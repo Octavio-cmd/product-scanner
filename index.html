@@ -1726,26 +1726,47 @@ async function openReadyPhoto() {
 // ── PRODUCT LOOKUP — eBay Catalog + Browse + Finding ──────────
 // Single unified call replacing UPCitemdb + separate eBay calls
 async function lookupProduct(upc) {
-  // Try eBay twice before giving up
-  for (let attempt = 1; attempt <= 2; attempt++) {
-    try {
-      stat(attempt === 1 ? 'Searching eBay...' : 'Retrying eBay search...');
-      const ctrl = new AbortController();
-      const timer = setTimeout(()=>ctrl.abort(), 15000);
-      const r = await fetch(WORKER + '/?upc=' + upc, { signal: ctrl.signal });
-      clearTimeout(timer);
-      if (!r.ok) throw new Error('HTTP ' + r.status);
-      const d = await r.json();
-      // If eBay found pricing data, return immediately
-      if (d.found || d.prices?.low || d.pricing?.sold?.count) return d;
-      // If no pricing but product found, return on first attempt
-      if (d.product?.name && attempt === 1) return d;
-    } catch(e) {
-      if (attempt === 2) console.warn('eBay lookup failed both attempts:', e.message);
-      else await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
+  // Try Algopix via Railway backend
+  try {
+    stat('Buscando en Algopix...');
+    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+    const ctrl = new AbortController();
+    const timer = setTimeout(()=>ctrl.abort(), 15000);
+    const r = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc), { signal: ctrl.signal });
+    clearTimeout(timer);
+    if (!r.ok) throw new Error('HTTP ' + r.status);
+    const d = await r.json();
+    
+    // Check if Algopix found data
+    if (d.status === 'success' && d.data) {
+      const algopix = d.data;
+      // Format response to match expected structure
+      return {
+        found: true,
+        product: {
+          name: algopix.name || 'Unknown',
+          brand: algopix.brand || '',
+          upc: upc
+        },
+        prices: {
+          low: algopix.ebay_price || 0,
+          avg: algopix.ebay_price || 0
+        },
+        algopix: algopix,
+        timestamp: new Date().toISOString()
+      };
     }
+    
+    // If no data from Algopix
+    if (d.error) {
+      console.warn('Algopix error:', d.error);
+    }
+  } catch(e) {
+    console.warn('Algopix lookup failed:', e.message);
   }
-  return { found: false, product: null, pricing: {}, topTitles: [], prices: null };
+  
+  // Fallback to UPCitemdb if Algopix fails
+  return await lookupUPCitemdb(upc);
 }
 
 // Kept as fallback if eBay Catalog finds nothing
