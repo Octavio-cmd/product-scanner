@@ -6096,6 +6096,121 @@ let pgState = {
   packUrl: null
 };
 
+// ═══════════════════════════════════════════════════════════════
+// FUNCIONES DE GENERACIÓN DE PACKS (Del ZIP de Manuel)
+// ═══════════════════════════════════════════════════════════════
+
+// Cargar imagen desde dataURL
+function lI(s) {
+  return new Promise((r, j) => {
+    const i = new Image();
+    i.onload = () => r(i);
+    i.onerror = j;
+    i.src = s;
+  });
+}
+
+// Calcular layout óptimo de items en grid
+function gL(c, sz, imgAspect) {
+  if(c===1) {
+    const h=sz*.95, w=h*imgAspect;
+    let s=1; if(w>sz*.95) s=(sz*.95)/w;
+    return [{x:sz/2, y:sz/2, w:w*s, h:h*s}];
+  }
+  const maxFill=0.97, gapPct=0.01;
+  let minCols, maxCols;
+  if(c===2) {minCols=2; maxCols=2;}
+  else if(c===3) {minCols=3; maxCols=3;}
+  else if(c===4) {minCols=2; maxCols=4;}
+  else if(c<=6) {minCols=2; maxCols=Math.min(c,6);}
+  else if(c<=10) {minCols=3; maxCols=Math.min(c,5);}
+  else {minCols=3; maxCols=Math.min(c,6);}
+  let bestCols=minCols, bestArea=0, bestProdW=0, bestProdH=0;
+  for(let cols=minCols; cols<=maxCols; cols++) {
+    const rows=Math.ceil(c/cols);
+    const availW=sz*maxFill-sz*gapPct*(cols-1);
+    const availH=sz*maxFill-sz*gapPct*(rows-1);
+    const cellW=availW/cols, cellH=availH/rows;
+    let pw, ph;
+    const cellAspect=cellW/cellH;
+    if(imgAspect>=cellAspect) {pw=cellW; ph=cellW/imgAspect;}
+    else {ph=cellH; pw=cellH*imgAspect;}
+    const area=pw*ph;
+    if(area>bestArea) {bestArea=area; bestCols=cols; bestProdW=pw; bestProdH=ph;}
+  }
+  const co=bestCols, ar=Math.ceil(c/co), gap=sz*gapPct;
+  const ps=[];
+  for(let i=0; i<c; i++) {
+    const rw=Math.floor(i/co), cl=i%co;
+    const ir=rw===ar-1 ? c-rw*co : co;
+    const rowW=ir*bestProdW+(ir-1)*gap;
+    const ox=(sz-rowW)/2;
+    const totalH=ar*bestProdH+(ar-1)*gap;
+    const oy=(sz-totalH)/2;
+    ps.push({x:ox+cl*(bestProdW+gap)+bestProdW/2, y:oy+rw*(bestProdH+gap)+bestProdH/2, w:bestProdW, h:bestProdH});
+  }
+  return ps;
+}
+
+// Dibujar badge circular con número de pack
+function dB(ctx, c, sz) {
+  const r=Math.round(sz*.09), x=sz-r-Math.round(sz*.018), y=r+Math.round(sz*.018), cl="#0F97DB";
+  ctx.save();
+  ctx.shadowColor="rgba(0,0,0,.3)";
+  ctx.shadowBlur=25;
+  ctx.shadowOffsetX=4;
+  ctx.shadowOffsetY=4;
+  ctx.beginPath();
+  ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.fillStyle=cl;
+  ctx.fill();
+  ctx.restore();
+  ctx.beginPath();
+  ctx.arc(x,y,r,0,Math.PI*2);
+  ctx.strokeStyle="#fff";
+  ctx.lineWidth=Math.round(r*.07);
+  ctx.stroke();
+  ctx.fillStyle="#fff";
+  ctx.textAlign="center";
+  ctx.textBaseline="middle";
+  const numSz=c>=10 ? Math.round(r*.75) : Math.round(r*.95);
+  ctx.font=`900 ${numSz}px "Arial Black","Impact",Arial,sans-serif`;
+  ctx.fillText(c, x, y-r*.14);
+  ctx.font=`700 ${Math.round(r*.35)}px "Arial Black","Impact",Arial,sans-serif`;
+  ctx.fillText("Pack", x, y+r*.4);
+}
+
+// Generar pack image (múltiples items con badge)
+function gPI(img, c) {
+  const sz=2048, cv=document.createElement("canvas");
+  cv.width=sz;
+  cv.height=sz;
+  const cx=cv.getContext("2d");
+  cx.fillStyle="#FFF";
+  cx.fillRect(0,0,sz,sz);
+  const ps=gL(c, sz, img.width/img.height);
+  ps.forEach(p=>{cx.drawImage(img, p.x-p.w/2, p.y-p.h/2, p.w, p.h);});
+  if(c>1) dB(cx, c, sz);
+  return cv.toDataURL("image/jpeg", .92);
+}
+
+// Generar single image (imagen centrada en fondo blanco)
+function gSI(img) {
+  const sz=2048, cv=document.createElement("canvas");
+  cv.width=sz;
+  cv.height=sz;
+  const cx=cv.getContext("2d");
+  cx.fillStyle="#FFF";
+  cx.fillRect(0,0,sz,sz);
+  const a=img.width/img.height, pd=sz*.02, mw=sz-pd*2, mh=sz-pd*2;
+  let w, h;
+  if(a>1) {w=mw; h=mw/a;} else {h=mh; w=mh*a;}
+  if(w>mw) {w=mw; h=w/a;}
+  if(h>mh) {h=mh; w=h*a;}
+  cx.drawImage(img, (sz-w)/2, (sz-h)/2, w, h);
+  return cv.toDataURL("image/jpeg", .92);
+}
+
 // STEP 1: SELECT PHOTO
 async function pgTakePhoto() {
   console.log('📷 pgTakePhoto() called');
