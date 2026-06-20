@@ -2688,7 +2688,7 @@ function renderResult(r){
       ⬜ Dark products (dark bottles, sprays) → use <strong>WHITE or LIGHT background</strong>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
-      <button onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#00e676,#4CAF50);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer">
+      <button id="pg-take-photo-btn" style="width:100%;background:linear-gradient(135deg,#00e676,#4CAF50);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer">
         📷 Take Photo & Remove Background
       </button>
     </div>
@@ -6912,31 +6912,43 @@ async function pgAutoRemoveBackground() {
 console.log('✅ Railway rembg integration loaded');
 console.log('✅ iOS event listeners attached');
 
-// ── FIX PARA iOS SAFARI: Agregar listener al botón verde ───────
-setTimeout(function() {
-  console.log('🔧 Attaching event listeners to green button...');
-  
-  // Buscar el botón por su color verde
-  const buttons = document.querySelectorAll('button');
-  for (let btn of buttons) {
-    if (btn.textContent.includes('Take Photo') && btn.textContent.includes('Remove Background')) {
-      console.log('✅ Found green button, attaching listener');
-      btn.addEventListener('click', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('🎯 Green button clicked!');
+// ── FIX PARA iOS SAFARI: Usar MutationObserver para detectar cuando aparece el botón ───────
+const observer = new MutationObserver(function() {
+  const btn = document.getElementById('pg-take-photo-btn');
+  if (btn && !btn.hasAttribute('data-listener-attached')) {
+    console.log('🔧 Button found! Attaching listener...');
+    
+    btn.setAttribute('data-listener-attached', 'true');
+    
+    // Click listener
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('🎯 Button clicked!');
+      if (typeof pgTakePhoto === 'function') {
         pgTakePhoto();
-      });
-      
-      btn.addEventListener('touchend', function(e) {
-        e.preventDefault();
-        e.stopPropagation();
-        console.log('🎯 Green button touched!');
+      } else {
+        console.error('❌ pgTakePhoto is not defined!');
+      }
+      return false;
+    });
+    
+    // Touch listener para iOS
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      e.stopPropagation();
+      console.log('🎯 Button touched!');
+      if (typeof pgTakePhoto === 'function') {
         pgTakePhoto();
-      });
-    }
+      } else {
+        console.error('❌ pgTakePhoto is not defined!');
+      }
+      return false;
+    });
   }
-}, 500);
+});
+
+observer.observe(document.body, { childList: true, subtree: true });
 </script>
 </body>
 </html>
