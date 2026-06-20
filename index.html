@@ -6155,7 +6155,7 @@ function pgShowPreview() {
 }
 
 // STEP 3: AUTO-CROP
-function pgAutoCrop() {
+async function pgAutoCrop() {
   console.log('✂️ Auto-cropping...');
   toast('✂️ Cropping...');
   
@@ -6210,7 +6210,7 @@ function pgAutoCrop() {
     }
     
     console.log('✅ Crop complete');
-    pgShowPackSizeSelection();
+    await pgAutoRemoveBackground();
   };
   img.src = pgState.originalPhoto;
 }
@@ -6578,6 +6578,76 @@ if (clUpcInput) {
 console.log('✅ Algopix integration loaded');
 
 console.log('✅ Pack Generator v4 loaded - Show image before confirming');
+
+// ── RAILWAY REMBG INTEGRATION FOR PRODUCT PACK GENERATOR ─────────────
+const REMBG_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
+
+async function pgRemoveBackgroundRailway(dataUrl) {
+  console.log('🎯 Calling Railway rembg service...');
+  toast('🎨 Removing background...');
+  
+  try {
+    const arr = dataUrl.split(',');
+    const mime = arr[0].match(/:(.*?);/)[1];
+    const bstr = atob(arr[1]);
+    const n = bstr.length;
+    const u8arr = new Uint8Array(n);
+    for (let i = 0; i < n; i++) {
+      u8arr[i] = bstr.charCodeAt(i);
+    }
+    const blob = new Blob([u8arr], { type: mime });
+    
+    const fd = new FormData();
+    fd.append('image', blob, 'photo.png');
+    
+    const res = await fetch(REMBG_API, { method: 'POST', body: fd });
+    
+    if (!res.ok) {
+      throw new Error(`HTTP ${res.status}`);
+    }
+    
+    const data = await res.json();
+    
+    if (data.success && data.image_url) {
+      console.log('✅ Background removed:', data.image_url);
+      toast('✅ Background removed!');
+      return data.image_url;
+    } else {
+      throw new Error(data.error || 'Background removal failed');
+    }
+  } catch (error) {
+    console.error('❌ Railway rembg error:', error);
+    toast('⚠️ Background removal failed, using original photo');
+    return dataUrl;
+  }
+}
+
+async function pgAutoRemoveBackground() {
+  console.log('🎨 Starting auto background removal');
+  toast('🎨 Processing background...');
+  
+  const img = new Image();
+  img.onload = async function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    
+    const croppedDataUrl = canvas.toDataURL('image/png');
+    const bgRemovedUrl = await pgRemoveBackgroundRailway(croppedDataUrl);
+    
+    pgState.croppedPhoto = bgRemovedUrl;
+    
+    console.log('✅ Background removal complete');
+    pgShowPackSizeSelection();
+  };
+  img.src = pgState.croppedPhoto;
+}
+
+
+
+console.log('✅ Railway rembg integration loaded');
 </script>
 </body>
 </html>
