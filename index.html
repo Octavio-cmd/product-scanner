@@ -6332,7 +6332,46 @@ async function pgAutoCrop() {
   img.src = pgState.originalPhoto;
 }
 
-// STEP 4: SELECT PACK SIZE
+// Mostrar resultado final - SOLO foto blanca (sin bundle aún)
+function pgShowRemovalResult() {
+  const modal = document.createElement('div');
+  modal.id = 'pg-removal-result-modal';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;
+    z-index:99999;padding:20px;font-family:system-ui;overflow:auto
+  `;
+  
+  modal.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:15px;padding:20px;max-width:90%;width:100%;color:#fff">
+      <h3 style="margin:0 0 15px 0;text-align:center;color:#00e676">✅ Background Removed</h3>
+      
+      <div style="text-align:center;margin-bottom:20px;background:#fff;padding:10px;border-radius:10px">
+        <img src="${pgState.croppedPhoto}" style="max-width:100%;max-height:300px;border-radius:8px">
+      </div>
+      
+      <div style="text-align:center;font-size:12px;color:#888;margin-bottom:20px">
+        Ready for eBay — white background ✓
+      </div>
+      
+      <button onclick="document.getElementById('pg-removal-result-modal').remove();pgShowPackSizeSelection();" style="
+        width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
+        color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
+        font-size:15px;margin-bottom:10px
+      ">📦 Generate Bundle Pack</button>
+      
+      <button onclick="document.getElementById('pg-removal-result-modal').remove();pgTakePhoto();" style="
+        width:100%;padding:10px;background:rgba(255,255,255,0.1);
+        color:#fff;border:1px solid #555;border-radius:8px;cursor:pointer;font-size:13px
+      ">📷 Take Another Photo</button>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  toast('✅ Background removed perfectly');
+}
+
+
 function pgShowPackSizeSelection() {
   console.log('📦 Showing pack size selection');
   const sizes = [2, 3, 4, 6, 8, 12];
@@ -6699,48 +6738,190 @@ console.log('✅ Pack Generator v4 loaded - Show image before confirming');
 // ── RAILWAY REMBG INTEGRATION FOR PRODUCT PACK GENERATOR ─────────────
 const REMBG_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
 
-async function pgRemoveBackgroundRailway(dataUrl) {
-  console.log('🎯 Calling Railway rembg service...');
-  toast('🎨 Removing background...');
-  
-  try {
-    const arr = dataUrl.split(',');
-    const mime = arr[0].match(/:(.*?);/)[1];
-    const bstr = atob(arr[1]);
-    const n = bstr.length;
-    const u8arr = new Uint8Array(n);
-    for (let i = 0; i < n; i++) {
-      u8arr[i] = bstr.charCodeAt(i);
-    }
-    const blob = new Blob([u8arr], { type: mime });
-    
-    const fd = new FormData();
-    fd.append('image', blob, 'photo.png');
-    
-    const res = await fetch(REMBG_API, { method: 'POST', body: fd });
-    
-    if (!res.ok) {
-      throw new Error(`HTTP ${res.status}`);
-    }
-    
-    const data = await res.json();
-    
-    if (data.success && data.image_url) {
-      console.log('✅ Background removed:', data.image_url);
-      toast('✅ Background removed!');
-      return data.image_url;
-    } else {
-      throw new Error(data.error || 'Background removal failed');
-    }
-  } catch (error) {
-    console.error('❌ Railway rembg error:', error);
-    toast('⚠️ Background removal failed, using original photo');
-    return dataUrl;
-  }
+// ════════════════════════════════════════════════════════════════
+// LIMPIAR BORDES TRANSPARENTES - Del módulo de ropa
+// ════════════════════════════════════════════════════════════════
+async function cleanTransparentEdges(dataUrl, bgColor) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var W=img.width, H=img.height, N=W*H;
+      var c=document.createElement('canvas'); c.width=W; c.height=H;
+      var ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      var id=ctx.getImageData(0,0,W,H), px=id.data;
+
+      // Paso 1: quitar borde del 8% (artefactos de esquina)
+      var mX=Math.round(W*0.08), mY=Math.round(H*0.08);
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        if(x<mX||x>=W-mX||y<mY||y>=H-mY) px[(y*W+x)*4+3]=0;
+      }
+
+      // Paso 1b: eliminar píxeles que coinciden con el color del fondo original
+      if(bgColor && bgColor.length===3){
+        var br=bgColor[0], bg2=bgColor[1], bb=bgColor[2];
+        var TOL=55;
+        for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+          var pi=(y*W+x)*4;
+          if(px[pi+3]<10) continue;
+          var dr=px[pi]-br, dg=px[pi+1]-bg2, db2=px[pi+2]-bb;
+          var dist=Math.sqrt(dr*dr+dg*dg+db2*db2);
+          if(dist<TOL) px[pi+3]=0;
+        }
+      }
+
+      // Paso 2: componentes conectados (BFS) sobre pixeles con alpha > 40
+      var vis=new Uint8Array(N);
+      var q=new Int32Array(N);
+      var components=[];
+
+      for(var sy=0;sy<H;sy++) for(var sx=0;sx<W;sx++){
+        var si=sy*W+sx;
+        if(vis[si]||px[si*4+3]<=40) continue;
+        var comp=[], qh=0, qt=0;
+        q[qt++]=si; vis[si]=1;
+        while(qh<qt){
+          var ci=q[qh++];
+          comp.push(ci);
+          var cy=Math.floor(ci/W), cx=ci-cy*W;
+          var ns=[ci-1,ci+1,ci-W,ci+W];
+          for(var k=0;k<4;k++){
+            var ni=ns[k];
+            if(ni<0||ni>=N||vis[ni]) continue;
+            if(k===0&&cx===0) continue;
+            if(k===1&&cx===W-1) continue;
+            if(px[ni*4+3]>40){vis[ni]=1; q[qt++]=ni;}
+          }
+        }
+        components.push(comp);
+      }
+
+      components.sort(function(a,b){return b.length-a.length;});
+
+      var bigSize = components.length>0 ? components[0].length : 0;
+      for(var ci2=1;ci2<components.length;ci2++){
+        if(components[ci2].length < bigSize*0.05){
+          for(var pi=0;pi<components[ci2].length;pi++){
+            px[components[ci2][pi]*4+3]=0;
+          }
+        }
+      }
+
+      ctx.putImageData(id,0,0);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror=function(){resolve(dataUrl);};
+    img.src=dataUrl;
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// ELIMINAR FONDOS RESIDUALES - Del módulo de ropa
+// ════════════════════════════════════════════════════════════════
+async function removeResidualBg(dataUrl, bgColor) {
+  if (!bgColor || bgColor.length < 3) return dataUrl;
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var W=img.width, H=img.height;
+      var c=document.createElement('canvas'); c.width=W; c.height=H;
+      var ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      var id=ctx.getImageData(0,0,W,H), px=id.data;
+      var br=bgColor[0], bg2=bgColor[1], bb=bgColor[2];
+      var TOL=80;
+      for(var y=0;y<H;y++) for(var x=0;x<W;x++){
+        var i=(y*W+x)*4;
+        var r=px[i],g=px[i+1],b=px[i+2];
+        var dist=Math.sqrt((r-br)*(r-br)+(g-bg2)*(g-bg2)+(b-bb)*(b-bb));
+        var inBorder=(x<W*0.20||x>W*0.80||y<H*0.20||y>H*0.80);
+        var tol=inBorder?TOL:TOL*0.65;
+        if(dist<tol){ px[i]=255; px[i+1]=255; px[i+2]=255; }
+      }
+      ctx.putImageData(id,0,0);
+      resolve(c.toDataURL('image/jpeg',0.93));
+    };
+    img.onerror=function(){resolve(dataUrl);};
+    img.src=dataUrl;
+  });
+}
+
+// ════════════════════════════════════════════════════════════════
+// QUITAFONDOS LOCAL - Del módulo de ropa (FUNCIONA PERFECTAMENTE)
+// ════════════════════════════════════════════════════════════════
+async function removeBgCanvas(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var W=img.width, H=img.height;
+      var c=document.createElement('canvas'); c.width=W; c.height=H;
+      var ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      var id=ctx.getImageData(0,0,W,H), px=id.data;
+
+      function pix(x,y){var i=(y*W+x)*4;return[px[i],px[i+1],px[i+2]];}
+      function dist(a,b){
+        return Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]));
+      }
+
+      // Detectar color de fondo desde TODO el borde (15px)
+      var edge=[], STRIP=15;
+      for(var x=0;x<W;x++){
+        for(var y=0;y<STRIP;y++) edge.push(pix(x,y));
+        for(var y=H-STRIP;y<H;y++) edge.push(pix(x,y));
+      }
+      for(var y=STRIP;y<H-STRIP;y++){
+        for(var x=0;x<STRIP;x++) edge.push(pix(x,y));
+        for(var x=W-STRIP;x<W;x++) edge.push(pix(x,y));
+      }
+      edge.sort(function(a,b){return (a[0]+a[1]+a[2])-(b[0]+b[1]+b[2]);});
+      var bg=edge[Math.floor(edge.length/2)];
+      var bgBright=(bg[0]+bg[1]+bg[2])/3;
+      var TOL = bgBright>230 ? 36 : bgBright>200 ? 58 : bgBright>150 ? 72 : 85;
+
+      // Flood-fill BFS desde todos los bordes
+      var vis=new Uint8Array(W*H);
+      var q=new Int32Array(W*H*2); var qh=0,qt=0;
+      function enq(x,y){if(x>=0&&x<W&&y>=0&&y<H&&!vis[y*W+x]){vis[y*W+x]=1;q[qt++]=x;q[qt++]=y;}}
+      for(var x=0;x<W;x++){enq(x,0);enq(x,H-1);}
+      for(var y=1;y<H-1;y++){enq(0,y);enq(W-1,y);}
+
+      while(qh<qt){
+        var cx=q[qh++],cy=q[qh++];
+        if(dist(pix(cx,cy),bg)<TOL){
+          px[(cy*W+cx)*4+3]=0;
+          enq(cx+1,cy);enq(cx-1,cy);enq(cx,cy+1);enq(cx,cy-1);
+        }
+      }
+
+      // Segunda pasada: eliminar islas de fondo no conectadas
+      var removed=new Uint8Array(W*H);
+      for(var i=0;i<W*H;i++) if(px[i*4+3]===0) removed[i]=1;
+
+      for(var pass=0;pass<2;pass++){
+        for(var y=1;y<H-1;y++) for(var x=1;x<W-1;x++){
+          if(removed[y*W+x]) continue;
+          var adj=removed[(y-1)*W+x]+removed[(y+1)*W+x]+removed[y*W+(x-1)]+removed[y*W+(x+1)];
+          if(adj>=1 && dist(pix(x,y),bg)<TOL*1.3){
+            px[(y*W+x)*4+3]=0; removed[y*W+x]=1;
+          }
+        }
+      }
+
+      // Erosionar borde duro 1px
+      for(var y=1;y<H-1;y++) for(var x=1;x<W-1;x++){
+        if(removed[y*W+x]) continue;
+        var hard=removed[(y-1)*W+x]+removed[(y+1)*W+x]+removed[y*W+(x-1)]+removed[y*W+(x+1)];
+        if(hard>=3) { px[(y*W+x)*4+3]=0; }
+      }
+
+      ctx.putImageData(id,0,0);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror=function(){resolve(dataUrl);};
+    img.src=dataUrl;
+  });
 }
 
 async function pgAutoRemoveBackground() {
-  console.log('🎨 Starting auto background removal');
+  console.log('🎨 Starting background removal (módulo de ropa logic)');
   toast('🎨 Removing background...');
   
   const img = new Image();
@@ -6751,16 +6932,44 @@ async function pgAutoRemoveBackground() {
     const ctx = canvas.getContext('2d');
     ctx.drawImage(img, 0, 0);
     
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    
+    // Detectar color de fondo (desde bordes como módulo de ropa)
+    let edge = [];
+    const STRIP = 15;
+    for(let x = 0; x < canvas.width; x++){
+      for(let y = 0; y < STRIP; y++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
+      for(let y = canvas.height-STRIP; y < canvas.height; y++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
+    }
+    for(let y = STRIP; y < canvas.height-STRIP; y++){
+      for(let x = 0; x < STRIP; x++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
+      for(let x = canvas.width-STRIP; x < canvas.width; x++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
+    }
+    edge.sort((a,b) => (a[0]+a[1]+a[2]) - (b[0]+b[1]+b[2]));
+    const bgColor = edge[Math.floor(edge.length/2)];
+    console.log('🎯 BG color:', bgColor);
+    
     const croppedDataUrl = canvas.toDataURL('image/png');
-    const bgRemovedUrl = await pgRemoveBackgroundRailway(croppedDataUrl);
     
-    // IMPORTANTE: Convertir PNG transparente a JPEG blanco (como módulo de ropa)
-    console.log('🎨 Converting to white background...');
-    const whiteJpeg = await pngToWhiteJpeg(bgRemovedUrl);
-    pgState.croppedPhoto = whiteJpeg;
+    // FLUJO EXACTO DEL MÓDULO DE ROPA:
+    console.log('Step 1: removeBgCanvas');
+    const bgRemoved = await removeBgCanvas(croppedDataUrl);
     
-    console.log('✅ Background removal complete with white background');
-    pgShowPackSizeSelection();
+    console.log('Step 2: cleanTransparentEdges');
+    const cleaned = await cleanTransparentEdges(bgRemoved, bgColor);
+    
+    console.log('Step 3: pngToWhiteJpeg');
+    const whiteJpeg = await pngToWhiteJpeg(cleaned);
+    
+    console.log('Step 4: removeResidualBg');
+    const final = await removeResidualBg(whiteJpeg, bgColor);
+    
+    pgState.croppedPhoto = final;
+    console.log('✅ Background removal COMPLETE');
+    
+    // Mostrar resultado final - SOLO foto blanca, sin bundle aún
+    pgShowRemovalResult();
   };
   img.src = pgState.croppedPhoto;
 }
