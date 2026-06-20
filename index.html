@@ -6764,16 +6764,7 @@ async function pgAutoRemoveBackground() {
 
 
 // ── iOS EVENT LISTENERS FOR PACK GENERATOR ─────────────────────────
-if (document.getElementById('bundle-gen-btn')) {
-  document.getElementById('bundle-gen-btn').addEventListener('touchend', function(e) {
-    e.preventDefault();
-    pgTakePhoto();
-  }, false);
-  document.getElementById('bundle-gen-btn').addEventListener('click', function(e) {
-    e.preventDefault();
-    pgTakePhoto();
-  }, false);
-}
+// REMOVIDO: Los event listeners conflictivos están siendo manejados por el onclick directo en el HTML
 
 console.log('✅ Railway rembg integration loaded');
 console.log('✅ iOS event listeners attached');
