@@ -6911,6 +6911,32 @@ async function pgAutoRemoveBackground() {
 
 console.log('✅ Railway rembg integration loaded');
 console.log('✅ iOS event listeners attached');
+
+// ── FIX PARA iOS SAFARI: Agregar listener al botón verde ───────
+setTimeout(function() {
+  console.log('🔧 Attaching event listeners to green button...');
+  
+  // Buscar el botón por su color verde
+  const buttons = document.querySelectorAll('button');
+  for (let btn of buttons) {
+    if (btn.textContent.includes('Take Photo') && btn.textContent.includes('Remove Background')) {
+      console.log('✅ Found green button, attaching listener');
+      btn.addEventListener('click', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🎯 Green button clicked!');
+        pgTakePhoto();
+      });
+      
+      btn.addEventListener('touchend', function(e) {
+        e.preventDefault();
+        e.stopPropagation();
+        console.log('🎯 Green button touched!');
+        pgTakePhoto();
+      });
+    }
+  }
+}, 500);
 </script>
 </body>
 </html>
