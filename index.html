@@ -2689,20 +2689,35 @@ function renderResult(r){
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
       <button id="pg-take-photo-btn" onclick="
-        const input = document.createElement('input');
-        input.type = 'file';
-        input.accept = 'image/*';
-        input.onchange = function(e) {
-          const file = e.target.files[0];
-          if (!file) return;
-          const reader = new FileReader();
-          reader.onload = function(evt) {
-            pgState.originalPhoto = evt.target.result;
-            pgShowPreview();
+        try {
+          const input = document.createElement('input');
+          input.type = 'file';
+          input.accept = 'image/*';
+          input.onchange = function(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            console.log('📸 Photo selected:', file.name);
+            const reader = new FileReader();
+            reader.onload = function(evt) {
+              console.log('✅ Photo loaded');
+              if (!window.pgState) window.pgState = {};
+              window.pgState.originalPhoto = evt.target.result;
+              console.log('🖼️ Photo saved to pgState');
+              if (typeof window.pgShowPreview === 'function') {
+                console.log('📋 Calling pgShowPreview()');
+                window.pgShowPreview();
+              } else {
+                console.error('❌ pgShowPreview not found!');
+                alert('Error: pgShowPreview function not loaded');
+              }
+            };
+            reader.readAsDataURL(file);
           };
-          reader.readAsDataURL(file);
-        };
-        input.click();
+          input.click();
+        } catch(err) {
+          console.error('Error in button:', err);
+          alert('Error: ' + err.message);
+        }
       " style="width:100%;background:linear-gradient(135deg,#00e676,#4CAF50);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer;touch-action:manipulation;-webkit-user-select:none">
         📷 Take Photo & Remove Background
       </button>
