@@ -6752,10 +6752,25 @@ async function pgAutoRemoveBackground() {
     const croppedDataUrl = canvas.toDataURL('image/png');
     const bgRemovedUrl = await pgRemoveBackgroundRailway(croppedDataUrl);
     
-    pgState.croppedPhoto = bgRemovedUrl;
-    
-    console.log('✅ Background removal complete');
-    pgShowPackSizeSelection();
+    // IMPORTANTE: Convertir imagen transparente a fondo blanco
+    console.log('🎨 Converting transparent background to white');
+    const finalImg = new Image();
+    finalImg.crossOrigin = 'anonymous';
+    finalImg.onload = async function() {
+      // Usar gSI() para crear imagen con fondo blanco
+      const whiteBackgroundImg = gSI(finalImg);
+      pgState.croppedPhoto = whiteBackgroundImg;
+      
+      console.log('✅ Background removal complete with white background');
+      pgShowPackSizeSelection();
+    };
+    finalImg.onerror = function() {
+      console.error('❌ Failed to load background-removed image');
+      toast('⚠️ Could not process image');
+      pgState.croppedPhoto = croppedDataUrl;
+      pgShowPackSizeSelection();
+    };
+    finalImg.src = bgRemovedUrl;
   };
   img.src = pgState.croppedPhoto;
 }
