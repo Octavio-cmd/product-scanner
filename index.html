@@ -2723,7 +2723,7 @@ function renderResult(r){
       ⬜ Dark products (dark bottles, sprays) → use <strong>WHITE or LIGHT background</strong>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
-      <button id="bundle-gen-btn" onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
+      <button id="bundle-gen-btn" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
         📦 Generate Pack with AI (Remove Background + Bundle)
       </button>
       <button onclick="openReadyPhoto()" style="width:100%;background:#1a472a;border:2px solid #2ecc71;border-radius:10px;padding:13px;color:#2ecc71;font-size:14px;font-weight:800;cursor:pointer">
@@ -6647,7 +6647,21 @@ async function pgAutoRemoveBackground() {
 
 
 
+
+// ── iOS EVENT LISTENERS FOR PACK GENERATOR ─────────────────────────
+if (document.getElementById('bundle-gen-btn')) {
+  document.getElementById('bundle-gen-btn').addEventListener('touchend', function(e) {
+    e.preventDefault();
+    pgTakePhoto();
+  }, false);
+  document.getElementById('bundle-gen-btn').addEventListener('click', function(e) {
+    e.preventDefault();
+    pgTakePhoto();
+  }, false);
+}
+
 console.log('✅ Railway rembg integration loaded');
+console.log('✅ iOS event listeners attached');
 </script>
 </body>
 </html>
