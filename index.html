@@ -2679,42 +2679,7 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
-  // ── 4. PACK SELECTOR ─────────────────────────────────────────
-  h+=`<div class="price-row">
-    <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
-    <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
-    <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
-  </div>`+
-  (function(){
-    var _cb=low||avg||0;
-    var h2='<div class="card"><div class="lbl">📦 SELECT PACK SIZE</div>';
-    h2+='<div class="pack-chips" id="pack-chips">';
-    PACK_SIZES.forEach(function(n){
-      var sel=(n===packs)?' sel':'';
-      var cp=_cb>0?'$'+(_cb*n*0.88).toFixed(2):'';
-      h2+='<div class="pack-chip'+sel+'" onclick="pickPack('+n+')">'
-        +'<div class="pc-n">'+n+'pk</div>'+(cp?'<div class="pc-p">'+cp+'</div>':'')+'</div>';
-    });
-    h2+='</div>';
-    h2+='<div id="pack-sel-display" style="font-size:12px;color:var(--mu);margin-top:4px">Selected: <strong style="color:var(--ac)">Pack of '+packs+'</strong></div>';
-    h2+='<div class="extra-field"><div class="extra-label">🎨 Shade / Color (optional)</div><input class="extra-input" id="shade-input" type="text" placeholder="e.g. Cherry Red, #12 Brown..." oninput="updateShadeColor(this.value)"></div>';
-    // Categorías que requieren fecha de expiración
-    var EXP_REQUIRED_CATS = ['67169','180959','75037','51227','57041','2984','67167','105070'];
-    var needsExpDate = EXP_REQUIRED_CATS.includes(String(r.category||''));
-
-    h2+='<div class="extra-field"><div class="extra-label">📅 Expiration Date'
-      + (needsExpDate ? ' <span style="color:#e74c3c;font-weight:800">* REQUIRED</span>' : ' (optional)')
-      + '</div>';
-    if (needsExpDate) {
-      h2+='<div style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.4);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px;color:#e74c3c">⚠️ Este producto requiere fecha de expiración para listarse en eBay</div>';
-    }
-    h2+='<div id="exp-toggle-btn" onclick="toggleExpDate()" style="display:inline-flex;align-items:center;gap:8px;background:var(--sf2);border:1.5px solid '+(needsExpDate?'#e74c3c':'var(--bd)')+';border-radius:10px;padding:10px 16px;cursor:pointer;margin-top:6px;font-size:13px;color:'+(needsExpDate?'#e74c3c':'var(--mu)')+'"><span>📅</span><span>'+(needsExpDate?'Ingresar fecha de expiración (REQUERIDO)':'This product has an expiration date')+'</span></div>';
-    h2+='<div id="exp-date-picker" style="display:none;margin-top:10px"><div class="extra-label">MONTH</div><div class="pack-chips" id="month-chips" style="gap:6px"></div><div class="extra-label" style="margin-top:10px">YEAR</div><div class="pack-chips" id="year-chips" style="gap:6px"></div><div class="date-result" id="date-result-display" style="text-align:left;margin-top:8px"></div><button onclick="clearExpDate()" style="background:none;border:none;color:var(--mu);font-size:12px;cursor:pointer;margin-top:4px">✕ Remove date</button></div></div>';
-    h2+='</div>';
-    return h2;
-  }());
-
-  // ── 3. BUNDLE PHOTO GENERATOR ────────────────────────────────
+  // ── 4. BUNDLE PHOTO GENERATOR ────────────────────────────────
   h+=`<div class="bundle-photo-card">
     <div class="lbl">📸 LISTING PHOTO — Bundle Image Generator</div>
     <div style="background:rgba(255,171,0,.1);border:1px solid rgba(255,171,0,.4);border-radius:8px;padding:8px 12px;margin:6px 0 10px;font-size:11px;line-height:1.6">
@@ -2723,11 +2688,8 @@ function renderResult(r){
       ⬜ Dark products (dark bottles, sprays) → use <strong>WHITE or LIGHT background</strong>
     </div>
     <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
-      <button id="bundle-gen-btn" onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
-        📦 Generate Pack with AI (Remove Background + Bundle)
-      </button>
-      <button onclick="openReadyPhoto()" style="width:100%;background:#1a472a;border:2px solid #2ecc71;border-radius:10px;padding:13px;color:#2ecc71;font-size:14px;font-weight:800;cursor:pointer">
-        📦 Generate Pack with AI (Quitar Fondo + Bundle)
+      <button onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#00e676,#4CAF50);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer">
+        📷 Take Photo & Remove Background
       </button>
     </div>
     <div id="bundle-generating" class="bundle-generating" style="display:none">⏳ Processing...</div>
@@ -6921,57 +6883,24 @@ async function removeBgCanvas(dataUrl) {
 }
 
 async function pgAutoRemoveBackground() {
-  console.log('🎨 Starting background removal (módulo de ropa logic)');
+  console.log('🎨 Starting background removal - SIMPLE');
   toast('🎨 Removing background...');
   
-  const img = new Image();
-  img.onload = async function() {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    
-    // Detectar color de fondo (desde bordes como módulo de ropa)
-    let edge = [];
-    const STRIP = 15;
-    for(let x = 0; x < canvas.width; x++){
-      for(let y = 0; y < STRIP; y++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
-      for(let y = canvas.height-STRIP; y < canvas.height; y++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
-    }
-    for(let y = STRIP; y < canvas.height-STRIP; y++){
-      for(let x = 0; x < STRIP; x++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
-      for(let x = canvas.width-STRIP; x < canvas.width; x++) edge.push([data[(y*canvas.width+x)*4], data[(y*canvas.width+x)*4+1], data[(y*canvas.width+x)*4+2]]);
-    }
-    edge.sort((a,b) => (a[0]+a[1]+a[2]) - (b[0]+b[1]+b[2]));
-    const bgColor = edge[Math.floor(edge.length/2)];
-    console.log('🎯 BG color:', bgColor);
-    
-    const croppedDataUrl = canvas.toDataURL('image/png');
-    
-    // FLUJO EXACTO DEL MÓDULO DE ROPA:
-    console.log('Step 1: removeBgCanvas');
-    const bgRemoved = await removeBgCanvas(croppedDataUrl);
-    
-    console.log('Step 2: cleanTransparentEdges');
-    const cleaned = await cleanTransparentEdges(bgRemoved, bgColor);
-    
-    console.log('Step 3: pngToWhiteJpeg');
-    const whiteJpeg = await pngToWhiteJpeg(cleaned);
-    
-    console.log('Step 4: removeResidualBg');
-    const final = await removeResidualBg(whiteJpeg, bgColor);
-    
-    pgState.croppedPhoto = final;
-    console.log('✅ Background removal COMPLETE');
-    
-    // Mostrar resultado final - SOLO foto blanca, sin bundle aún
-    pgShowRemovalResult();
-  };
-  img.src = pgState.croppedPhoto;
+  // SOLO 2 PASOS que SABEMOS que funcionan:
+  // 1. removeBgCanvas (funciona en ropa)
+  // 2. pngToWhiteJpeg (funciona en ropa)
+  
+  const bgRemoved = await removeBgCanvas(pgState.croppedPhoto);
+  console.log('✅ Step 1 done');
+  
+  const whiteJpeg = await pngToWhiteJpeg(bgRemoved);
+  console.log('✅ Step 2 done');
+  
+  pgState.croppedPhoto = whiteJpeg;
+  console.log('✅ Background removal COMPLETE');
+  
+  // Mostrar resultado final
+  pgShowRemovalResult();
 }
 
 
