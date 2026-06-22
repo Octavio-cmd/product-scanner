@@ -7107,13 +7107,14 @@ async function pngToWhiteJpeg(pngDataUrl) {
   });
 }
 
-
+// ── PRODUCT MODULE: AUTO REMOVE BACKGROUND ───────────────────
+window.pgAutoRemoveBackground = async function() {
   alert('🎨 Step 1: Using removeBgCanvas()...');
   
   try {
     // Use the REAL background removal function from clothing module
     alert('🎨 Step 2: Processing with flood-fill...');
-    const pngResult = await removeBgCanvas(pgState.croppedPhoto);
+    const pngResult = await removeBgCanvas(window.pgState.croppedPhoto);
     console.log('✅ PNG generated (transparent): ' + pngResult.length + ' bytes');
     
     alert('🎨 Step 3: Converting PNG to white JPEG...');
@@ -7127,13 +7128,18 @@ async function pngToWhiteJpeg(pngDataUrl) {
     window.pgState.croppedPhoto = whiteJpeg;
     
     console.log('✅ pgState updated - showing result');
-    window.pgShowRemovalResult();
+    if (typeof window.pgShowRemovalResult === 'function') {
+      window.pgShowRemovalResult();
+    } else {
+      alert('❌ pgShowRemovalResult not available');
+    }
     
   } catch(err) {
     alert('❌ ERROR: ' + err.message);
     console.error('❌ ERROR:', err);
   }
-}
+};
+
 
 
 
