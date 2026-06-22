@@ -740,7 +740,7 @@ window.pgShowPreview = function() {
 // ── RAILWAY REMBG: Enviar foto a servidor para quitar fondo
 async function pgRemoveBackgroundViaRailway(dataUrl) {
   console.log('🚀 Enviando a Railway rembg...');
-  if (typeof toast === 'function') toast('🚀 Enviando a Railway...');
+  alert('🚀 INICIANDO: Enviando a Railway rembg');
   
   try {
     const RAILWAY_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
@@ -748,11 +748,11 @@ async function pgRemoveBackgroundViaRailway(dataUrl) {
     
     if (!b64) {
       console.error('❌ Invalid image data');
-      if (typeof toast === 'function') toast('❌ Datos de imagen inválidos');
+      alert('❌ FALLO: Datos de imagen inválidos');
       return null;
     }
     
-    if (typeof toast === 'function') toast('⏳ Procesando con Railway...');
+    alert('⏳ Enviando foto a Railway (puede tomar 10-15 segundos)...');
     
     const response = await fetch(RAILWAY_API, {
       method: 'POST',
@@ -761,10 +761,11 @@ async function pgRemoveBackgroundViaRailway(dataUrl) {
     });
     
     console.log('Railway response status:', response.status);
+    alert('Railway respondió con status: ' + response.status);
     
     if (!response.ok) {
       console.error('❌ Railway API error:', response.status);
-      if (typeof toast === 'function') toast('❌ Railway error: ' + response.status);
+      alert('❌ FALLO Railway: ' + response.status + '\nUsando método local...');
       return null;
     }
     
@@ -772,17 +773,17 @@ async function pgRemoveBackgroundViaRailway(dataUrl) {
     console.log('Railway response data:', data);
     
     if (data.success && data.image) {
-      console.log('✅ Railway rembg complete — PNG transparente recibido');
-      if (typeof toast === 'function') toast('✅ Railway OK — PNG listo');
+      console.log('✅ Railway rembg complete');
+      alert('✅ EXITO: Railway entregó PNG transparente');
       return 'data:image/png;base64,' + data.image;
     } else {
       console.error('❌ Rembg processing failed:', data);
-      if (typeof toast === 'function') toast('❌ Railway procesamiento falló');
+      alert('❌ FALLO: Railway no procesó bien\nError: ' + JSON.stringify(data));
       return null;
     }
   } catch(error) {
     console.error('Railway remove-bg error:', error);
-    if (typeof toast === 'function') toast('❌ Error: ' + error.message);
+    alert('❌ FALLO Exception: ' + error.message + '\nUsando método local...');
     return null;
   }
 }
