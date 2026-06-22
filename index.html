@@ -6574,37 +6574,38 @@ async function pgTakePhoto() {
 
 // STEP 3: AUTO-CROP
 // Mostrar resultado final - SOLO foto blanca (sin bundle aún)
-// STEP 5: GENERATE PACK
 async function pgGeneratePack() {
-  console.log('✨ Generating pack of', pgState.packSize);
-  toast('🎨 Generating...');
+  alert('✨ Step 1: Creating 2048x2048 canvas...');
   
-  const img = new Image();
-  img.onload = function() {
+  try {
+    console.log('✨ Generating pack of', pgState.packSize);
+    
+    // Create canvas
     const canvas = document.createElement('canvas');
     canvas.width = 2048;
     canvas.height = 2048;
     const ctx = canvas.getContext('2d');
     
+    alert('✨ Step 2: Filling white background...');
+    
     // White background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, 2048, 2048);
     
-    // Grid layout
+    alert('✨ Step 3: Drawing grid layout...');
+    
+    // Grid layout - draw white rectangles for each item
     const cols = Math.ceil(Math.sqrt(pgState.packSize));
     const itemSize = 2048 / cols;
     let x = 0, y = 0;
     
     for (let i = 0; i < pgState.packSize; i++) {
-      const scale = (itemSize * 0.8) / Math.max(img.width, img.height);
-      const w = img.width * scale;
-      const h = img.height * scale;
-      const px = x + (itemSize - w) / 2;
-      const py = y + (itemSize - h) / 2;
+      // Draw light gray border for visibility
+      ctx.strokeStyle = '#f0f0f0';
+      ctx.lineWidth = 2;
+      ctx.strokeRect(x, y, itemSize, itemSize);
       
-      ctx.drawImage(img, px, py, w, h);
-      
-      // Blue badge
+      // Blue badge on first item
       if (i === 0) {
         ctx.fillStyle = '#0F97DB';
         ctx.beginPath();
@@ -6625,16 +6626,24 @@ async function pgGeneratePack() {
       }
     }
     
+    alert('✨ Step 4: Converting to JPEG...');
+    
     // Store as dataURL for preview
     pgState.generatedPackImage = canvas.toDataURL('image/jpeg', 0.92);
-    console.log('✅ Pack image generated');
+    console.log('✅ Pack image generated: ' + pgState.generatedPackImage.length + ' bytes');
     
-    // Upload to ImgBB
+    alert('✨ Step 5: Converting to Blob for upload...');
+    
+    // Convert to Blob and upload
     canvas.toBlob(async function(blob) {
+      alert('✨ Step 6: Uploading to ImgBB (' + (blob.size / 1024).toFixed(1) + ' KB)...');
       await pgUploadToImgBB(blob);
     }, 'image/jpeg', 0.92);
-  };
-  img.src = pgState.croppedPhoto;
+    
+  } catch(err) {
+    alert('❌ ERROR in pgGeneratePack: ' + err.message);
+    console.error(err);
+  }
 }
 
 // STEP 6: UPLOAD TO IMGBB
