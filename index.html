@@ -6575,8 +6575,6 @@ async function pgTakePhoto() {
 // STEP 3: AUTO-CROP
 // Mostrar resultado final - SOLO foto blanca (sin bundle aún)
 async function pgGeneratePack() {
-  alert('✨ Step 1: Creating 2048x2048 canvas...');
-  
   try {
     console.log('✨ Generating pack of', pgState.packSize);
     
@@ -6586,13 +6584,9 @@ async function pgGeneratePack() {
     canvas.height = 2048;
     const ctx = canvas.getContext('2d');
     
-    alert('✨ Step 2: Filling white background...');
-    
     // White background
     ctx.fillStyle = '#ffffff';
     ctx.fillRect(0, 0, 2048, 2048);
-    
-    alert('✨ Step 3: Drawing grid layout...');
     
     // Grid layout - draw white rectangles for each item
     const cols = Math.ceil(Math.sqrt(pgState.packSize));
@@ -6626,17 +6620,13 @@ async function pgGeneratePack() {
       }
     }
     
-    alert('✨ Step 4: Converting to JPEG...');
-    
     // Store as dataURL for preview
     pgState.generatedPackImage = canvas.toDataURL('image/jpeg', 0.92);
     console.log('✅ Pack image generated: ' + pgState.generatedPackImage.length + ' bytes');
     
-    alert('✨ Step 5: Converting to Blob for upload...');
-    
     // Convert to Blob and upload
     canvas.toBlob(async function(blob) {
-      alert('✨ Step 6: Uploading to ImgBB (' + (blob.size / 1024).toFixed(1) + ' KB)...');
+      console.log('📤 Uploading to ImgBB (' + (blob.size / 1024).toFixed(1) + ' KB)...');
       await pgUploadToImgBB(blob);
     }, 'image/jpeg', 0.92);
     
@@ -7041,9 +7031,9 @@ async function removeBgCanvas(dataUrl) {
       var bg=edge[Math.floor(edge.length/2)];
       var bgBright=(bg[0]+bg[1]+bg[2])/3;
 
-      // Tolerancia basada en el fondo
-      // Blanco puro → conservador; cartón/gris → agresivo
-      var TOL = bgBright>230 ? 36 : bgBright>200 ? 58 : bgBright>150 ? 72 : 85;
+      // Tolerancia basada en el fondo - MÁS AGRESIVO para remover ruido gris
+      // Aumentado 2-3x para eliminar artefactos y manchitas
+      var TOL = bgBright>230 ? 70 : bgBright>200 ? 100 : bgBright>150 ? 120 : 150;
 
       // ── 2. Flood-fill BFS desde todos los bordes ─────────────────
       var vis=new Uint8Array(W*H);
@@ -7109,20 +7099,20 @@ async function pngToWhiteJpeg(pngDataUrl) {
 
 // ── PRODUCT MODULE: AUTO REMOVE BACKGROUND ───────────────────
 window.pgAutoRemoveBackground = async function() {
-  alert('🎨 Step 1: Using removeBgCanvas()...');
+  console.log('🎨 Auto-removing background...');
   
   try {
     // Use the REAL background removal function from clothing module
-    alert('🎨 Step 2: Processing with flood-fill...');
+    console.log('🎨 Processing with flood-fill...');
     const pngResult = await removeBgCanvas(window.pgState.croppedPhoto);
     console.log('✅ PNG generated (transparent): ' + pngResult.length + ' bytes');
     
-    alert('🎨 Step 3: Converting PNG to white JPEG...');
+    console.log('🎨 Converting PNG to white JPEG...');
     // Convert PNG transparent → JPEG white
     const whiteJpeg = await pngToWhiteJpeg(pngResult);
     console.log('✅ JPEG white: ' + whiteJpeg.length + ' bytes');
     
-    alert('🎨 Step 4: Saving and showing result...');
+    console.log('🎨 Saving and showing result...');
     // Save and show
     if (!window.pgState) window.pgState = {};
     window.pgState.croppedPhoto = whiteJpeg;
