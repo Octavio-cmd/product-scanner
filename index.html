@@ -7008,28 +7008,36 @@ async function pgAutoRemoveBackground() {
   alert('⏳ Step 1: Creating white canvas...');
   
   try {
-    // Crear canvas BLANCO
+    alert('Step 1a: createElement');
     const canvas = document.createElement('canvas');
+    
+    alert('Step 1b: Setting width/height');
     canvas.width = 800;
     canvas.height = 800;
+    
+    alert('Step 1c: getContext');
     const ctx = canvas.getContext('2d');
+    
+    alert('Step 1d: fillStyle');
     ctx.fillStyle = '#FFFFFF';
+    
+    alert('Step 1e: fillRect');
     ctx.fillRect(0, 0, 800, 800);
     
     alert('✅ Step 2: Canvas created white');
     
-    // Convertir a JPEG
+    alert('Step 3a: toDataURL');
     const whiteJpeg = canvas.toDataURL('image/jpeg', 0.95);
     
     alert('✅ Step 3: Converted to JPEG (' + whiteJpeg.length + ' bytes)');
     
-    // Guardar
+    alert('Step 4a: setting pgState');
     if (!window.pgState) window.pgState = {};
     window.pgState.croppedPhoto = whiteJpeg;
     
     alert('✅ Step 4: pgState updated - showing WHITE image');
     
-    // Mostrar
+    alert('Step 5: calling pgShowRemovalResult');
     if (typeof window.pgShowRemovalResult === 'function') {
       window.pgShowRemovalResult();
     } else {
@@ -7037,7 +7045,7 @@ async function pgAutoRemoveBackground() {
     }
     
   } catch(err) {
-    alert('❌ ERROR: ' + err.message);
+    alert('❌ CAUGHT ERROR: ' + err.message);
     console.error(err);
   }
 }
