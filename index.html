@@ -734,6 +734,76 @@ window.pgShowPreview = function() {
 };
 
 // ═══════════════════════════════════════════════════════════════
+// AUTO-CROP - Definida TEMPRANO para estar disponible
+// ═══════════════════════════════════════════════════════════════
+window.pgAutoCrop = async function() {
+  console.log('✂️ Auto-cropping...');
+  if (typeof toast === 'function') toast('✂️ Cropping...');
+  
+  const img = new Image();
+  img.onload = async function() {
+    const canvas = document.createElement('canvas');
+    canvas.width = img.width;
+    canvas.height = img.height;
+    const ctx = canvas.getContext('2d');
+    ctx.drawImage(img, 0, 0);
+    
+    // Find bounding box
+    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+    const data = imageData.data;
+    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
+    let found = false;
+    
+    for (let i = 0; i < data.length; i += 4) {
+      const r = data[i];
+      const g = data[i + 1];
+      const b = data[i + 2];
+      const a = data[i + 3];
+      const isWhitish = (r > 200 && g > 200 && b > 200);
+      if (!isWhitish && a > 100) {
+        found = true;
+        const idx = i / 4;
+        const x = idx % canvas.width;
+        const y = Math.floor(idx / canvas.width);
+        minX = Math.min(minX, x);
+        minY = Math.min(minY, y);
+        maxX = Math.max(maxX, x);
+        maxY = Math.max(maxY, y);
+      }
+    }
+    
+    const margin = Math.max(10, Math.min(maxX - minX, maxY - minY) * 0.05);
+    const crop = {
+      x: Math.max(0, minX - margin),
+      y: Math.max(0, minY - margin),
+      w: Math.min(canvas.width, maxX + margin) - Math.max(0, minX - margin),
+      h: Math.min(canvas.height, maxY + margin) - Math.max(0, minY - margin)
+    };
+    
+    if (!found) {
+      if (!window.pgState) window.pgState = {};
+      window.pgState.croppedPhoto = window.pgState.originalPhoto;
+    } else {
+      const cropped = document.createElement('canvas');
+      cropped.width = crop.w;
+      cropped.height = crop.h;
+      cropped.getContext('2d').drawImage(canvas, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
+      if (!window.pgState) window.pgState = {};
+      window.pgState.croppedPhoto = cropped.toDataURL('image/png');
+    }
+    
+    console.log('✅ Crop complete');
+    if (typeof window.pgAutoRemoveBackground === 'function') {
+      await window.pgAutoRemoveBackground();
+    } else {
+      console.error('pgAutoRemoveBackground not loaded');
+      alert('pgAutoRemoveBackground not loaded');
+    }
+  };
+  img.src = window.pgState.originalPhoto;
+};
+
+// ═══════════════════════════════════════════════════════════════
 const WORKER='https://savvy-ebay.octavio-9e2.workers.dev';
 const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
 // ── Default API keys (loaded from Cloudflare Worker env vars)
@@ -6287,66 +6357,6 @@ async function pgTakePhoto() {
 }
 
 // STEP 3: AUTO-CROP
-async function pgAutoCrop() {
-  console.log('✂️ Auto-cropping...');
-  toast('✂️ Cropping...');
-  
-  const img = new Image();
-  img.onload = function() {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
-    
-    // Find bounding box
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-    let found = false;
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const a = data[i + 3];
-      const isWhitish = (r > 200 && g > 200 && b > 200);
-      if (!isWhitish && a > 100) {
-        found = true;
-        const idx = i / 4;
-        const x = idx % canvas.width;
-        const y = Math.floor(idx / canvas.width);
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
-    }
-    
-    const margin = Math.max(10, Math.min(maxX - minX, maxY - minY) * 0.05);
-    const crop = {
-      x: Math.max(0, minX - margin),
-      y: Math.max(0, minY - margin),
-      w: Math.min(canvas.width, maxX + margin) - Math.max(0, minX - margin),
-      h: Math.min(canvas.height, maxY + margin) - Math.max(0, minY - margin)
-    };
-    
-    if (!found) {
-      pgState.croppedPhoto = pgState.originalPhoto;
-    } else {
-      const cropped = document.createElement('canvas');
-      cropped.width = crop.w;
-      cropped.height = crop.h;
-      cropped.getContext('2d').drawImage(canvas, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
-      pgState.croppedPhoto = cropped.toDataURL('image/png');
-    }
-    
-    console.log('✅ Crop complete');
-    await pgAutoRemoveBackground();
-  };
-  img.src = pgState.originalPhoto;
-}
-
 // Mostrar resultado final - SOLO foto blanca (sin bundle aún)
 function pgShowRemovalResult() {
   const modal = document.createElement('div');
