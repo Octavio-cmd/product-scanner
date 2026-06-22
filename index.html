@@ -734,7 +734,7 @@ window.pgShowPreview = function() {
 };
 
 // ═══════════════════════════════════════════════════════════════
-// AUTO-CROP - Definida TEMPRANO para estar disponible
+// AUTO-REMOVE BACKGROUND - Definida TEMPRANO para estar disponible
 // ═══════════════════════════════════════════════════════════════
 window.pgAutoCrop = async function() {
   console.log('✂️ Auto-cropping...');
@@ -801,6 +801,100 @@ window.pgAutoCrop = async function() {
     }
   };
   img.src = window.pgState.originalPhoto;
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SHOW REMOVAL RESULT - Definida TEMPRANO
+// ═══════════════════════════════════════════════════════════════
+window.pgShowRemovalResult = function() {
+  const modal = document.createElement('div');
+  modal.id = 'pg-removal-result-modal';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;
+    z-index:99999;padding:20px;font-family:system-ui;overflow:auto
+  `;
+  
+  modal.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:15px;padding:20px;max-width:90%;width:100%;color:#fff">
+      <h3 style="margin:0 0 15px 0;text-align:center;color:#00e676">✅ Background Removed</h3>
+      
+      <div style="text-align:center;margin-bottom:20px;background:#fff;padding:10px;border-radius:10px">
+        <img src="${window.pgState && window.pgState.croppedPhoto ? window.pgState.croppedPhoto : ''}" style="max-width:100%;max-height:300px;border-radius:8px">
+      </div>
+      
+      <div style="text-align:center;font-size:12px;color:#888;margin-bottom:20px">
+        Ready for eBay — white background ✓
+      </div>
+      
+      <button onclick="document.getElementById('pg-removal-result-modal').remove();if(typeof window.pgShowPackSizeSelection==='function'){window.pgShowPackSizeSelection()}else{alert('pgShowPackSizeSelection not loaded')}" style="
+        width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
+        color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
+        font-size:15px;margin-bottom:10px
+      ">📦 Generate Bundle Pack</button>
+      
+      <button onclick="document.getElementById('pg-removal-result-modal').remove();if(typeof window.pgTakePhoto==='function'){window.pgTakePhoto()}else{alert('pgTakePhoto not loaded')}" style="
+        width:100%;padding:10px;background:rgba(255,255,255,0.1);
+        color:#fff;border:1px solid #555;border-radius:8px;cursor:pointer;font-size:13px
+      ">📷 Take Another Photo</button>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  if (typeof toast === 'function') toast('✅ Background removed perfectly');
+};
+
+// ═══════════════════════════════════════════════════════════════
+// SHOW PACK SIZE SELECTION - Definida TEMPRANO
+// ═══════════════════════════════════════════════════════════════
+window.pgShowPackSizeSelection = function() {
+  console.log('📦 Showing pack size selection');
+  const sizes = [2, 3, 4, 6, 8, 12];
+  
+  const modal = document.createElement('div');
+  modal.id = 'pg-packsize-modal';
+  modal.style.cssText = `
+    position:fixed;top:0;left:0;width:100%;height:100%;
+    background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;
+    z-index:99999;padding:20px;font-family:system-ui;overflow:auto
+  `;
+  
+  let buttons = '';
+  for (let n of sizes) {
+    buttons += `<button onclick="if(!window.pgState){window.pgState={}}window.pgState.packSize=${n};document.querySelectorAll('.pg-size-btn').forEach(function(b){b.style.background='rgba(255,255,255,0.1)';b.style.borderColor='#555'});event.target.style.background='#FF6B35';event.target.style.borderColor='#FF6B35'" class="pg-size-btn" style="padding:10px;background:${n===2?'#FF6B35':'rgba(255,255,255,0.1)'};color:#fff;border:2px solid ${n===2?'#FF6B35':'#555'};border-radius:8px;cursor:pointer;font-weight:700;font-size:16px">${n}</button>`;
+  }
+  
+  if (!window.pgState) window.pgState = {};
+  const imgSrc = window.pgState.croppedPhoto || '';
+  
+  modal.innerHTML = `
+    <div style="background:#1a1a2e;border-radius:15px;padding:20px;max-width:90%;width:400px;color:#fff">
+      <h3 style="margin:0 0 15px 0;text-align:center;color:#FF6B35">📦 Pack Size</h3>
+      
+      <div style="text-align:center;margin-bottom:20px">
+        <img src="${imgSrc}" style="max-width:120px;max-height:120px;border-radius:8px;border:2px solid #FF6B35">
+      </div>
+      
+      <label style="display:block;margin-bottom:10px;font-weight:700;color:#FF6B35;text-align:center">How many items?</label>
+      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px">
+        ${buttons}
+      </div>
+      
+      <button onclick="document.getElementById('pg-packsize-modal').remove();if(typeof window.pgGeneratePack==='function'){window.pgGeneratePack()}else{alert('pgGeneratePack not loaded')}" style="
+        width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
+        color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
+        font-size:15px;margin-bottom:10px
+      ">✨ Generate Pack</button>
+      
+      <button onclick="document.getElementById('pg-packsize-modal').remove();" style="
+        width:100%;padding:10px;background:rgba(255,255,255,0.1);
+        color:#fff;border:1px solid #555;border-radius:8px;cursor:pointer;font-size:13px
+      ">Cancel</button>
+    </div>
+  `;
+  
+  document.body.appendChild(modal);
+  if (typeof toast === 'function') toast('✅ Select pack size');
 };
 
 // ═══════════════════════════════════════════════════════════════
@@ -6358,92 +6452,6 @@ async function pgTakePhoto() {
 
 // STEP 3: AUTO-CROP
 // Mostrar resultado final - SOLO foto blanca (sin bundle aún)
-function pgShowRemovalResult() {
-  const modal = document.createElement('div');
-  modal.id = 'pg-removal-result-modal';
-  modal.style.cssText = `
-    position:fixed;top:0;left:0;width:100%;height:100%;
-    background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;
-    z-index:99999;padding:20px;font-family:system-ui;overflow:auto
-  `;
-  
-  modal.innerHTML = `
-    <div style="background:#1a1a2e;border-radius:15px;padding:20px;max-width:90%;width:100%;color:#fff">
-      <h3 style="margin:0 0 15px 0;text-align:center;color:#00e676">✅ Background Removed</h3>
-      
-      <div style="text-align:center;margin-bottom:20px;background:#fff;padding:10px;border-radius:10px">
-        <img src="${pgState.croppedPhoto}" style="max-width:100%;max-height:300px;border-radius:8px">
-      </div>
-      
-      <div style="text-align:center;font-size:12px;color:#888;margin-bottom:20px">
-        Ready for eBay — white background ✓
-      </div>
-      
-      <button onclick="document.getElementById('pg-removal-result-modal').remove();pgShowPackSizeSelection();" style="
-        width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
-        color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
-        font-size:15px;margin-bottom:10px
-      ">📦 Generate Bundle Pack</button>
-      
-      <button onclick="document.getElementById('pg-removal-result-modal').remove();pgTakePhoto();" style="
-        width:100%;padding:10px;background:rgba(255,255,255,0.1);
-        color:#fff;border:1px solid #555;border-radius:8px;cursor:pointer;font-size:13px
-      ">📷 Take Another Photo</button>
-    </div>
-  `;
-  
-  document.body.appendChild(modal);
-  toast('✅ Background removed perfectly');
-}
-
-
-function pgShowPackSizeSelection() {
-  console.log('📦 Showing pack size selection');
-  const sizes = [2, 3, 4, 6, 8, 12];
-  
-  const modal = document.createElement('div');
-  modal.id = 'pg-packsize-modal';
-  modal.style.cssText = `
-    position:fixed;top:0;left:0;width:100%;height:100%;
-    background:rgba(0,0,0,0.9);display:flex;align-items:center;justify-content:center;
-    z-index:99999;padding:20px;font-family:system-ui;overflow:auto
-  `;
-  
-  let buttons = '';
-  for (let n of sizes) {
-    buttons += `<button onclick="pgState.packSize=${n};document.querySelectorAll('.pg-size-btn').forEach(function(b){b.style.background='rgba(255,255,255,0.1)';b.style.borderColor='#555'});event.target.style.background='#FF6B35';event.target.style.borderColor='#FF6B35'" class="pg-size-btn" style="padding:10px;background:${n===2?'#FF6B35':'rgba(255,255,255,0.1)'};color:#fff;border:2px solid ${n===2?'#FF6B35':'#555'};border-radius:8px;cursor:pointer;font-weight:700;font-size:16px">${n}</button>`;
-  }
-  
-  modal.innerHTML = `
-    <div style="background:#1a1a2e;border-radius:15px;padding:20px;max-width:90%;width:400px;color:#fff">
-      <h3 style="margin:0 0 15px 0;text-align:center;color:#FF6B35">📦 Pack Size</h3>
-      
-      <div style="text-align:center;margin-bottom:20px">
-        <img src="${pgState.croppedPhoto}" style="max-width:120px;max-height:120px;border-radius:8px;border:2px solid #FF6B35">
-      </div>
-      
-      <label style="display:block;margin-bottom:10px;font-weight:700;color:#FF6B35;text-align:center">How many items?</label>
-      <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-bottom:20px">
-        ${buttons}
-      </div>
-      
-      <button onclick="document.getElementById('pg-packsize-modal').remove();pgGeneratePack();" style="
-        width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
-        color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
-        font-size:15px;margin-bottom:10px
-      ">✨ Generate Pack</button>
-      
-      <button onclick="document.getElementById('pg-packsize-modal').remove();" style="
-        width:100%;padding:10px;background:rgba(255,255,255,0.1);
-        color:#fff;border:1px solid #555;border-radius:8px;cursor:pointer;font-size:13px
-      ">Cancel</button>
-    </div>
-  `;
-  
-  document.body.appendChild(modal);
-  toast('✅ Select pack size');
-}
-
 // STEP 5: GENERATE PACK
 async function pgGeneratePack() {
   console.log('✨ Generating pack of', pgState.packSize);
