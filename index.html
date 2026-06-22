@@ -1519,6 +1519,67 @@ async function stopCam(){
 // Muestrea el borde completo para detectar el color de fondo,
 // luego hace flood-fill + segunda pasada para limpiar residuos.
 // Mejor resultado con fondo de color (cartón, gris) que con blanco.
+// ═══════════════════════════════════════════════════════════════
+// TEST SIMPLE BACKGROUND REMOVAL
+// ═══════════════════════════════════════════════════════════════
+async function simpleBgRemove(dataUrl) {
+  return new Promise(function(resolve) {
+    const img = new Image();
+    img.onload = function() {
+      const canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      const ctx = canvas.getContext('2d');
+      
+      // Dibujar imagen original
+      ctx.drawImage(img, 0, 0);
+      
+      // Obtener datos de pixel
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const data = imgData.data;
+      
+      // Detectar color de fondo desde bordes
+      let bgR = 0, bgG = 0, bgB = 0, count = 0;
+      for (let i = 0; i < data.length; i += 4) {
+        const x = (i / 4) % canvas.width;
+        const y = Math.floor((i / 4) / canvas.width);
+        // Muestrear solo bordes
+        if (x < 10 || x > canvas.width - 10 || y < 10 || y > canvas.height - 10) {
+          bgR += data[i];
+          bgG += data[i + 1];
+          bgB += data[i + 2];
+          count++;
+        }
+      }
+      bgR = Math.floor(bgR / count);
+      bgG = Math.floor(bgG / count);
+      bgB = Math.floor(bgB / count);
+      
+      alert('Detected bg color: RGB(' + bgR + ',' + bgG + ',' + bgB + ')');
+      
+      // Remover pixeles similares al fondo (tolerancia 50)
+      const TOL = 50;
+      for (let i = 0; i < data.length; i += 4) {
+        const r = data[i];
+        const g = data[i + 1];
+        const b = data[i + 2];
+        const dist = Math.sqrt((r-bgR)*(r-bgR) + (g-bgG)*(g-bgG) + (b-bgB)*(b-bgB));
+        if (dist < TOL) {
+          data[i + 3] = 0; // Alpha = 0 (transparente)
+        }
+      }
+      
+      ctx.putImageData(imgData, 0, 0);
+      resolve(canvas.toDataURL('image/png'));
+    };
+    img.onerror = function() {
+      alert('❌ Error loading image in simpleBgRemove');
+      resolve(dataUrl);
+    };
+    img.src = dataUrl;
+  });
+}
+
 async function removeBgCanvas(dataUrl) {
   return new Promise(function(resolve) {
     var img = new Image();
@@ -6893,24 +6954,43 @@ async function removeResidualBg(dataUrl, bgColor) {
 // QUITAFONDOS LOCAL - Del módulo de ropa (FUNCIONA PERFECTAMENTE)
 // ════════════════════════════════════════════════════════════════
 async function pgAutoRemoveBackground() {
-  console.log('🎨 Starting background removal - SIMPLE');
+  console.log('🎨 Starting background removal');
   toast('🎨 Removing background...');
   
-  // SOLO 2 PASOS que SABEMOS que funcionan:
-  // 1. removeBgCanvas (funciona en ropa)
-  // 2. pngToWhiteJpeg (funciona en ropa)
-  
-  const bgRemoved = await removeBgCanvas(pgState.croppedPhoto);
-  console.log('✅ Step 1 done');
-  
-  const whiteJpeg = await pngToWhiteJpeg(bgRemoved);
-  console.log('✅ Step 2 done');
-  
-  pgState.croppedPhoto = whiteJpeg;
-  console.log('✅ Background removal COMPLETE');
-  
-  // Mostrar resultado final
-  pgShowRemovalResult();
+  try {
+    console.log('🔄 Step 1: simpleBgRemove()...');
+    alert('⏳ Step 1: Testing simple background removal...');
+    
+    const bgRemoved = await simpleBgRemove(pgState.croppedPhoto);
+    
+    if (!bgRemoved) {
+      alert('❌ ERROR: simpleBgRemove returned empty result');
+      console.error('simpleBgRemove returned:', bgRemoved);
+      return;
+    }
+    alert('✅ Step 1 done: Background removed');
+    
+    console.log('🔄 Step 2: pngToWhiteJpeg()...');
+    alert('⏳ Step 2: Converting to white JPEG...');
+    
+    const whiteJpeg = await pngToWhiteJpeg(bgRemoved);
+    
+    if (!whiteJpeg) {
+      alert('❌ ERROR: pngToWhiteJpeg returned empty result');
+      return;
+    }
+    alert('✅ Step 2 done: Converted to JPEG');
+    
+    pgState.croppedPhoto = whiteJpeg;
+    console.log('✅ pgState.croppedPhoto updated');
+    
+    alert('✅ Background removal COMPLETE - showing result');
+    window.pgShowRemovalResult();
+    
+  } catch(err) {
+    console.error('❌ Error:', err);
+    alert('❌ ERROR: ' + err.message + '\n\nStack: ' + err.stack);
+  }
 }
 
 
