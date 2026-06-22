@@ -7011,35 +7011,126 @@ async function removeResidualBg(dataUrl, bgColor) {
 // ════════════════════════════════════════════════════════════════
 // QUITAFONDOS LOCAL - Del módulo de ropa (FUNCIONA PERFECTAMENTE)
 // ════════════════════════════════════════════════════════════════
-async function pgAutoRemoveBackground() {
-  console.log('🎨 pgAutoRemoveBackground called');
+// ── BACKGROUND REMOVAL: Flood-fill BFS to detect and remove background ────
+async function removeBgCanvas(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var W=img.width, H=img.height;
+      var c=document.createElement('canvas'); c.width=W; c.height=H;
+      var ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      var id=ctx.getImageData(0,0,W,H), px=id.data;
+
+      function pix(x,y){var i=(y*W+x)*4;return[px[i],px[i+1],px[i+2]];}
+      function dist(a,b){
+        return Math.sqrt((a[0]-b[0])*(a[0]-b[0])+(a[1]-b[1])*(a[1]-b[1])+(a[2]-b[2])*(a[2]-b[2]));
+      }
+
+      // ── 1. Detectar color de fondo desde TODO el borde (15px) ───
+      var edge=[], STRIP=15;
+      for(var x=0;x<W;x++){
+        for(var y=0;y<STRIP;y++) edge.push(pix(x,y));
+        for(var y=H-STRIP;y<H;y++) edge.push(pix(x,y));
+      }
+      for(var y=STRIP;y<H-STRIP;y++){
+        for(var x=0;x<STRIP;x++) edge.push(pix(x,y));
+        for(var x=W-STRIP;x<W;x++) edge.push(pix(x,y));
+      }
+      // Mediana de brightness para evitar outliers (sombras, producto en borde)
+      edge.sort(function(a,b){return (a[0]+a[1]+a[2])-(b[0]+b[1]+b[2]);});
+      var bg=edge[Math.floor(edge.length/2)];
+      var bgBright=(bg[0]+bg[1]+bg[2])/3;
+
+      // Tolerancia basada en el fondo
+      // Blanco puro → conservador; cartón/gris → agresivo
+      var TOL = bgBright>230 ? 36 : bgBright>200 ? 58 : bgBright>150 ? 72 : 85;
+
+      // ── 2. Flood-fill BFS desde todos los bordes ─────────────────
+      var vis=new Uint8Array(W*H);
+      var q=new Int32Array(W*H*2); var qh=0,qt=0;
+      function enq(x,y){if(x>=0&&x<W&&y>=0&&y<H&&!vis[y*W+x]){vis[y*W+x]=1;q[qt++]=x;q[qt++]=y;}}
+      for(var x=0;x<W;x++){enq(x,0);enq(x,H-1);}
+      for(var y=1;y<H-1;y++){enq(0,y);enq(W-1,y);}
+
+      while(qh<qt){
+        var cx=q[qh++],cy=q[qh++];
+        if(dist(pix(cx,cy),bg)<TOL){
+          px[(cy*W+cx)*4+3]=0;
+          enq(cx+1,cy);enq(cx-1,cy);enq(cx,cy+1);enq(cx,cy-1);
+        }
+      }
+
+      // ── 3. Segunda pasada: eliminar "islas" de fondo no conectadas ─
+      // Reconstruir máscara de pixels eliminados
+      var removed=new Uint8Array(W*H);
+      for(var i=0;i<W*H;i++) if(px[i*4+3]===0) removed[i]=1;
+
+      // Eliminar pixels adyacentes a borde removido que también son similares al fondo
+      for(var pass=0;pass<2;pass++){
+        for(var y=1;y<H-1;y++) for(var x=1;x<W-1;x++){
+          if(removed[y*W+x]) continue;
+          var adj=removed[(y-1)*W+x]+removed[(y+1)*W+x]+removed[y*W+(x-1)]+removed[y*W+(x+1)];
+          if(adj>=1 && dist(pix(x,y),bg)<TOL*1.3){
+            px[(y*W+x)*4+3]=0; removed[y*W+x]=1;
+          }
+        }
+      }
+
+      // ── 4. Erosionar borde duro 1px ───────────────────────────────
+      for(var y=1;y<H-1;y++) for(var x=1;x<W-1;x++){
+        if(removed[y*W+x]) continue;
+        var hard=removed[(y-1)*W+x]+removed[(y+1)*W+x]+removed[y*W+(x-1)]+removed[y*W+(x+1)];
+        if(hard>=3) { px[(y*W+x)*4+3]=0; }
+      }
+
+      ctx.putImageData(id,0,0);
+      resolve(c.toDataURL('image/png'));
+    };
+    img.onerror=function(){resolve(dataUrl);};
+    img.src=dataUrl;
+  });
+}
+
+// ── CONVERT PNG TRANSPARENT TO JPEG WHITE ────────────────────────
+async function pngToWhiteJpeg(pngDataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var c=document.createElement('canvas'); c.width=img.width; c.height=img.height;
+      var ctx=c.getContext('2d');
+      ctx.fillStyle='#FFFFFF'; ctx.fillRect(0,0,c.width,c.height);
+      ctx.drawImage(img,0,0);
+      resolve(c.toDataURL('image/jpeg',0.92));
+    };
+    img.onerror=function(){resolve(pngDataUrl);};
+    img.src=pngDataUrl;
+  });
+}
+
+
+  alert('🎨 Step 1: Using removeBgCanvas()...');
   
   try {
-    // Crear canvas BLANCO
-    const canvas = document.createElement('canvas');
-    canvas.width = 800;
-    canvas.height = 800;
-    const ctx = canvas.getContext('2d');
-    ctx.fillStyle = '#FFFFFF';
-    ctx.fillRect(0, 0, 800, 800);
+    // Use the REAL background removal function from clothing module
+    alert('🎨 Step 2: Processing with flood-fill...');
+    const pngResult = await removeBgCanvas(pgState.croppedPhoto);
+    console.log('✅ PNG generated (transparent): ' + pngResult.length + ' bytes');
     
-    // Convertir a JPEG
-    const whiteJpeg = canvas.toDataURL('image/jpeg', 0.95);
+    alert('🎨 Step 3: Converting PNG to white JPEG...');
+    // Convert PNG transparent → JPEG white
+    const whiteJpeg = await pngToWhiteJpeg(pngResult);
+    console.log('✅ JPEG white: ' + whiteJpeg.length + ' bytes');
     
-    console.log('✅ JPEG created: ' + whiteJpeg.length + ' bytes');
-    
-    // Guardar
+    alert('🎨 Step 4: Saving and showing result...');
+    // Save and show
     if (!window.pgState) window.pgState = {};
     window.pgState.croppedPhoto = whiteJpeg;
     
-    // Mostrar resultado
-    if (typeof window.pgShowRemovalResult === 'function') {
-      window.pgShowRemovalResult();
-    } else {
-      console.error('pgShowRemovalResult not available');
-    }
+    console.log('✅ pgState updated - showing result');
+    window.pgShowRemovalResult();
     
   } catch(err) {
+    alert('❌ ERROR: ' + err.message);
     console.error('❌ ERROR:', err);
   }
 }
