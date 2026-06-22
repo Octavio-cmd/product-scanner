@@ -1520,6 +1520,52 @@ async function stopCam(){
 // luego hace flood-fill + segunda pasada para limpiar residuos.
 // Mejor resultado con fondo de color (cartón, gris) que con blanco.
 // ═══════════════════════════════════════════════════════════════
+// ULTRA-SIMPLE: Just make it WHITE
+// ═══════════════════════════════════════════════════════════════
+async function makeWhiteImage(dataUrl) {
+  return new Promise(function(resolve) {
+    alert('🔄 makeWhiteImage: Starting...');
+    
+    const img = new Image();
+    
+    img.onload = function() {
+      alert('✅ Image loaded: ' + img.width + 'x' + img.height);
+      
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        const ctx = canvas.getContext('2d');
+        
+        // JUST MAKE IT WHITE
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        
+        // Draw image on top
+        ctx.globalAlpha = 0.9;
+        ctx.drawImage(img, 0, 0);
+        ctx.globalAlpha = 1.0;
+        
+        const result = canvas.toDataURL('image/jpeg', 0.95);
+        alert('✅ makeWhiteImage DONE: ' + result.length + ' bytes');
+        resolve(result);
+        
+      } catch(err) {
+        alert('❌ Error in canvas: ' + err.message);
+        resolve(dataUrl);
+      }
+    };
+    
+    img.onerror = function() {
+      alert('❌ Image failed to load');
+      resolve(dataUrl);
+    };
+    
+    img.src = dataUrl;
+  });
+}
+
+// ═══════════════════════════════════════════════════════════════
 // TEST SIMPLE BACKGROUND REMOVAL
 // ═══════════════════════════════════════════════════════════════
 async function simpleBgRemove(dataUrl) {
@@ -6972,41 +7018,26 @@ async function removeResidualBg(dataUrl, bgColor) {
 // ════════════════════════════════════════════════════════════════
 async function pgAutoRemoveBackground() {
   console.log('🎨 Starting background removal');
-  toast('🎨 Removing background...');
+  toast('🎨 Making image white...');
   
   try {
-    console.log('🔄 Step 1: simpleBgRemove()...');
-    alert('⏳ Step 1: Testing simple background removal...');
+    alert('⏳ Converting image to white...');
     
-    const bgRemoved = await simpleBgRemove(pgState.croppedPhoto);
+    const whiteJpeg = await makeWhiteImage(pgState.croppedPhoto);
     
-    if (!bgRemoved) {
-      alert('❌ ERROR: simpleBgRemove returned empty result');
-      console.error('simpleBgRemove returned:', bgRemoved);
+    if (!whiteJpeg || whiteJpeg.length < 100) {
+      alert('❌ ERROR: makeWhiteImage returned invalid result');
       return;
     }
-    alert('✅ Step 1 done: Background removed');
-    
-    console.log('🔄 Step 2: pngToWhiteJpeg()...');
-    alert('⏳ Step 2: Converting to white JPEG...');
-    
-    const whiteJpeg = await pngToWhiteJpeg(bgRemoved);
-    
-    if (!whiteJpeg) {
-      alert('❌ ERROR: pngToWhiteJpeg returned empty result');
-      return;
-    }
-    alert('✅ Step 2 done: Converted to JPEG');
     
     pgState.croppedPhoto = whiteJpeg;
-    console.log('✅ pgState.croppedPhoto updated');
+    alert('✅ Image is now WHITE - showing result');
     
-    alert('✅ Background removal COMPLETE - showing result');
     window.pgShowRemovalResult();
     
   } catch(err) {
     console.error('❌ Error:', err);
-    alert('❌ ERROR: ' + err.message + '\n\nStack: ' + err.stack);
+    alert('❌ EXCEPTION: ' + err.message);
   }
 }
 
