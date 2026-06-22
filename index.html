@@ -6117,7 +6117,7 @@ function pgShowPreview() {
       <h3 style="margin:0 0 15px 0;text-align:center;color:#FF6B35">📸 Photo Preview</h3>
       <img src="${pgState.originalPhoto}" style="width:100%;max-height:250px;object-fit:contain;border-radius:10px;margin-bottom:20px">
       
-      <button onclick="document.getElementById('pg-preview-modal').remove();(async()=>{await pgAutoCrop();})();" style="
+      <button onclick="document.getElementById('pg-preview-modal').remove();pgAutoCrop();" style="
         width:100%;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);
         color:#fff;border:none;border-radius:8px;font-weight:700;cursor:pointer;
         font-size:15px;margin-bottom:10px
@@ -6188,27 +6188,18 @@ async function pgAutoCrop() {
   console.log('✂️ Auto-cropping + Railway rembg...');
   toast('✂️ Enviando a Railway...');
   
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  // PASO 1: ENVIAR A RAILWAY REMBG (obtener PNG transparente limpio)
-  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
-  
   const railwayPng = await pgRemoveBackgroundViaRailway(pgState.originalPhoto);
   
   if (!railwayPng) {
-    console.error('❌ Railway rembg failed, volviendo a método local');
-    toast('⚠️ Railway no disponible, usando canvas local...');
-    // Fallback a método local
-    if (!pgState) pgState = {};
+    console.error('❌ Railway rembg failed, fallback local');
+    toast('⚠️ Railway no disponible, usando local...');
     pgState.croppedPhoto = pgState.originalPhoto;
-    pgShowPackSizeSelection();
   } else {
-    // ✅ Railway funcionó - usar PNG transparente
-    console.log('✅ PNG transparente de Railway recibido');
-    if (!pgState) pgState = {};
+    console.log('✅ PNG de Railway recibido');
     pgState.croppedPhoto = railwayPng;
-    console.log('✅ Crop complete (Railway)');
-    pgShowPackSizeSelection();
   }
+  
+  pgShowPackSizeSelection();
 }
 
 // STEP 4: SELECT PACK SIZE
