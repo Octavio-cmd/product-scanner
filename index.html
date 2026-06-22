@@ -740,14 +740,19 @@ window.pgShowPreview = function() {
 // ── RAILWAY REMBG: Enviar foto a servidor para quitar fondo
 async function pgRemoveBackgroundViaRailway(dataUrl) {
   console.log('🚀 Enviando a Railway rembg...');
+  if (typeof toast === 'function') toast('🚀 Enviando a Railway...');
+  
   try {
     const RAILWAY_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
     const b64 = dataUrl.split(',')[1];
     
     if (!b64) {
       console.error('❌ Invalid image data');
+      if (typeof toast === 'function') toast('❌ Datos de imagen inválidos');
       return null;
     }
+    
+    if (typeof toast === 'function') toast('⏳ Procesando con Railway...');
     
     const response = await fetch(RAILWAY_API, {
       method: 'POST',
@@ -755,22 +760,29 @@ async function pgRemoveBackgroundViaRailway(dataUrl) {
       body: JSON.stringify({ image: b64 })
     });
     
+    console.log('Railway response status:', response.status);
+    
     if (!response.ok) {
       console.error('❌ Railway API error:', response.status);
+      if (typeof toast === 'function') toast('❌ Railway error: ' + response.status);
       return null;
     }
     
     const data = await response.json();
+    console.log('Railway response data:', data);
     
     if (data.success && data.image) {
       console.log('✅ Railway rembg complete — PNG transparente recibido');
+      if (typeof toast === 'function') toast('✅ Railway OK — PNG listo');
       return 'data:image/png;base64,' + data.image;
     } else {
-      console.error('❌ Rembg processing failed');
+      console.error('❌ Rembg processing failed:', data);
+      if (typeof toast === 'function') toast('❌ Railway procesamiento falló');
       return null;
     }
   } catch(error) {
     console.error('Railway remove-bg error:', error);
+    if (typeof toast === 'function') toast('❌ Error: ' + error.message);
     return null;
   }
 }
