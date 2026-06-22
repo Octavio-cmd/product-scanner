@@ -736,79 +736,88 @@ window.pgShowPreview = function() {
 // ═══════════════════════════════════════════════════════════════
 // AUTO-REMOVE BACKGROUND - Definida TEMPRANO para estar disponible
 // ═══════════════════════════════════════════════════════════════
-window.pgAutoCrop = async function() {
-  console.log('✂️ Auto-cropping...');
-  if (typeof toast === 'function') toast('✂️ Cropping...');
-  
-  const img = new Image();
-  img.onload = async function() {
-    const canvas = document.createElement('canvas');
-    canvas.width = img.width;
-    canvas.height = img.height;
-    const ctx = canvas.getContext('2d');
-    ctx.drawImage(img, 0, 0);
+
+// ── RAILWAY REMBG: Enviar foto a servidor para quitar fondo
+async function pgRemoveBackgroundViaRailway(dataUrl) {
+  console.log('🚀 Enviando a Railway rembg...');
+  try {
+    const RAILWAY_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
+    const b64 = dataUrl.split(',')[1];
     
-    // Find bounding box
-    const imageData = ctx.getImageData(0, 0, canvas.width, canvas.height);
-    const data = imageData.data;
-    let minX = canvas.width, minY = canvas.height, maxX = 0, maxY = 0;
-    let found = false;
-    
-    for (let i = 0; i < data.length; i += 4) {
-      const r = data[i];
-      const g = data[i + 1];
-      const b = data[i + 2];
-      const a = data[i + 3];
-      const isWhitish = (r > 200 && g > 200 && b > 200);
-      if (!isWhitish && a > 100) {
-        found = true;
-        const idx = i / 4;
-        const x = idx % canvas.width;
-        const y = Math.floor(idx / canvas.width);
-        minX = Math.min(minX, x);
-        minY = Math.min(minY, y);
-        maxX = Math.max(maxX, x);
-        maxY = Math.max(maxY, y);
-      }
+    if (!b64) {
+      console.error('❌ Invalid image data');
+      return null;
     }
     
-    const margin = Math.max(10, Math.min(maxX - minX, maxY - minY) * 0.05);
-    const crop = {
-      x: Math.max(0, minX - margin),
-      y: Math.max(0, minY - margin),
-      w: Math.min(canvas.width, maxX + margin) - Math.max(0, minX - margin),
-      h: Math.min(canvas.height, maxY + margin) - Math.max(0, minY - margin)
-    };
+    const response = await fetch(RAILWAY_API, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: b64 })
+    });
     
-    if (!found) {
-      if (!window.pgState) window.pgState = {};
-      window.pgState.croppedPhoto = window.pgState.originalPhoto;
+    if (!response.ok) {
+      console.error('❌ Railway API error:', response.status);
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.image) {
+      console.log('✅ Railway rembg complete — PNG transparente recibido');
+      return 'data:image/png;base64,' + data.image;
     } else {
-      const cropped = document.createElement('canvas');
-      cropped.width = crop.w;
-      cropped.height = crop.h;
-      cropped.getContext('2d').drawImage(canvas, crop.x, crop.y, crop.w, crop.h, 0, 0, crop.w, crop.h);
-      if (!window.pgState) window.pgState = {};
-      window.pgState.croppedPhoto = cropped.toDataURL('image/png');
+      console.error('❌ Rembg processing failed');
+      return null;
     }
+  } catch(error) {
+    console.error('Railway remove-bg error:', error);
+    return null;
+  }
+}
+
+window.pgAutoCrop = async function() {
+  console.log('✂️ Auto-cropping + Railway rembg...');
+  if (typeof toast === 'function') toast('✂️ Enviando a Railway...');
+  
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PASO 1: ENVIAR A RAILWAY REMBG (obtener PNG transparente limpio)
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
+  const railwayPng = await pgRemoveBackgroundViaRailway(window.pgState.originalPhoto);
+  
+  if (!railwayPng) {
+    console.error('❌ Railway rembg failed, volviendo a método local');
+    if (typeof toast === 'function') toast('⚠️ Railway no disponible, usando canvas local...');
+    // Fallback a método local
+    if (!window.pgState) window.pgState = {};
+    window.pgState.croppedPhoto = window.pgState.originalPhoto;
+  } else {
+    // ✅ Railway funcionó - usar PNG transparente
+    console.log('✅ PNG transparente de Railway recibido');
+    if (!window.pgState) window.pgState = {};
+    window.pgState.croppedPhoto = railwayPng;
     
-    console.log('✅ Crop complete');
-    console.log('🎯 Running cropToProduct for intelligent cropping...');
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+    // PASO 2: cropToProduct() - ahora FUNCIONA porque PNG tiene alpha channel
+    // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
     
-    // Apply cropToProduct for better results
+    console.log('🎯 Llamando cropToProduct()...');
     if (typeof cropToProduct === 'function') {
       window.pgState.croppedPhoto = await cropToProduct(window.pgState.croppedPhoto);
       console.log('✅ CropToProduct complete');
     }
-    
-    if (typeof window.pgAutoRemoveBackground === 'function') {
-      await window.pgAutoRemoveBackground();
-    } else {
-      console.error('pgAutoRemoveBackground not loaded');
-      alert('pgAutoRemoveBackground not loaded');
-    }
-  };
-  img.src = window.pgState.originalPhoto;
+  }
+  
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  // PASO 3: Background removal final + pngToWhiteJpeg
+  // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+  
+  if (typeof window.pgAutoRemoveBackground === 'function') {
+    await window.pgAutoRemoveBackground();
+  } else {
+    console.error('pgAutoRemoveBackground not loaded');
+    alert('pgAutoRemoveBackground not loaded');
+  }
 };
 
 // ═══════════════════════════════════════════════════════════════
