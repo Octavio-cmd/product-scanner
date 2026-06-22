@@ -7005,48 +7005,33 @@ async function removeResidualBg(dataUrl, bgColor) {
 async function pgAutoRemoveBackground() {
   console.log('🎨 pgAutoRemoveBackground called');
   
-  alert('⏳ Step 1: Creating white canvas...');
-  
   try {
-    alert('Step 1a: createElement');
+    // Crear canvas BLANCO
     const canvas = document.createElement('canvas');
-    
-    alert('Step 1b: Setting width/height');
     canvas.width = 800;
     canvas.height = 800;
-    
-    alert('Step 1c: getContext');
     const ctx = canvas.getContext('2d');
-    
-    alert('Step 1d: fillStyle');
     ctx.fillStyle = '#FFFFFF';
-    
-    alert('Step 1e: fillRect');
     ctx.fillRect(0, 0, 800, 800);
     
-    alert('✅ Step 2: Canvas created white');
-    
-    alert('Step 3a: toDataURL');
+    // Convertir a JPEG
     const whiteJpeg = canvas.toDataURL('image/jpeg', 0.95);
     
-    alert('✅ Step 3: Converted to JPEG (' + whiteJpeg.length + ' bytes)');
+    console.log('✅ JPEG created: ' + whiteJpeg.length + ' bytes');
     
-    alert('Step 4a: setting pgState');
+    // Guardar
     if (!window.pgState) window.pgState = {};
     window.pgState.croppedPhoto = whiteJpeg;
     
-    alert('✅ Step 4: pgState updated - showing WHITE image');
-    
-    alert('Step 5: calling pgShowRemovalResult');
+    // Mostrar resultado
     if (typeof window.pgShowRemovalResult === 'function') {
       window.pgShowRemovalResult();
     } else {
-      alert('❌ pgShowRemovalResult not available');
+      console.error('pgShowRemovalResult not available');
     }
     
   } catch(err) {
-    alert('❌ CAUGHT ERROR: ' + err.message);
-    console.error(err);
+    console.error('❌ ERROR:', err);
   }
 }
 
