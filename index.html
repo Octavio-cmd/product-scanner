@@ -7003,29 +7003,42 @@ async function removeResidualBg(dataUrl, bgColor) {
 // QUITAFONDOS LOCAL - Del módulo de ropa (FUNCIONA PERFECTAMENTE)
 // ════════════════════════════════════════════════════════════════
 async function pgAutoRemoveBackground() {
-  console.log('🎨 Starting background removal');
-  toast('🎨 Making image white...');
+  console.log('🎨 pgAutoRemoveBackground called');
+  
+  alert('⏳ Step 1: Creating white canvas...');
   
   try {
-    alert('⏳ Converting image to white...');
+    // Crear canvas BLANCO
+    const canvas = document.createElement('canvas');
+    canvas.width = 800;
+    canvas.height = 800;
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, 800, 800);
     
-    const whiteJpeg = await makeWhiteImage(pgState.croppedPhoto);
+    alert('✅ Step 2: Canvas created white');
     
-    alert('✅ Result received: ' + (whiteJpeg ? whiteJpeg.length : 0) + ' bytes');
+    // Convertir a JPEG
+    const whiteJpeg = canvas.toDataURL('image/jpeg', 0.95);
     
-    if (!whiteJpeg || whiteJpeg.length < 100) {
-      alert('❌ ERROR: Invalid result');
-      return;
+    alert('✅ Step 3: Converted to JPEG (' + whiteJpeg.length + ' bytes)');
+    
+    // Guardar
+    if (!window.pgState) window.pgState = {};
+    window.pgState.croppedPhoto = whiteJpeg;
+    
+    alert('✅ Step 4: pgState updated - showing WHITE image');
+    
+    // Mostrar
+    if (typeof window.pgShowRemovalResult === 'function') {
+      window.pgShowRemovalResult();
+    } else {
+      alert('❌ pgShowRemovalResult not available');
     }
     
-    pgState.croppedPhoto = whiteJpeg;
-    alert('✅ pgState updated - showing result');
-    
-    window.pgShowRemovalResult();
-    
   } catch(err) {
-    console.error('❌ Error:', err);
-    alert('❌ EXCEPTION: ' + err.message);
+    alert('❌ ERROR: ' + err.message);
+    console.error(err);
   }
 }
 
