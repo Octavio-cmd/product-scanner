@@ -793,6 +793,14 @@ window.pgAutoCrop = async function() {
     }
     
     console.log('✅ Crop complete');
+    console.log('🎯 Running cropToProduct for intelligent cropping...');
+    
+    // Apply cropToProduct for better results
+    if (typeof cropToProduct === 'function') {
+      window.pgState.croppedPhoto = await cropToProduct(window.pgState.croppedPhoto);
+      console.log('✅ CropToProduct complete');
+    }
+    
     if (typeof window.pgAutoRemoveBackground === 'function') {
       await window.pgAutoRemoveBackground();
     } else {
@@ -7001,6 +7009,40 @@ async function removeResidualBg(dataUrl, bgColor) {
 // ════════════════════════════════════════════════════════════════
 // QUITAFONDOS LOCAL - Del módulo de ropa (FUNCIONA PERFECTAMENTE)
 // ════════════════════════════════════════════════════════════════
+// ── RECORTAR AL PRODUCTO (sin espacio vacío) ───────────────────
+async function cropToProduct(dataUrl) {
+  return new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var W=img.width, H=img.height;
+      var c=document.createElement('canvas'); c.width=W; c.height=H;
+      var ctx=c.getContext('2d'); ctx.drawImage(img,0,0);
+      var d=ctx.getImageData(0,0,W,H).data;
+      var x0=W,x1=0,y0=H,y1=0;
+      for (var y=0;y<H;y++) for (var x=0;x<W;x++) {
+        var i=(y*W+x)*4;
+        // alpha>180: solo pixels sólidos del producto, ignora bordes suaves
+        var notTransp=d[i+3]>180;
+        var notWhite=d[i]<240||d[i+1]<240||d[i+2]<240;
+        if (notTransp && notWhite) {
+          if(x<x0)x0=x; if(x>x1)x1=x;
+          if(y<y0)y0=y; if(y>y1)y1=y;
+        }
+      }
+      if(x0>=x1||y0>=y1){resolve(dataUrl);return;}
+      var M=10;
+      x0=Math.max(0,x0-M); y0=Math.max(0,y0-M);
+      x1=Math.min(W,x1+M); y1=Math.min(H,y1+M);
+      var oc=document.createElement('canvas');
+      oc.width=x1-x0; oc.height=y1-y0;
+      oc.getContext('2d').drawImage(img,x0,y0,oc.width,oc.height,0,0,oc.width,oc.height);
+      resolve(oc.toDataURL('image/png'));
+    };
+    img.onerror=function(){resolve(dataUrl);};
+    img.src=dataUrl;
+  });
+}
+
 // ── BACKGROUND REMOVAL: Flood-fill BFS to detect and remove background ────
 async function removeBgCanvas(dataUrl) {
   return new Promise(function(resolve) {
