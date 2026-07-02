@@ -555,7 +555,24 @@
   </div>
 </div>
 
-<div class="scr" id="scr-res"><div id="resBody"></div></div>
+<div class="scr" id="scr-res">
+  <!-- ── SCANNER INTEGRADO ─────────────────────────────────── -->
+  <div id="ps-scanner-block" style="margin-bottom:12px">
+    <div style="background:var(--sf);border:1.5px solid var(--ac);border-radius:14px;padding:14px 14px 10px">
+      <div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.08em;margin-bottom:8px">📷 SCAN BARCODE — AUTO-FILL FROM eBay</div>
+      <button id="camBtn" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
+        📷 Scan Barcode
+      </button>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="upcIn" class="ui" type="text" inputmode="numeric" placeholder="Or type UPC manually..." style="flex:1;margin:0">
+        <button id="srchBtn" style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;color:var(--tx);font-size:20px;cursor:pointer">🔍</button>
+      </div>
+      <div id="ps-scan-result" style="display:none;margin-top:10px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
+    </div>
+  </div>
+  <!-- ── RESULTADO DEL PRODUCTO ─────────────────────────────── -->
+  <div id="resBody"></div>
+</div>
 
 <button class="fab" id="fab">📋 CSV <div class="fbc" id="fabN">0</div></button>
 
@@ -1258,12 +1275,14 @@ async function startCam(){
   screen('cam');
   savvyStopScan('qr-video');
   savvyStartScan('qr-video', async txt => {
+    savvyStopScan('qr-video');
+    screen('res');
     analyze(txt.replace(/\D/g,''));
   });
 }
 async function stopCam(){
   savvyStopScan('qr-video');
-  screen('idle');
+  screen('res');
 }
 
 
@@ -2747,6 +2766,19 @@ function renderResult(r){
   h+=sv
     ? `<button class="add-btn" id="addBtn" ${cur && cur._bundleImg===undefined ? '' : ''}>➕ ADD TO CSV</button>`
     : `<button class="ov-add-btn" id="addBtn">➕ Add anyway (DWI override)</button>`;
+
+  // Botón Ver precio real en eBay
+  var _ebayUPC = (r && r.upc) ? r.upc : '';
+  var _ebayTitle = (r && r.title) ? r.title : '';
+  var _ebayQ = encodeURIComponent(_ebayUPC || _ebayTitle);
+  h+=`<a href="https://www.ebay.com/sch/i.html?_nkw=${_ebayQ}&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25"
+    target="_blank" rel="noopener"
+    style="display:block;width:100%;box-sizing:border-box;margin-bottom:8px;background:#0064d2;
+           border-radius:10px;padding:13px;color:#fff;font-weight:700;font-size:14px;
+           text-decoration:none;text-align:center">
+    🔍 Ver precio real en eBay →
+  </a>`;
+
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
@@ -2785,10 +2817,12 @@ function clearBulkSession() {
 }
 
 function scanAnother() {
-  const upcInput = document.getElementById('upcIn');
+  var upcInput = $('upcIn');
   if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
   _lastBundleUrl = '';
-  screen('idle');
+  var rb = $('resBody'); if (rb) rb.innerHTML = '';
+  var sr = $('ps-scan-result'); if (sr) { sr.style.display='none'; sr.innerHTML=''; }
+  screen('res');
 }
 
 function renderBulk(){
@@ -3429,7 +3463,11 @@ function toDash() {
 
 function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  $('scr-idle').classList.add('on');
+  $('scr-res').classList.add('on');
+  // Limpiar resultado anterior
+  var rb = $('resBody'); if (rb) rb.innerHTML = '';
+  var sr = $('ps-scan-result'); if (sr) { sr.style.display='none'; sr.innerHTML=''; }
+  var upcIn = $('upcIn'); if (upcIn) upcIn.value = '';
 }
 
 function openClothing() {
