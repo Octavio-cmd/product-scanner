@@ -818,17 +818,24 @@ function toast(msg,ms=2600){const t=$('toast');t.textContent=msg;t.classList.add
 function stat(m){const e=$('ls');if(e)e.textContent=m;}
 
 // SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
-function makeSKU(brand,upc,packs,title){
-  packs=packs||2; title=title||'';
-  let src=(brand||'').trim();
-  if(!src||src.toLowerCase()==='generic') src='';
-  if(!src&&title){
-    const skip=new Set(['2x','bundle','pack','new','of','the','and','for','set','lot','value']);
-    const words=title.replace(/[^a-zA-Z\s]/g,' ').trim().split(/\s+/);
-    src=words.find(w=>w.length>1&&!skip.has(w.toLowerCase()))||'';
+function makeSKU(brand, upc, packs, title) {
+  packs = packs || 1;
+  title = title || '';
+  upc   = (upc || '').replace(/\D/g, ''); // solo dígitos
+
+  // Obtener las 3 primeras letras de la marca
+  var src = (brand || '').trim();
+  if (!src || src.toLowerCase() === 'generic' || src.toLowerCase() === 'unknown') src = '';
+  if (!src && title) {
+    // Extraer primera palabra significativa del título como marca
+    var skip = new Set(['2x','bundle','pack','new','of','the','and','for','set','lot','value','brand']);
+    var words = title.replace(/[^a-zA-Z\s]/g, ' ').trim().split(/\s+/);
+    src = words.find(function(w) { return w.length > 1 && !skip.has(w.toLowerCase()); }) || '';
   }
-  const pfx=src.replace(/[^a-zA-Z]/g,'').substring(0,3).toUpperCase()||'GEN';
-  return pfx+'-'+upc+'-'+packs+'pk';
+  var pfx = src.replace(/[^a-zA-Z]/g, '').substring(0, 3).toUpperCase() || 'GEN';
+
+  // Formato: MAR-UPCOMPLETO-Npk
+  return pfx + '-' + (upc || '00000') + '-' + packs + 'pk';
 }
 
 // Categorys — mapa completo de categorías leaf de eBay
@@ -1816,16 +1823,31 @@ async function lookupUPCitemdb(upc) {
 }
 
 // Price calculation
-function calcBundlePrice(ebay,packs){
-  packs=packs||2;
-  // Priority: sold avg (real) > sold low > active low > active avg
-  const soldAvg = ebay?.pricing?.sold?.avg || 0;
-  const soldLow = ebay?.pricing?.sold?.low || 0;
-  const actLow  = ebay?.prices?.low || 0;
-  const actAvg  = ebay?.prices?.avg || 0;
-  const base = soldAvg||soldLow||actLow||actAvg||0;
-  if(base>0) return (base*packs*0.88).toFixed(2); // 12% below market for fast sales
-  return(packs===2?'14.99':packs===3?'19.99':packs===4?'24.99':'29.99');
+function calcBundlePrice(ebay, packs) {
+  packs = packs || 2;
+  var soldAvg = (ebay && ebay.pricing && ebay.pricing.sold && ebay.pricing.sold.avg) || 0;
+  var soldLow = (ebay && ebay.pricing && ebay.pricing.sold && ebay.pricing.sold.low) || 0;
+  var actLow  = (ebay && ebay.prices && ebay.prices.low) || 0;
+  var actAvg  = (ebay && ebay.prices && ebay.prices.avg) || 0;
+  var base    = soldAvg || soldLow || actLow || actAvg || 0;
+  if (base > 0) {
+    // Verificar si es viable con la fórmula real
+    var COSTO_UNIT   = 2.00;
+    var ENVIO        = 10.00;
+    var HANDLING     = 1.00;
+    var EBAY_FEE     = 0.13;
+    var GANANCIA_MIN = 10.00;
+    var costoTotal   = (COSTO_UNIT * packs) + ENVIO + HANDLING + GANANCIA_MIN;
+    var minVenta     = costoTotal / (1 - EBAY_FEE);
+    var ebayPack     = base * packs;
+    // Precio sugerido: 5% debajo del eBay equivalente, pero no menos que el mínimo viable
+    var sugerido = Math.max(ebayPack * 0.95, minVenta);
+    return sugerido.toFixed(2);
+  }
+  // Fallback sin datos de eBay
+  var defaults = {1:'9.99',2:'16.99',3:'22.99',4:'27.99',5:'32.99',
+                  6:'36.99',8:'46.99',10:'54.99',12:'62.99'};
+  return defaults[packs] || '29.99';
 }
 
 // Pack optimizer
@@ -2482,34 +2504,86 @@ async function analyze(upc){
       }
     }
 
-    // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
-    // Recalcular aquí en scope local de analyze()
+    // ── LÓGICA DE PACKS — Fórmula DWI/Savvy ─────────────────
+    // Costo asumido por unidad: $2.00 (precio máximo pagado en tráiler)
+    // Envío: $10 (First Class default)
+    // Handling: $1
+    // Fees eBay: 13%
+    // Ganancia mínima: $10
+    // Fórmula: precio_venta = (costo_prod + envio + handling + ganancia) / (1 - 0.13)
+    // Pack mínimo viable = pack donde precio_venta <= precio_ebay * pack
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
     const _mBase    = _low || _soldAvg || _avg || 0;
     const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
-    const _MIN      = 15;
-    let   _optPack  = 1;
+
+    const COSTO_UNIT   = 2.00;   // costo máximo por unidad
+    const ENVIO        = 10.00;  // First Class
+    const HANDLING     = 1.00;
+    const EBAY_FEE     = 0.13;   // 13%
+    const GANANCIA_MIN = 10.00;
+    const PACKS_LIST   = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+
+    function calcMinSalePrice(n) {
+      // Precio mínimo de venta para ganar $10 con n unidades
+      var costo = (COSTO_UNIT * n) + ENVIO + HANDLING + GANANCIA_MIN;
+      return costo / (1 - EBAY_FEE);
+    }
+
+    let _optPack = null;
+    let _bPrice  = 0;
+    let _viable  = false;
+
     if (_mBase > 0) {
-      for (let p = 1; p <= 12; p++) {
-        if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
+      // Buscar el pack más pequeño donde el precio de venta necesario
+      // es menor o igual a lo que ya se vende en eBay (competitivo)
+      for (let i = 0; i < PACKS_LIST.length; i++) {
+        const n = PACKS_LIST[i];
+        const minVenta = calcMinSalePrice(n);
+        const ebayPack = _mBase * n; // lo que costaría ese pack en eBay
+        if (minVenta <= ebayPack) {
+          _optPack = n;
+          // Precio de venta = 5% por debajo del eBay equivalente (para ser competitivo)
+          _bPrice  = (ebayPack * 0.95).toFixed(2);
+          _viable  = true;
+          break;
+        }
+      }
+      // Si ningún pack alcanza, calcular cuánto ganaría con pack de 12
+      if (!_viable) {
+        _optPack = 12;
+        _bPrice  = (_mBase * 12 * 0.95).toFixed(2);
+        const minVenta12 = calcMinSalePrice(12);
+        _viable  = parseFloat(_bPrice) >= minVenta12;
       }
     }
-    const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
-    const _viable   = parseFloat(_bPrice) >= _MIN;
+
+    // Calcular ganancia real con el pack elegido
+    function calcGananciaReal(n, precioVenta) {
+      var ingreso = parseFloat(precioVenta);
+      var costo   = (COSTO_UNIT * n) + ENVIO + HANDLING;
+      var fees    = ingreso * EBAY_FEE;
+      return (ingreso - costo - fees).toFixed(2);
+    }
 
     if (ebay.found && _mBase > 0) {
       if (_viable) {
+        const _ganancia = calcGananciaReal(_optPack, _bPrice);
         res.verdict  = 'SAVVY';
         res.price    = _bPrice;
         res.packSize = _optPack;
-        res.reason   = _soldCnt > 0
-          ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
-          : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
+        res.reason   = `eBay precio unitario $${_mBase.toFixed(2)}. `
+          + `Pack de ${_optPack} → vender a $${_bPrice} → ganancia ~$${_ganancia}. `
+          + (_soldCnt > 0 ? `${_soldCnt} ventas en 90 días.` : 'Sin ventas registradas — monitorear.');
       } else {
+        const maxPack = 12;
+        const minVentaMax = calcMinSalePrice(maxPack).toFixed(2);
+        const ebayMax = (_mBase * maxPack).toFixed(2);
         res.verdict = 'DWI';
-        res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
+        res.reason  = `eBay precio unitario $${_mBase.toFixed(2)}. `
+          + `Pack de 12 en eBay = $${ebayMax} pero necesitas vender a $${minVentaMax} para ganar $10. `
+          + `No es rentable.`;
       }
     } else if (!ebay.found || _mBase === 0) {
       res.verdict = 'DWI';
