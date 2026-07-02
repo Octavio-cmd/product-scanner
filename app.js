@@ -579,12 +579,14 @@ async function startCam(){
   screen('cam');
   savvyStopScan('qr-video');
   savvyStartScan('qr-video', async txt => {
-    analyze(txt.replace(/\D/g,''));
+    savvyStopScan('qr-video');
+    screen('res');
+    pgLookupUPC(txt.replace(/\D/g,''));
   });
 }
 async function stopCam(){
   savvyStopScan('qr-video');
-  screen('idle');
+  screen('res');
 }
 
 
@@ -2106,10 +2108,14 @@ function clearBulkSession() {
 }
 
 function scanAnother() {
-  const upcInput = document.getElementById('upcIn');
-  if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
+  var upcInput = document.getElementById('upcIn');
+  if (upcInput) { upcInput.value = ''; setTimeout(function(){upcInput.focus();}, 100); }
   _lastBundleUrl = '';
-  screen('idle');
+  var rb = $('resBody');
+  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
+  var bsr = $('ps-barcode-result');
+  if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
+  screen('res');
 }
 
 function renderBulk(){
@@ -2746,7 +2752,58 @@ function toDash() {
 
 function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  $('scr-idle').classList.add('on');
+  var resScr = $('scr-res');
+  if (resScr) resScr.classList.add('on');
+  var rb = $('resBody');
+  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
+  var bsr = $('ps-barcode-result');
+  if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
+  var upcIn = $('upcIn');
+  if (upcIn) upcIn.value = '';
+}
+
+async function pgLookupUPC(upc) {
+  if (!upc || upc.length < 8) return;
+  var resultDiv = $('ps-barcode-result');
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span style="color:var(--mu)">🔍 Searching eBay for ' + upc + '...</span>';
+  }
+  try {
+    var RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+    var res = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    if (!data.data || (!data.data.name && !data.data.brand)) {
+      if (resultDiv) resultDiv.innerHTML = '⚠️ Not found. Searching eBay catalog...';
+      analyze(upc);
+      return;
+    }
+    var p = data.data;
+    var itemPrice = p.ebay_price || 0;
+    var shipping = p.ebay_shipping || 0;
+    var total = p.ebay_total || itemPrice;
+    var brand = (p.brand || '').trim();
+    if (!brand || brand === 'Unknown') {
+      brand = (p.name || '').split(/\s+/)[0] || 'Unknown';
+    }
+    brand = brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase();
+    var ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(upc) + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
+    if (resultDiv) {
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = '<div style="color:#00e676;font-weight:700;margin-bottom:4px">✅ Found! ' + (p.data_source || 'eBay') + '</div>'
+        + '<div>🏷️ <strong>Brand:</strong> ' + brand + '</div>'
+        + '<div style="margin:3px 0">📦 ' + (p.name || '').substring(0, 70) + '</div>'
+        + (total > 0
+          ? '<div>💰 $' + itemPrice.toFixed(2) + ' + envío $' + shipping.toFixed(2) + ' = <strong style="color:#00e676">$' + total.toFixed(2) + ' total</strong></div>'
+          : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
+        + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
+    }
+    analyze(upc);
+  } catch(e) {
+    if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
+    analyze(upc);
+  }
 }
 
 function openClothing() {
