@@ -556,24 +556,37 @@
 </div>
 
 <div class="scr" id="scr-res">
-  <!-- ── SCANNER INTEGRADO ─────────────────────────────────── -->
+  <!-- ── SCANNER INTEGRADO (idéntico a Clothing & Shoes) ───── -->
   <div id="ps-scanner-block" style="margin-bottom:12px">
     <div style="background:var(--sf);border:1.5px solid var(--ac);border-radius:14px;padding:14px 14px 10px">
       <div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.08em;margin-bottom:8px">📷 SCAN BARCODE — AUTO-FILL FROM eBay</div>
+
+      <div id="ps-barcode-result" style="display:none;margin-bottom:8px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
+
       <button id="camBtn"
         ontouchend="event.preventDefault();startCam();"
         onclick="startCam();"
         style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
         📷 Scan Barcode
       </button>
-      <div style="display:flex;gap:8px;align-items:center">
+
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <input id="upcIn" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
           style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:15px;outline:none"
-          onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);}">
-        <button id="srchBtn"
-          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);else{var el=document.getElementById('upcIn');el.style.border='1.5px solid #e74c3c';setTimeout(function(){el.style.border='1px solid var(--bd)';},1200);}})();"
-          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);else{var el=document.getElementById('upcIn');el.style.border='1.5px solid #e74c3c';setTimeout(function(){el.style.border='1px solid var(--bd)';},1200);}})();"
+          onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);}">
+        <button
+          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);})();"
+          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);})();"
           style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 16px;color:var(--tx);font-size:20px;cursor:pointer;flex-shrink:0">🔍</button>
+      </div>
+
+      <div style="display:flex;gap:8px;align-items:center">
+        <input id="ps-ebay-url" type="text" placeholder="OR paste eBay listing URL..."
+          style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:13px;outline:none">
+        <button
+          ontouchend="event.preventDefault();clLookupEbayURL(document.getElementById('ps-ebay-url').value);"
+          onclick="clLookupEbayURL(document.getElementById('ps-ebay-url').value);"
+          style="padding:11px 14px;background:linear-gradient(135deg,#0064d2,#004b9f);border:none;border-radius:10px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap">eBay 🛒</button>
       </div>
     </div>
   </div>
@@ -1284,7 +1297,7 @@ async function startCam(){
   savvyStartScan('qr-video', async txt => {
     savvyStopScan('qr-video');
     screen('res');
-    analyze(txt.replace(/\D/g,''));
+    pgLookupUPC(txt.replace(/\D/g,''));
   });
 }
 async function stopCam(){
@@ -2315,6 +2328,53 @@ function fallback(upc,prod,ebay){
 }
 
 // Main
+// ── pgLookupUPC: busca por UPC en Railway /search-upc y muestra resultado rápido ──
+async function pgLookupUPC(upc) {
+  if (!upc || upc.length < 8) { return; }
+  var resultDiv = document.getElementById('ps-barcode-result');
+  if (resultDiv) {
+    resultDiv.style.display = 'block';
+    resultDiv.innerHTML = '<span style="color:var(--mu)">🔍 Searching eBay for ' + upc + '...</span>';
+  }
+  try {
+    var RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+    var res = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    var data = await res.json();
+    if (!data.data || (!data.data.name && !data.data.brand)) {
+      if (resultDiv) resultDiv.innerHTML = '⚠️ Not found. Searching eBay catalog...';
+      analyze(upc);
+      return;
+    }
+    var p = data.data;
+    var itemPrice = p.ebay_price || 0;
+    var shipping = p.ebay_shipping || 0;
+    var total = p.ebay_total || itemPrice;
+    // Extraer marca del nombre si no viene
+    var brand = (p.brand || '').trim();
+    if (!brand || brand === 'Unknown') {
+      brand = (p.name || '').split(/\s+/)[0] || 'Unknown';
+    }
+    brand = brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase();
+    var ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(upc) + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
+    if (resultDiv) {
+      resultDiv.style.display = 'block';
+      resultDiv.innerHTML = '<div style="color:#00e676;font-weight:700;margin-bottom:4px">✅ Found! ' + (p.data_source || 'eBay') + '</div>'
+        + '<div>🏷️ <strong>Brand:</strong> ' + brand + '</div>'
+        + '<div style="margin:3px 0">📦 ' + (p.name || '').substring(0, 70) + '</div>'
+        + (total > 0
+          ? '<div>💰 $' + itemPrice.toFixed(2) + ' + envío $' + shipping.toFixed(2) + ' = <strong style="color:#00e676">$' + total.toFixed(2) + ' total</strong></div>'
+          : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
+        + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
+    }
+    // Llamar a analyze para el flujo completo (Claude + packs + bundle)
+    analyze(upc);
+  } catch(e) {
+    if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
+    analyze(upc);
+  }
+}
+
 async function analyze(upc){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
