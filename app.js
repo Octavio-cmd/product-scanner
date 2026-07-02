@@ -1613,9 +1613,10 @@ function fallback(upc,prod,ebay){
 }
 
 // Main
-async function analyze(upc){
+async function analyze(upc, railwayPriceHint){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
+  railwayPriceHint = parseFloat(railwayPriceHint) || 0;
   screen('load');$('lp').textContent='UPC: '+upc;
 
   let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
@@ -1699,6 +1700,13 @@ async function analyze(upc){
 
     step='claude';
     stat('Analyzing with Claude...');
+    // Si tenemos precio de Railway y el Worker no devolvió precios, usarlo
+    if (railwayPriceHint > 0 && !ebay.prices?.low && !ebay.prices?.avg) {
+      if (!ebay.prices) ebay.prices = {};
+      ebay.prices.low = railwayPriceHint;
+      ebay.prices.avg = railwayPriceHint;
+      ebay.found = true;
+    }
     res=await callClaude(upc,prod,ebay);
 
     step='render';
@@ -1725,7 +1733,8 @@ async function analyze(upc){
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
-    const _mBase    = _low || _soldAvg || _avg || 0;
+    // Si el Worker no devolvió precios, usar el precio de Railway como referencia
+    const _mBase    = _low || _soldAvg || _avg || railwayPriceHint || 0;
     const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
 
     const COSTO_UNIT   = 2.00;
@@ -2834,7 +2843,9 @@ async function pgLookupUPC(upc) {
           : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
         + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
     }
-    analyze(upc);
+    // Pasar precio de Railway a analyze() para que lo use en SAVVY/DWI y título
+    var railwayPriceHint = total > 0 ? total : itemPrice;
+    analyze(upc, railwayPriceHint);
   } catch(e) {
     if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
     analyze(upc);
