@@ -3526,7 +3526,10 @@ function openScanner() {
   // Limpiar resultado anterior
   var rb = $('resBody'); if (rb) rb.innerHTML = '';
   var sr = $('ps-scan-result'); if (sr) { sr.style.display='none'; sr.innerHTML=''; }
+  var bsr = $('ps-barcode-result'); if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
   var upcIn = $('upcIn'); if (upcIn) upcIn.value = '';
+  // Abrir cámara automáticamente al entrar al módulo
+  setTimeout(function() { startCam(); }, 200);
 }
 
 function openClothing() {
