@@ -560,14 +560,21 @@
   <div id="ps-scanner-block" style="margin-bottom:12px">
     <div style="background:var(--sf);border:1.5px solid var(--ac);border-radius:14px;padding:14px 14px 10px">
       <div style="font-size:11px;font-weight:700;color:var(--ac);letter-spacing:.08em;margin-bottom:8px">📷 SCAN BARCODE — AUTO-FILL FROM eBay</div>
-      <button id="camBtn" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
+      <button id="camBtn"
+        ontouchend="event.preventDefault();startCam();"
+        onclick="startCam();"
+        style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
         📷 Scan Barcode
       </button>
       <div style="display:flex;gap:8px;align-items:center">
-        <input id="upcIn" class="ui" type="text" inputmode="numeric" placeholder="Or type UPC manually..." style="flex:1;margin:0">
-        <button id="srchBtn" style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 14px;color:var(--tx);font-size:20px;cursor:pointer">🔍</button>
+        <input id="upcIn" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
+          style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:15px;outline:none"
+          onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);}">
+        <button id="srchBtn"
+          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);else{var el=document.getElementById('upcIn');el.style.border='1.5px solid #e74c3c';setTimeout(function(){el.style.border='1px solid var(--bd)';},1200);}})();"
+          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\\D/g,'');if(v.length>=8)analyze(v);else{var el=document.getElementById('upcIn');el.style.border='1.5px solid #e74c3c';setTimeout(function(){el.style.border='1px solid var(--bd)';},1200);}})();"
+          style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 16px;color:var(--tx);font-size:20px;cursor:pointer;flex-shrink:0">🔍</button>
       </div>
-      <div id="ps-scan-result" style="display:none;margin-top:10px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
     </div>
   </div>
   <!-- ── RESULTADO DEL PRODUCTO ─────────────────────────────── -->
@@ -3133,20 +3140,12 @@ document.addEventListener('DOMContentLoaded',()=>{
   cfgBtn.addEventListener('click',openCfgWithPin);
   $('cfgX').addEventListener('click',closeCfg);
 
-  const camBtn=$('camBtn');
-  camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
-  camBtn.addEventListener('click',startCam);
+  // camBtn y srchBtn usan onclick directo en HTML (más confiable en iOS Safari)
+  // Ver atributos ontouchend/onclick en el HTML de scr-res
+
   const stopBtn=$('camStop');
   stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
   stopBtn.addEventListener('click',stopCam);
-
-  const ui=$('upcIn'),sb=$('srchBtn');
-  function chk(){sb.classList.toggle('on',ui.value.trim().replace(/\D/g,'').length>=8);}
-  ui.addEventListener('input',chk);ui.addEventListener('change',chk);ui.addEventListener('paste',()=>setTimeout(chk,50));
-  function doSearch(){const v=ui.value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);}
-  sb.addEventListener('touchend',e=>{e.preventDefault();doSearch();});
-  sb.addEventListener('click',doSearch);
-  ui.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
 
   function openBulk(){renderBulk();$('bulkOv').classList.add('on');}
   $('fab').addEventListener('touchend',e=>{e.preventDefault();openBulk();});
