@@ -2887,8 +2887,8 @@ function scanAnother() {
   var upcInput = $('upcIn');
   if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
   _lastBundleUrl = '';
-  var rb = $('resBody'); if (rb) rb.innerHTML = '';
-  var sr = $('ps-scan-result'); if (sr) { sr.style.display='none'; sr.innerHTML=''; }
+  var rb = $('resBody'); if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
+  var bsr = $('ps-barcode-result'); if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
   screen('res');
 }
 
@@ -3524,12 +3524,9 @@ function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
   $('scr-res').classList.add('on');
   // Limpiar resultado anterior
-  var rb = $('resBody'); if (rb) rb.innerHTML = '';
-  var sr = $('ps-scan-result'); if (sr) { sr.style.display='none'; sr.innerHTML=''; }
+  var rb = $('resBody'); if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
   var bsr = $('ps-barcode-result'); if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
   var upcIn = $('upcIn'); if (upcIn) upcIn.value = '';
-  // Abrir cámara automáticamente al entrar al módulo
-  setTimeout(function() { startCam(); }, 200);
 }
 
 function openClothing() {
