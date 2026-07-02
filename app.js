@@ -1525,9 +1525,10 @@ DATOS DEL PRODUCTO:
 REGLAS DE DECISIÓN SAVVY vs DWI (aplica EN ESTE ORDEN):
 1. Si NO está en eBay o no tiene precio → DWI (no podemos saber si vende)
 2. Si está en eBay pero tiene 0 ventas en 90 días → DWI (no se vende)
-3. Si el bundle de ${optimalPack} unidad(es) a $${bundlePrice} es MENOR a $${MIN_BUNDLE} → DWI (no cubre envío+fees)
-4. Si tiene ventas Y el bundle es viable (≥$${MIN_BUNDLE}) → SAVVY
-5. Si el precio unitario ya es ≥$${MIN_BUNDLE} → SAVVY con pack de 1 o 2
+3. FÓRMULA DE RENTABILIDAD: precio_minimo_venta = ($2×N + $10_envio + $1_handling + $10_ganancia) / 0.87
+   Si el bundle de ${optimalPack} unidades a $${bundlePrice} NO cubre ese mínimo → DWI
+4. Si el bundle de ${optimalPack} unidades a $${bundlePrice} SÍ cubre el mínimo Y tiene ventas → SAVVY
+5. Si el precio unitario en eBay × pack ya supera el mínimo → SAVVY
 
 PACK SIZE RECOMENDADO: ${optimalPack} unidades a $${bundlePrice} precio total
 (Este es el pack mínimo para ser rentable. Puedes sugerir un pack mayor si tiene muchas ventas)
@@ -1553,8 +1554,8 @@ Responde ÚNICAMENTE con este JSON (sin markdown, sin explicación):
 {"verdict":"SAVVY o DWI","reason":"1 oración en español explicando el veredicto con el dato clave de eBay","title":"título eBay MAX 80 chars","price":${bundlePrice||'NUMERO_precio'},"packSize":${optimalPack},"category":"ID_categoria_ebay","categoryName":"nombre categoría","description":"Bundle of [N] [product name]. [key benefit/use]. Brand new, factory sealed. Fast shipping from North Carolina.","brand":"marca exacta"}
 
 CRITERIO SAVVY vs DWI:
-- SAVVY: producto conocido con demanda real, precio eBay > $5 unidad, categoría con rotación
-- DWI: precio eBay < $3 unidad, sin demanda, producto no identificado, o artículo restringido
+- SAVVY: precio eBay unitario permite cubrir $2 costo + $10 envío + $1 handling + $10 ganancia mínima con el pack recomendado
+- DWI: precio demasiado bajo para ser rentable aunque hagas pack de 12, o sin demanda en eBay
 
 REGLA CRÍTICA DEL TÍTULO: NUNCA incluyas el UPC, código de barras, o frases como "2-Pack Bundle UPC 12345". El título DEBE empezar con la BRAND seguida del NOMBRE del producto.
 Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no hay datos eBay, usa estimado conservador por categoría.`;
@@ -1719,34 +1720,68 @@ async function analyze(upc){
       }
     }
 
-    // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
-    // Recalcular aquí en scope local de analyze()
+    // ── LÓGICA SAVVY/DWI — Fórmula DWI/Savvy ─────────────────
+    // Costo por unidad: $2.00 | Envío: $10 | Handling: $1 | Fees eBay: 13% | Ganancia mínima: $10
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
     const _mBase    = _low || _soldAvg || _avg || 0;
     const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
-    const _MIN      = 15;
-    let   _optPack  = 1;
+
+    const COSTO_UNIT   = 2.00;
+    const ENVIO        = 10.00;
+    const HANDLING     = 1.00;
+    const EBAY_FEE     = 0.13;
+    const GANANCIA_MIN = 10.00;
+    const PACKS_LIST   = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+
+    function calcMinSalePrice(n) {
+      return ((COSTO_UNIT * n) + ENVIO + HANDLING + GANANCIA_MIN) / (1 - EBAY_FEE);
+    }
+
+    let _optPack = null;
+    let _bPrice  = 0;
+    let _viable  = false;
+
     if (_mBase > 0) {
-      for (let p = 1; p <= 12; p++) {
-        if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
+      for (let i = 0; i < PACKS_LIST.length; i++) {
+        const n = PACKS_LIST[i];
+        const minVenta = calcMinSalePrice(n);
+        const ebayPack = _mBase * n;
+        if (minVenta <= ebayPack) {
+          _optPack = n;
+          _bPrice  = (ebayPack * 0.95).toFixed(2);
+          _viable  = true;
+          break;
+        }
+      }
+      if (!_viable) {
+        _optPack = 12;
+        _bPrice  = (_mBase * 12 * 0.95).toFixed(2);
+        _viable  = parseFloat(_bPrice) >= calcMinSalePrice(12);
       }
     }
-    const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
-    const _viable   = parseFloat(_bPrice) >= _MIN;
+
+    function calcGananciaReal(n, precioVenta) {
+      var ingreso = parseFloat(precioVenta);
+      var costo   = (COSTO_UNIT * n) + ENVIO + HANDLING;
+      var fees    = ingreso * EBAY_FEE;
+      return (ingreso - costo - fees).toFixed(2);
+    }
 
     if (ebay.found && _mBase > 0) {
       if (_viable) {
+        const _ganancia = calcGananciaReal(_optPack, _bPrice);
         res.verdict  = 'SAVVY';
         res.price    = _bPrice;
         res.packSize = _optPack;
-        res.reason   = _soldCnt > 0
-          ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
-          : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
+        res.reason   = `eBay precio unitario $${_mBase.toFixed(2)}. Pack de ${_optPack} → vender a $${_bPrice} → ganancia ~$${_ganancia}.`
+          + (_soldCnt > 0 ? ` ${_soldCnt} ventas en 90 días.` : ' Sin ventas registradas — monitorear.');
       } else {
+        const minVenta12 = calcMinSalePrice(12).toFixed(2);
+        const ebayMax    = (_mBase * 12 * 0.95).toFixed(2);
         res.verdict = 'DWI';
-        res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
+        res.reason  = `eBay precio unitario $${_mBase.toFixed(2)}. Pack de 12 = $${ebayMax} pero necesitas $${minVenta12} para ganar $10. No es rentable.`;
       }
     } else if (!ebay.found || _mBase === 0) {
       res.verdict = 'DWI';
