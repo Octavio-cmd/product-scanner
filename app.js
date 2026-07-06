@@ -1443,24 +1443,19 @@ function renderPackTable(ebayLow){
 function buildSmartTitle(prod, packs) {
   packs = packs || 2;
   if (!prod || (!prod.name && !prod.brand)) return '';
-  const SKIP_WORDS = new Set(['the','a','an','by','for','with','and','or','of','from','in','on','at','to','new','brand','unknown','generic','2pk','2pk-','1pk','3pk','4pk']);
+  const SKIP_WORDS = new Set(['the','a','an','by','for','with','and','or','of','from','in','on','at','to','new','brand','unknown','generic','2pk','2pk-','1pk','3pk','4pk','gen']);
   let brand = (prod.brand || '').trim();
-  const name  = (prod.name  || '').trim();
-  // If brand is a skip word or too short, try to extract from name
+  const name = (prod.name || '').trim();
+  // If brand is a skip word or too short, extract first meaningful word from name
   if (!brand || SKIP_WORDS.has(brand.toLowerCase()) || brand.length <= 2) {
     const words = name.split(/\s+/);
-    for (var i = 0; i < Math.min(3, words.length); i++) {
+    for (var i = 0; i < Math.min(4, words.length); i++) {
       var w = words[i].replace(/[^a-zA-Z0-9]/g, '');
-      if (w.length > 2 && !SKIP_WORDS.has(w.toLowerCase()) && !/^\d/.test(w)) {
-        brand = words[i]; break;
-      }
+      if (w.length > 2 && !SKIP_WORDS.has(w.toLowerCase()) && !/^\d/.test(w)) { brand = words[i]; break; }
     }
   }
-  // Remove brand from start of name to avoid "Neutrogena Neutrogena..."
   const cleanName = (brand && name.toLowerCase().startsWith(brand.toLowerCase()))
-    ? name.substring(brand.length).trim()
-    : name;
-  // Extract size/count if present
+    ? name.substring(brand.length).trim() : name;
   const sizeMatch = cleanName.match(/\b(\d+\.?\d*\s*(?:oz|fl oz|ct|count|ml|l|lb|lbs|mg|g|kg|pack|pc|pcs|pieces?))\b/i);
   const sizeStr   = sizeMatch ? sizeMatch[0] : '';
   const nameNoSize = sizeStr ? cleanName.replace(sizeStr, '').replace(/\s{2,}/g,' ').trim() : cleanName;
@@ -1606,27 +1601,25 @@ function fallback(upc,prod,ebay){
   const found=prod&&prod.found;
   const packs=2;
   const cid=catId((prod&&prod.name)||'');
-  const SKIP_BRANDS_FB = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','']);
-  // Fix brand
+  const SKIP_FB = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
   let brand=(prod&&prod.brand)||'';
-  if(!brand || SKIP_BRANDS_FB.has(brand.toLowerCase())) {
+  if(!brand || SKIP_FB.has(brand.toLowerCase())) {
     const nm=(prod&&prod.name)||'';
     const words=nm.split(/\s+/);
-    for(var i=0;i<Math.min(3,words.length);i++){
+    for(var i=0;i<Math.min(4,words.length);i++){
       var w=words[i].replace(/[^a-zA-Z0-9]/g,'');
-      if(w.length>2 && !SKIP_BRANDS_FB.has(w.toLowerCase()) && !/^\d/.test(w)){brand=words[i];break;}
+      if(w.length>2&&!SKIP_FB.has(w.toLowerCase())&&!/^\d/.test(w)){brand=words[i];break;}
     }
   }
-  // Build title — never expose UPC, never use error messages
   let title='';
   if(found) title=buildSmartTitle(prod,packs);
-  if(!title && ebay&&ebay.topTitles&&ebay.topTitles[0]){
+  if(!title&&ebay&&ebay.topTitles&&ebay.topTitles[0]){
     const t=ebay.topTitles[0];
     title=String(typeof t==='object'?t.title:t).substring(0,80);
   }
-  if(!title || title.includes(upc) || /unable|unavailable|error|no data|not found|unknown product/i.test(title)){
+  if(!title||title.includes(upc)||/unable|unavailable|error|no data|not found|unknown product/i.test(title)){
     const nm=(prod&&prod.name)||'';
-    title = nm ? buildSmartTitle(prod,packs) : (brand ? brand+' New Product Pack of '+packs+' New' : 'New Product Pack of '+packs+' New');
+    title=nm?buildSmartTitle(prod,packs):(brand&&brand!=='GEN'?brand+' New Product Pack of '+packs+' New':'New Product Pack of '+packs+' New');
   }
   return{verdict:found||(avg>3)?'SAVVY':'DWI',
     reason:found?'Estimado sin API':'No data suficientes',
@@ -1637,12 +1630,13 @@ function fallback(upc,prod,ebay){
 }
 
 // Main
-async function analyze(upc, railwayPriceHint, railwayName, railwayBrand){
+async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railwaySellersCount){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
-  railwayPriceHint = parseFloat(railwayPriceHint) || 0;
-  railwayName  = String(railwayName  || '').trim();
-  railwayBrand = String(railwayBrand || '').trim();
+  railwayPriceHint   = parseFloat(railwayPriceHint)   || 0;
+  railwayName        = String(railwayName        || '').trim();
+  railwayBrand       = String(railwayBrand       || '').trim();
+  railwaySellersCount= parseInt(railwaySellersCount)   || 0;
   screen('load');$('lp').textContent='UPC: '+upc;
 
   let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
@@ -1713,27 +1707,21 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand){
     // Map ebayFull to legacy ebay format expected by callClaude
     ebay = {
       found:          ebayFull.found,
-      activeListings: ebayFull.activeListings || 0,
+      activeListings: ebayFull.activeListings || railwaySellersCount || 0,
       soldCount:      ebayFull.soldCount || 0,
       cheapestPrice:  ebayFull.cheapestPrice || 0,
       cheapestTitle:  ebayFull.cheapestTitle || '',
-      prices:         ebayFull.prices || null,
+      prices:         ebayFull.prices || (railwayPriceHint > 0 ? {low: railwayPriceHint, avg: railwayPriceHint, high: railwayPriceHint} : null),
       topTitles:      ebayFull.topTitles || [],
       pricing:        ebayFull.pricing || {},
       category:       ebayFull.category || null,
-      priceSource:    ebayFull.priceSource || 'keyword', // 'gtin_exact' = most accurate
+      priceSource:    ebayFull.priceSource || 'keyword',
     };
 
     // ── Inject Railway product data when eBay catalog found nothing ──
-    const SKIP_BRANDS = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','']);
-    if (railwayName && (!prod.found || !prod.name)) {
-      prod.name  = railwayName;
-      prod.found = true;
-    }
-    if (railwayBrand && (!prod.brand || SKIP_BRANDS.has(prod.brand.toLowerCase()))) {
-      prod.brand = railwayBrand;
-    }
-    // Also mark ebay.found so SAVVY/DWI logic runs
+    const SKIP_INJ = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
+    if (railwayName && (!prod.found || !prod.name)) { prod.name = railwayName; prod.found = true; }
+    if (railwayBrand && (!prod.brand || SKIP_INJ.has(prod.brand.toLowerCase()))) prod.brand = railwayBrand;
     if (railwayPriceHint > 0 && !ebay.found) ebay.found = true;
 
     step='claude';
@@ -1741,11 +1729,9 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand){
     res=await callClaude(upc,prod,ebay);
 
     step='render';
-    const SKIP_BRANDS_POST = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','']);
-    if(!res.brand||SKIP_BRANDS_POST.has(res.brand.toLowerCase().trim())){
+    const SKIP_POST = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
+    if(!res.brand||SKIP_POST.has(res.brand.toLowerCase().trim()))
       res.brand = prod.brand || railwayBrand || '';
-    }
-    // Sanitize title: reject if contains UPC, error message, or is too short
     var BAD_TITLE = !res.title || res.title.length < 8
       || res.title.includes(upc)
       || /unable|unavailable|error|no data|not found|product data|unknown product/i.test(res.title)
@@ -1812,7 +1798,7 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand){
       return (ingreso - costo - fees).toFixed(2);
     }
 
-    if (ebay.found && _mBase > 0) {
+    if ((ebay.found || railwayPriceHint > 0) && _mBase > 0) {
       if (_viable) {
         const _ganancia = calcGananciaReal(_optPack, _bPrice);
         res.verdict  = 'SAVVY';
@@ -2125,63 +2111,86 @@ function renderResult(r){
 
   // ── 6. EBAY MARKET DATA ──────────────────────────────────────
   (function(){
-    var sold     = ebay.pricing && ebay.pricing.sold;
-    var soldCnt  = (sold && sold.count) || ebay.soldCount || 0;
-    var soldAvg  = (sold && (sold.avg || sold.median)) || 0;
-    var soldLow  = (sold && sold.low) || 0;
-    var actHigh  = (ebay.prices && ebay.prices.high) || 0;
-    var hasData  = ebay.activeListings > 0 || low > 0 || avg > 0 || soldCnt > 0;
+    var sold      = ebay.pricing && ebay.pricing.sold;
+    var soldCnt   = (sold && sold.count) || ebay.soldCount || 0;
+    var soldAvg   = (sold && (sold.avg || sold.median)) || 0;
+    var soldLow   = (sold && sold.low) || 0;
+    var actHigh   = (ebay.prices && ebay.prices.high) || 0;
+    var sellers   = ebay.activeListings || 0;
+    var hasData   = sellers > 0 || low > 0 || avg > 0 || soldCnt > 0;
     if (!hasData) return;
-    var demandColor = '#888', demandLabel = '— Sin datos';
+
+    // Competition signal
+    var compColor = '#00e676', compLabel = '✅ Poca competencia';
+    if (sellers >= 20)     { compColor = '#e74c3c'; compLabel = '⚠️ Alta competencia'; }
+    else if (sellers >= 8) { compColor = '#ffab00'; compLabel = '⚡ Competencia media'; }
+
+    // Demand signal
+    var demandColor = '#888', demandLabel = '— Sin datos de ventas';
     if (soldCnt >= 50)      { demandColor = '#00e676'; demandLabel = '🔥 Alta demanda'; }
     else if (soldCnt >= 15) { demandColor = '#ffab00'; demandLabel = '📈 Demanda media'; }
     else if (soldCnt >= 1)  { demandColor = '#ff9800'; demandLabel = '📉 Demanda baja'; }
-    else if (ebay.activeListings > 0) { demandColor = '#888'; demandLabel = '👀 Sin ventas registradas'; }
-    var compColor = '#00e676', compLabel = '✅ Poca competencia';
-    if (ebay.activeListings >= 20)     { compColor = '#e74c3c'; compLabel = '⚠️ Alta competencia'; }
-    else if (ebay.activeListings >= 8) { compColor = '#ffab00'; compLabel = '⚡ Competencia media'; }
+
     var rows = '';
-    if (ebay.activeListings > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+
+    // Vendedores activos
+    if (sellers > 0) {
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
         <span style="color:var(--mu);font-size:12px">🏪 Vendedores activos</span>
-        <span style="font-weight:700;font-size:14px">${ebay.activeListings} <span style="font-size:11px;color:${compColor}">${compLabel}</span></span>
+        <span style="font-weight:700;font-size:14px">${sellers} <span style="font-size:11px;font-weight:400;color:${compColor}">${compLabel}</span></span>
       </div>`;
     }
+
+    // Precio activo BIN
     if (low > 0 || avg > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
-        <span style="color:var(--mu);font-size:12px">💲 Rango activo (BIN)</span>
-        <span style="font-size:13px"><strong style="color:#00e676">${fmt(low)}</strong>${actHigh>0?' – '+fmt(actHigh):''} <span style="color:var(--mu);font-size:11px">avg ${fmt(avg)}</span></span>
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+        <span style="color:var(--mu);font-size:12px">💲 Precio activo (BIN)</span>
+        <span style="font-size:13px">
+          <strong style="color:#00e676">${fmt(low)}</strong>
+          ${actHigh > 0 && actHigh !== low ? ' – ' + fmt(actHigh) : ''}
+          ${avg > 0 ? '<span style="color:var(--mu);font-size:11px"> avg ' + fmt(avg) + '</span>' : ''}
+        </span>
       </div>`;
     }
+
+    // Vendidos 90 días
     if (soldCnt > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
         <span style="color:var(--mu);font-size:12px">✅ Vendidos (90 días)</span>
         <span style="font-weight:700;font-size:14px;color:${demandColor}">${soldCnt} uds</span>
       </div>`;
     }
+
+    // Precio vendido avg
     if (soldAvg > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
         <span style="color:var(--mu);font-size:12px">💵 Precio vendido avg</span>
         <span style="font-weight:700;font-size:14px">${fmt(soldAvg)}</span>
       </div>`;
     }
+
+    // Precio vendido mínimo
     if (soldLow > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
         <span style="color:var(--mu);font-size:12px">📉 Precio vendido mínimo</span>
         <span style="font-size:13px">${fmt(soldLow)}</span>
       </div>`;
     }
-    if (soldCnt > 0 || ebay.activeListings > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0">
+
+    // Señal de demanda
+    if (soldCnt > 0) {
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
         <span style="color:var(--mu);font-size:12px">📊 Señal de mercado</span>
         <span style="font-weight:700;font-size:13px;color:${demandColor}">${demandLabel}</span>
       </div>`;
     }
+
     var srcNote = src !== 'gtin_exact'
-      ? `<div style="margin-top:8px;background:rgba(255,171,0,.1);border-radius:8px;padding:7px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay</div>`
-      : '';
+      ? `<div style="margin-top:8px;background:rgba(255,171,0,.1);border-radius:8px;padding:7px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay antes de listar</div>`
+      : `<div style="margin-top:8px;background:rgba(0,230,118,.08);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--sv)">✅ UPC exacto — datos confiables</div>`;
+
     h += `<div class="card" style="border-left:3px solid #0064d2">
-      <div class="lbl" style="color:#0064d2;margin-bottom:4px">📊 MERCADO eBay</div>
+      <div class="lbl" style="color:#0064d2;margin-bottom:2px">📊 MERCADO eBay</div>
       ${rows}${srcNote}
     </div>`;
   }());
@@ -2908,12 +2917,20 @@ async function pgLookupUPC(upc) {
       return;
     }
     var p = data.data;
-    var itemPrice = p.ebay_price || 0;
-    var shipping = p.ebay_shipping || 0;
-    var total = p.ebay_total || itemPrice;
+    var itemPrice    = p.ebay_price || 0;
+    var shipping     = p.ebay_shipping || 0;
+    var total        = p.ebay_total || itemPrice;
+    var sellersCount = p.sellers_count || 0;
+    var SKIP_BR = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','by','new','for','with','']);
     var brand = (p.brand || '').trim();
-    if (!brand || brand === 'Unknown') {
-      brand = (p.name || '').split(/\s+/)[0] || 'Unknown';
+    if (!brand || SKIP_BR.has(brand.toLowerCase())) {
+      var nameWords = (p.name || '').split(/\s+/);
+      brand = '';
+      for (var wi = 0; wi < Math.min(4, nameWords.length); wi++) {
+        var ww = nameWords[wi].replace(/[^a-zA-Z0-9]/g, '');
+        if (ww.length > 2 && !SKIP_BR.has(ww.toLowerCase()) && !/^\d/.test(ww)) { brand = nameWords[wi]; break; }
+      }
+      if (!brand) brand = 'GEN';
     }
     brand = brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase();
     var ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(upc) + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
@@ -2927,7 +2944,7 @@ async function pgLookupUPC(upc) {
           : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
         + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
     }
-    analyze(upc, total > 0 ? total : itemPrice, p.name || '', brand);
+    analyze(upc, total > 0 ? total : itemPrice, p.name || '', brand, sellersCount);
   } catch(e) {
     if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
     analyze(upc);
