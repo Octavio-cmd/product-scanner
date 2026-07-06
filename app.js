@@ -1700,13 +1700,6 @@ async function analyze(upc, railwayPriceHint){
 
     step='claude';
     stat('Analyzing with Claude...');
-    // Si tenemos precio de Railway y el Worker no devolvió precios, usarlo
-    if (railwayPriceHint > 0 && !ebay.prices?.low && !ebay.prices?.avg) {
-      if (!ebay.prices) ebay.prices = {};
-      ebay.prices.low = railwayPriceHint;
-      ebay.prices.avg = railwayPriceHint;
-      ebay.found = true;
-    }
     res=await callClaude(upc,prod,ebay);
 
     step='render';
@@ -1733,7 +1726,6 @@ async function analyze(upc, railwayPriceHint){
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
-    // Si el Worker no devolvió precios, usar el precio de Railway como referencia
     const _mBase    = _low || _soldAvg || _avg || railwayPriceHint || 0;
     const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
 
@@ -1778,7 +1770,7 @@ async function analyze(upc, railwayPriceHint){
       return (ingreso - costo - fees).toFixed(2);
     }
 
-    if (ebay.found && _mBase > 0) {
+    if ((ebay.found || railwayPriceHint > 0) && _mBase > 0) {
       if (_viable) {
         const _ganancia = calcGananciaReal(_optPack, _bPrice);
         res.verdict  = 'SAVVY';
@@ -2843,9 +2835,7 @@ async function pgLookupUPC(upc) {
           : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
         + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
     }
-    // Pasar precio de Railway a analyze() para que lo use en SAVVY/DWI y título
-    var railwayPriceHint = total > 0 ? total : itemPrice;
-    analyze(upc, railwayPriceHint);
+    analyze(upc, total > 0 ? total : itemPrice);
   } catch(e) {
     if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
     analyze(upc);
