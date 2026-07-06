@@ -1443,8 +1443,19 @@ function renderPackTable(ebayLow){
 function buildSmartTitle(prod, packs) {
   packs = packs || 2;
   if (!prod || (!prod.name && !prod.brand)) return '';
-  const brand    = (prod.brand || '').trim();
-  const name     = (prod.name  || '').trim();
+  const SKIP_WORDS = new Set(['the','a','an','by','for','with','and','or','of','from','in','on','at','to','new','brand']);
+  let brand = (prod.brand || '').trim();
+  const name  = (prod.name  || '').trim();
+  // If brand is a skip word or too short, try to extract from name
+  if (!brand || SKIP_WORDS.has(brand.toLowerCase()) || brand.length <= 2) {
+    const words = name.split(/\s+/);
+    for (var i = 0; i < Math.min(3, words.length); i++) {
+      var w = words[i].replace(/[^a-zA-Z0-9]/g, '');
+      if (w.length > 2 && !SKIP_WORDS.has(w.toLowerCase()) && !/^\d/.test(w)) {
+        brand = words[i]; break;
+      }
+    }
+  }
   // Remove brand from start of name to avoid "Neutrogena Neutrogena..."
   const cleanName = (brand && name.toLowerCase().startsWith(brand.toLowerCase()))
     ? name.substring(brand.length).trim()
@@ -1583,7 +1594,13 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
     const txt=(d.content&&d.content[0]&&d.content[0].text||'').replace(/```json|```/g,'').trim();
     const res=JSON.parse(txt);
     res.upc=upc;res.ebay=ebay;res.prod=prod;
-    if(!res.brand||res.brand.toLowerCase()==='generic')res.brand=prod.brand||'';
+    if(!res.brand||res.brand.toLowerCase()==='generic'||res.brand.trim()===''||res.brand.toLowerCase()==='unknown')res.brand=prod.brand||'';
+    // Sanitize title: reject if contains UPC, error message, or is too short
+    var BAD_TITLE = !res.title || res.title.length < 8
+      || res.title.includes(upc)
+      || /unable|unavailable|error|no data|not found|product data/i.test(res.title)
+      || res.title.toLowerCase().includes(' upc ');
+    if (BAD_TITLE) res.title = buildSmartTitle(prod, res.packSize || 2) || res.title;
     return res;
   }catch(e){
     if(e.name==='AbortError') toast('⚠️ Claude timeout — using fast estimate');
@@ -1596,14 +1613,29 @@ function fallback(upc,prod,ebay){
   const found=prod&&prod.found;
   const packs=2;
   const cid=catId((prod&&prod.name)||'');
-  // Smart title — never expose UPC
+  // Smart title — never expose UPC, never use error messages
   let title='';
   if(found) title=buildSmartTitle(prod,packs);
-  else if(ebay&&ebay.topTitles&&ebay.topTitles[0]){
+  if(!title && ebay&&ebay.topTitles&&ebay.topTitles[0]){
     const t=ebay.topTitles[0];
     title=String(typeof t==='object'?t.title:t).substring(0,80);
-  } else title='New Product Pack of '+packs+' New';
-  const brand=(prod&&prod.brand)||'';
+  }
+  // Reject title if it contains UPC or error text
+  if(!title || title.includes(upc) || /unable|unavailable|error|no data|not found/i.test(title)){
+    const nm = (prod&&prod.name)||'';
+    title = nm ? buildSmartTitle(prod, packs) : 'New Product Pack of '+packs+' New';
+  }
+  // Fix brand — skip articles and generic words
+  const SKIP_WORDS = new Set(['the','a','an','unknown','generic','brand','']);
+  let brand=(prod&&prod.brand)||'';
+  if(!brand || SKIP_WORDS.has(brand.toLowerCase())) {
+    const nm = (prod&&prod.name)||'';
+    const words = nm.split(/\s+/);
+    for(var i=0;i<Math.min(3,words.length);i++){
+      var w=words[i].replace(/[^a-zA-Z0-9]/g,'');
+      if(w.length>2 && !SKIP_WORDS.has(w.toLowerCase()) && !/^\d/.test(w)){brand=words[i];break;}
+    }
+  }
   return{verdict:found||(avg>3)?'SAVVY':'DWI',
     reason:found?'Estimado sin API':'No data suficientes',
     title,price:calcBundlePrice(ebay,packs),packSize:packs,
@@ -2088,80 +2120,62 @@ function renderResult(r){
     var soldAvg  = (sold && (sold.avg || sold.median)) || 0;
     var soldLow  = (sold && sold.low) || 0;
     var actHigh  = (ebay.prices && ebay.prices.high) || 0;
-    var hasData  = ebay.activeListings > 0 || low > 0 || avg > 0 || soldCnt > 0 || r._railwayPrice > 0;
+    var hasData  = ebay.activeListings > 0 || low > 0 || avg > 0 || soldCnt > 0;
     if (!hasData) return;
 
-    // Demand signal
     var demandColor = '#888', demandLabel = '— Sin datos';
-    if (soldCnt >= 50)       { demandColor = '#00e676'; demandLabel = '🔥 Alta demanda'; }
-    else if (soldCnt >= 15)  { demandColor = '#ffab00'; demandLabel = '📈 Demanda media'; }
-    else if (soldCnt >= 1)   { demandColor = '#ff9800'; demandLabel = '📉 Demanda baja'; }
+    if (soldCnt >= 50)      { demandColor = '#00e676'; demandLabel = '🔥 Alta demanda'; }
+    else if (soldCnt >= 15) { demandColor = '#ffab00'; demandLabel = '📈 Demanda media'; }
+    else if (soldCnt >= 1)  { demandColor = '#ff9800'; demandLabel = '📉 Demanda baja'; }
     else if (ebay.activeListings > 0) { demandColor = '#888'; demandLabel = '👀 Sin ventas registradas'; }
 
-    // Competition signal
     var compColor = '#00e676', compLabel = '✅ Poca competencia';
-    if (ebay.activeListings >= 20)      { compColor = '#e74c3c'; compLabel = '⚠️ Alta competencia'; }
-    else if (ebay.activeListings >= 8)  { compColor = '#ffab00'; compLabel = '⚡ Competencia media'; }
+    if (ebay.activeListings >= 20)     { compColor = '#e74c3c'; compLabel = '⚠️ Alta competencia'; }
+    else if (ebay.activeListings >= 8) { compColor = '#ffab00'; compLabel = '⚡ Competencia media'; }
 
     var rows = '';
-
-    // Row: active sellers
     if (ebay.activeListings > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
         <span style="color:var(--mu);font-size:12px">🏪 Vendedores activos</span>
         <span style="font-weight:700;font-size:14px">${ebay.activeListings} <span style="font-size:11px;color:${compColor}">${compLabel}</span></span>
       </div>`;
     }
-
-    // Row: price range active
     if (low > 0 || avg > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
         <span style="color:var(--mu);font-size:12px">💲 Rango activo (BIN)</span>
-        <span style="font-size:13px"><strong style="color:#00e676">${fmt(low)}</strong> – ${fmt(actHigh)} <span style="color:var(--mu);font-size:11px">avg ${fmt(avg)}</span></span>
+        <span style="font-size:13px"><strong style="color:#00e676">${fmt(low)}</strong>${actHigh>0?' – '+fmt(actHigh):''} <span style="color:var(--mu);font-size:11px">avg ${fmt(avg)}</span></span>
       </div>`;
     }
-
-    // Row: sold 90 days
     if (soldCnt > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
         <span style="color:var(--mu);font-size:12px">✅ Vendidos (90 días)</span>
         <span style="font-weight:700;font-size:14px;color:${demandColor}">${soldCnt} uds</span>
       </div>`;
     }
-
-    // Row: sold avg price
     if (soldAvg > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
         <span style="color:var(--mu);font-size:12px">💵 Precio vendido avg</span>
         <span style="font-weight:700;font-size:14px">${fmt(soldAvg)}</span>
       </div>`;
     }
-
-    // Row: sold low price
     if (soldLow > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0;border-bottom:1px solid rgba(255,255,255,.06)">
         <span style="color:var(--mu);font-size:12px">📉 Precio vendido mínimo</span>
         <span style="font-size:13px">${fmt(soldLow)}</span>
       </div>`;
     }
-
-    // Row: demand signal summary
     if (soldCnt > 0 || ebay.activeListings > 0) {
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:7px 0">
         <span style="color:var(--mu);font-size:12px">📊 Señal de mercado</span>
         <span style="font-weight:700;font-size:13px;color:${demandColor}">${demandLabel}</span>
       </div>`;
     }
-
-    // Price source warning
     var srcNote = src !== 'gtin_exact'
       ? `<div style="margin-top:8px;background:rgba(255,171,0,.1);border-radius:8px;padding:7px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay</div>`
       : '';
-
     h += `<div class="card" style="border-left:3px solid #0064d2">
       <div class="lbl" style="color:#0064d2;margin-bottom:4px">📊 MERCADO eBay</div>
-      ${rows}
-      ${srcNote}
+      ${rows}${srcNote}
     </div>`;
   }());
 
