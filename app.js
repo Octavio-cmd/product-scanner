@@ -1446,7 +1446,6 @@ function buildSmartTitle(prod, packs) {
   const SKIP_WORDS = new Set(['the','a','an','by','for','with','and','or','of','from','in','on','at','to','new','brand','unknown','generic','2pk','2pk-','1pk','3pk','4pk','gen']);
   let brand = (prod.brand || '').trim();
   const name = (prod.name || '').trim();
-  // If brand is a skip word or too short, extract first meaningful word from name
   if (!brand || SKIP_WORDS.has(brand.toLowerCase()) || brand.length <= 2) {
     const words = name.split(/\s+/);
     for (var i = 0; i < Math.min(4, words.length); i++) {
@@ -1603,7 +1602,7 @@ function fallback(upc,prod,ebay){
   const cid=catId((prod&&prod.name)||'');
   const SKIP_FB = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
   let brand=(prod&&prod.brand)||'';
-  if(!brand || SKIP_FB.has(brand.toLowerCase())) {
+  if(!brand||SKIP_FB.has(brand.toLowerCase())){
     const nm=(prod&&prod.name)||'';
     const words=nm.split(/\s+/);
     for(var i=0;i<Math.min(4,words.length);i++){
@@ -1633,10 +1632,10 @@ function fallback(upc,prod,ebay){
 async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railwaySellersCount){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
-  railwayPriceHint   = parseFloat(railwayPriceHint)   || 0;
-  railwayName        = String(railwayName        || '').trim();
-  railwayBrand       = String(railwayBrand       || '').trim();
-  railwaySellersCount= parseInt(railwaySellersCount)   || 0;
+  railwayPriceHint    = parseFloat(railwayPriceHint)    || 0;
+  railwayName         = String(railwayName         || '').trim();
+  railwayBrand        = String(railwayBrand        || '').trim();
+  railwaySellersCount = parseInt(railwaySellersCount)    || 0;
   screen('load');$('lp').textContent='UPC: '+upc;
 
   let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
@@ -1717,8 +1716,6 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railway
       category:       ebayFull.category || null,
       priceSource:    ebayFull.priceSource || 'keyword',
     };
-
-    // ── Inject Railway product data when eBay catalog found nothing ──
     const SKIP_INJ = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
     if (railwayName && (!prod.found || !prod.name)) { prod.name = railwayName; prod.found = true; }
     if (railwayBrand && (!prod.brand || SKIP_INJ.has(prod.brand.toLowerCase()))) prod.brand = railwayBrand;
@@ -1732,10 +1729,9 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railway
     const SKIP_POST = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
     if(!res.brand||SKIP_POST.has(res.brand.toLowerCase().trim()))
       res.brand = prod.brand || railwayBrand || '';
-    var BAD_TITLE = !res.title || res.title.length < 8
-      || res.title.includes(upc)
-      || /unable|unavailable|error|no data|not found|product data|unknown product/i.test(res.title)
-      || res.title.toLowerCase().includes(' upc ');
+    var BAD_TITLE = !res.title||res.title.length<8||res.title.includes(upc)
+      ||/unable|unavailable|error|no data|not found|product data|unknown product/i.test(res.title)
+      ||res.title.toLowerCase().includes(' upc ');
     if(BAD_TITLE) res.title = buildSmartTitle(prod, res.packSize||2) || res.title;
     // Validar categoría — si Claude pone categoría padre o default, recalcular desde título
     const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725'];
@@ -2028,6 +2024,54 @@ function renderResult(r){
 
   let h=`<div class="badge ${sv?'sv':'dw'}">${sv?'✅ SAVVY':'❌ DWI'}</div>`;
 
+  // ── 0. MERCADO eBay (right after verdict) ─────────────────────
+  (function(){
+    const sold     = ebay.pricing && ebay.pricing.sold;
+    const soldCnt  = (sold && sold.count) || ebay.soldCount || 0;
+    const soldAvg  = (sold && (sold.avg || sold.median)) || 0;
+    const soldLow  = (sold && sold.low) || 0;
+    const actHigh  = (ebay.prices && ebay.prices.high) || 0;
+    const sellers  = ebay.activeListings || 0;
+    const hasData  = sellers > 0 || low > 0 || avg > 0 || soldCnt > 0;
+    if (!hasData) return;
+
+    const compColor = sellers >= 20 ? '#e74c3c' : sellers >= 8 ? '#ffab00' : '#00e676';
+    const compLabel = sellers >= 20 ? '⚠️ Alta competencia' : sellers >= 8 ? '⚡ Media' : '✅ Poca';
+
+    const demandColor = soldCnt >= 50 ? '#00e676' : soldCnt >= 15 ? '#ffab00' : soldCnt >= 1 ? '#ff9800' : '#888';
+    const demandLabel = soldCnt >= 50 ? '🔥 Alta demanda' : soldCnt >= 15 ? '📈 Demanda media' : soldCnt >= 1 ? '📉 Demanda baja' : '👀 Sin ventas registradas';
+
+    let rows = '';
+    if (sellers > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+      <span style="color:var(--mu);font-size:12px">🏪 Vendedores activos</span>
+      <span style="font-weight:700;font-size:13px">${sellers} <span style="color:${compColor};font-size:11px;font-weight:400">${compLabel}</span></span></div>`;
+
+    if (low > 0 || avg > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+      <span style="color:var(--mu);font-size:12px">💲 Precio activo (BIN)</span>
+      <span style="font-size:13px"><strong style="color:#00e676">${fmt(low)}</strong>${actHigh>0&&actHigh!==low?' – '+fmt(actHigh):''}${avg>0?' <span style="color:var(--mu);font-size:11px">avg '+fmt(avg)+'</span>':''}</span></div>`;
+
+    if (soldCnt > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+      <span style="color:var(--mu);font-size:12px">✅ Vendidos (90 días)</span>
+      <span style="font-weight:700;font-size:13px;color:${demandColor}">${soldCnt} uds — ${demandLabel}</span></div>`;
+
+    if (soldAvg > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
+      <span style="color:var(--mu);font-size:12px">💵 Precio vendido avg</span>
+      <span style="font-weight:700;font-size:13px">${fmt(soldAvg)}</span></div>`;
+
+    if (soldLow > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
+      <span style="color:var(--mu);font-size:12px">📉 Precio vendido mínimo</span>
+      <span style="font-size:13px">${fmt(soldLow)}</span></div>`;
+
+    const srcNote = (ebay.priceSource||'keyword') !== 'gtin_exact'
+      ? `<div style="margin-top:6px;background:rgba(255,171,0,.1);border-radius:8px;padding:6px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay antes de listar</div>`
+      : `<div style="margin-top:6px;background:rgba(0,230,118,.08);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--sv)">✅ UPC exacto — datos confiables</div>`;
+
+    h += `<div class="card" style="border-left:3px solid #0064d2;margin-top:6px">
+      <div class="lbl" style="color:#0064d2;margin-bottom:4px">📊 MERCADO eBay</div>
+      ${rows}${srcNote}
+    </div>`;
+  }());
+
   // ── 1. TITLE ─────────────────────────────────────────────────
   h+=`<div class="card" style="border-left:3px solid var(--ac)">
     <div class="lbl" style="color:var(--ac)">📝 eBay SEO Title</div>
@@ -2108,92 +2152,6 @@ function renderResult(r){
     ?'<span style="background:rgba(255,171,0,.15);color:var(--gd);font-size:11px;padding:3px 10px;border-radius:10px">⚠️ PARTIAL MATCH</span>'
     :'<span style="background:rgba(255,107,0,.15);color:var(--ac);font-size:11px;padding:3px 10px;border-radius:10px">🔍 KEYWORD ONLY</span>';
   h+=`<div style="text-align:center;margin:8px 0">${srcBadge}</div>`;
-
-  // ── 6. EBAY MARKET DATA ──────────────────────────────────────
-  (function(){
-    var sold      = ebay.pricing && ebay.pricing.sold;
-    var soldCnt   = (sold && sold.count) || ebay.soldCount || 0;
-    var soldAvg   = (sold && (sold.avg || sold.median)) || 0;
-    var soldLow   = (sold && sold.low) || 0;
-    var actHigh   = (ebay.prices && ebay.prices.high) || 0;
-    var sellers   = ebay.activeListings || 0;
-    var hasData   = sellers > 0 || low > 0 || avg > 0 || soldCnt > 0;
-    if (!hasData) return;
-
-    // Competition signal
-    var compColor = '#00e676', compLabel = '✅ Poca competencia';
-    if (sellers >= 20)     { compColor = '#e74c3c'; compLabel = '⚠️ Alta competencia'; }
-    else if (sellers >= 8) { compColor = '#ffab00'; compLabel = '⚡ Competencia media'; }
-
-    // Demand signal
-    var demandColor = '#888', demandLabel = '— Sin datos de ventas';
-    if (soldCnt >= 50)      { demandColor = '#00e676'; demandLabel = '🔥 Alta demanda'; }
-    else if (soldCnt >= 15) { demandColor = '#ffab00'; demandLabel = '📈 Demanda media'; }
-    else if (soldCnt >= 1)  { demandColor = '#ff9800'; demandLabel = '📉 Demanda baja'; }
-
-    var rows = '';
-
-    // Vendedores activos
-    if (sellers > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-        <span style="color:var(--mu);font-size:12px">🏪 Vendedores activos</span>
-        <span style="font-weight:700;font-size:14px">${sellers} <span style="font-size:11px;font-weight:400;color:${compColor}">${compLabel}</span></span>
-      </div>`;
-    }
-
-    // Precio activo BIN
-    if (low > 0 || avg > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-        <span style="color:var(--mu);font-size:12px">💲 Precio activo (BIN)</span>
-        <span style="font-size:13px">
-          <strong style="color:#00e676">${fmt(low)}</strong>
-          ${actHigh > 0 && actHigh !== low ? ' – ' + fmt(actHigh) : ''}
-          ${avg > 0 ? '<span style="color:var(--mu);font-size:11px"> avg ' + fmt(avg) + '</span>' : ''}
-        </span>
-      </div>`;
-    }
-
-    // Vendidos 90 días
-    if (soldCnt > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-        <span style="color:var(--mu);font-size:12px">✅ Vendidos (90 días)</span>
-        <span style="font-weight:700;font-size:14px;color:${demandColor}">${soldCnt} uds</span>
-      </div>`;
-    }
-
-    // Precio vendido avg
-    if (soldAvg > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-        <span style="color:var(--mu);font-size:12px">💵 Precio vendido avg</span>
-        <span style="font-weight:700;font-size:14px">${fmt(soldAvg)}</span>
-      </div>`;
-    }
-
-    // Precio vendido mínimo
-    if (soldLow > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-        <span style="color:var(--mu);font-size:12px">📉 Precio vendido mínimo</span>
-        <span style="font-size:13px">${fmt(soldLow)}</span>
-      </div>`;
-    }
-
-    // Señal de demanda
-    if (soldCnt > 0) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0">
-        <span style="color:var(--mu);font-size:12px">📊 Señal de mercado</span>
-        <span style="font-weight:700;font-size:13px;color:${demandColor}">${demandLabel}</span>
-      </div>`;
-    }
-
-    var srcNote = src !== 'gtin_exact'
-      ? `<div style="margin-top:8px;background:rgba(255,171,0,.1);border-radius:8px;padding:7px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay antes de listar</div>`
-      : `<div style="margin-top:8px;background:rgba(0,230,118,.08);border-radius:8px;padding:7px 10px;font-size:11px;color:var(--sv)">✅ UPC exacto — datos confiables</div>`;
-
-    h += `<div class="card" style="border-left:3px solid #0064d2">
-      <div class="lbl" style="color:#0064d2;margin-bottom:2px">📊 MERCADO eBay</div>
-      ${rows}${srcNote}
-    </div>`;
-  }());
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
