@@ -2750,7 +2750,7 @@ function openScanner() {
   $('scr-idle').classList.add('on');
 }
 
-function openScanner() {
+function openClothing() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
   $('cl-sku').classList.add('on');
   clRenderSKU();
@@ -5523,4 +5523,4 @@ function clShowExportOptions(csv, fname, count) {
 }
 
 // Auto-open Clothing & Shoes module on load
-document.addEventListener('DOMContentLoaded', function(){ if(typeof openScanner==='function') openScanner(); });
+document.addEventListener('DOMContentLoaded', function(){ if(typeof openClothing==='function') openClothing(); });
