@@ -28,7 +28,6 @@ let _keysLoaded = false;
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   _keysLoaded = true;
-  // Refresh Settings UI if it's open
   if (typeof renderSt === 'function') renderSt();
 })();
 // ── Login System ──────────────────────────────────────────────
@@ -516,7 +515,15 @@ function validateSettingsPin() {
   }
 }
 
-function openCfg(){renderSt();$('cfgOv').classList.add('on');}
+function openCfg(){
+  if(!_keysLoaded){
+    // Keys still loading — wait and retry
+    setTimeout(()=>openCfg(), 300);
+    return;
+  }
+  renderSt();
+  $('cfgOv').classList.add('on');
+}
 function closeCfg(){$('cfgOv').classList.remove('on');}
 
 // ── Savvy Universal Scanner (html5-qrcode) ───────────────────
