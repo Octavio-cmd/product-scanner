@@ -2750,7 +2750,7 @@ function openScanner() {
   $('scr-idle').classList.add('on');
 }
 
-function openClothing() {
+function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
   $('cl-sku').classList.add('on');
   clRenderSKU();
@@ -5522,5 +5522,5 @@ function clShowExportOptions(csv, fname, count) {
   };
 }
 
-// Auto-open Clothing & Shoes module on load
-document.addEventListener('DOMContentLoaded', function(){ if(typeof openClothing==='function') openClothing(); });
+// Auto-open Product Scanner module on load
+document.addEventListener('DOMContentLoaded', function(){ if(typeof openScanner==='function') openScanner(); });
