@@ -1,29 +1,29 @@
 
 const WORKER='https://savvy-ebay.octavio-9e2.workers.dev';
+const SAVVY_CONFIG='https://savvy-config-production.up.railway.app';
 const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
-// ── Default API keys (loaded from Cloudflare Worker env vars)
+// ── Default API keys (loaded from savvy-config Railway server)
 let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
 let DEFAULT_IMGBB_KEY = '';
 let DEFAULT_CLAUDE_KEY = '';
-// Load keys from worker on startup
+// Load keys from savvy-config on startup
 (async function loadKeys() {
   try {
-    const r = await fetch(WORKER + '/?action=keys');
+    const r = await fetch(SAVVY_CONFIG + '/config');
     if (r.ok) {
       const d = await r.json();
-      if (d.photoroom) DEFAULT_PHOTOROOM_KEY = d.photoroom;
-      if (d.rbg)       DEFAULT_RBG_KEY       = d.rbg;
-      if (d.imgbb)     DEFAULT_IMGBB_KEY      = d.imgbb;
-      if (d.claude)    DEFAULT_CLAUDE_KEY     = d.claude;
+      if (d.photoroom)  DEFAULT_PHOTOROOM_KEY = d.photoroom;
+      if (d.rbg)        DEFAULT_RBG_KEY       = d.rbg;
+      if (d.imgbb)      DEFAULT_IMGBB_KEY      = d.imgbb;
+      if (d.claude)     DEFAULT_CLAUDE_KEY     = d.claude;
     }
-  } catch(e) { console.warn('Could not load keys from worker'); }
-  // Fallback local (encoded)
+  } catch(e) { console.warn('Could not load keys from savvy-config'); }
+  // Fallback local (encoded) — no Claude key here for security
   const _k = [
     ['DEFAULT_PHOTOROOM_KEY', atob('c2tfcHJfZGVmYXVsdF9iNmRhM2NlNDAzYzM0NDFhZDE2MWRmNzYxODE5MTU3ZDEyODY2ZWVm')],
     ['DEFAULT_RBG_KEY',       atob('RWFpSkZDRGNoSzJMb0twMlU3blNadVpD')],
     ['DEFAULT_IMGBB_KEY',     atob('MWU4ZWNlYTJmYzJlYTkxOGNhY2E3NDM2OTkyOGVmNjM=')],
-    ['DEFAULT_CLAUDE_KEY',    ''], // User enters key manually in Settings
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
 })();
