@@ -1291,6 +1291,7 @@ async function initImgbbFromIndexedDB() {
 if (document.readyState === 'loading') {
   document.addEventListener('DOMContentLoaded', () => {
     initImgbbFromIndexedDB();
+    openScanner();
   });
 } else {
   initImgbbFromIndexedDB();
