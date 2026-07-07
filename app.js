@@ -7,6 +7,7 @@ let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
 let DEFAULT_IMGBB_KEY = '';
 let DEFAULT_CLAUDE_KEY = '';
+let _keysLoaded = false;
 // Load keys from savvy-config on startup
 (async function loadKeys() {
   try {
@@ -26,6 +27,9 @@ let DEFAULT_CLAUDE_KEY = '';
     ['DEFAULT_IMGBB_KEY',     atob('MWU4ZWNlYTJmYzJlYTkxOGNhY2E3NDM2OTkyOGVmNjM=')],
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
+  _keysLoaded = true;
+  // Refresh Settings UI if it's open
+  if (typeof renderSt === 'function') renderSt();
 })();
 // ── Login System ──────────────────────────────────────────────
 const SAVVY_USERS = {
