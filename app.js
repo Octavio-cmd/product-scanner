@@ -1,43 +1,31 @@
 
 const WORKER='https://savvy-ebay.octavio-9e2.workers.dev';
-const SAVVY_CONFIG='https://savvy-config-production.up.railway.app';
 const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
-// ── Default API keys (loaded from savvy-config Railway server)
+// ── Default API keys (loaded from Cloudflare Worker env vars)
 let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
 let DEFAULT_IMGBB_KEY = '';
 let DEFAULT_CLAUDE_KEY = '';
-let _keysLoaded = false;
-// Load keys from savvy-config on startup
+// Load keys from worker on startup
 (async function loadKeys() {
   try {
-    const r = await fetch(SAVVY_CONFIG + '/config');
+    const r = await fetch(WORKER + '/?action=keys');
     if (r.ok) {
       const d = await r.json();
-      if (d.photoroom)  DEFAULT_PHOTOROOM_KEY = d.photoroom;
-      if (d.rbg)        DEFAULT_RBG_KEY       = d.rbg;
-      if (d.imgbb)      DEFAULT_IMGBB_KEY      = d.imgbb;
-      if (d.claude)     DEFAULT_CLAUDE_KEY     = d.claude;
+      if (d.photoroom) DEFAULT_PHOTOROOM_KEY = d.photoroom;
+      if (d.rbg)       DEFAULT_RBG_KEY       = d.rbg;
+      if (d.imgbb)     DEFAULT_IMGBB_KEY      = d.imgbb;
+      if (d.claude)    DEFAULT_CLAUDE_KEY     = d.claude;
     }
-  } catch(e) { console.warn('Could not load keys from savvy-config'); }
-  // Fallback local (encoded) — no Claude key here for security
+  } catch(e) { console.warn('Could not load keys from worker'); }
+  // Fallback local (encoded)
   const _k = [
     ['DEFAULT_PHOTOROOM_KEY', atob('c2tfcHJfZGVmYXVsdF9iNmRhM2NlNDAzYzM0NDFhZDE2MWRmNzYxODE5MTU3ZDEyODY2ZWVm')],
     ['DEFAULT_RBG_KEY',       atob('RWFpSkZDRGNoSzJMb0twMlU3blNadVpD')],
     ['DEFAULT_IMGBB_KEY',     atob('MWU4ZWNlYTJmYzJlYTkxOGNhY2E3NDM2OTkyOGVmNjM=')],
+    ['DEFAULT_CLAUDE_KEY',    ''], // User enters key manually in Settings
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
-  _keysLoaded = true;
-  // Refresh Settings UI if open
-  if (typeof renderSt === 'function') renderSt();
-  // Refresh ImgBB status display
-  const imgbbKey = DEFAULT_IMGBB_KEY;
-  if (imgbbKey) {
-    const keyIn = document.getElementById('imgbb-key-in');
-    const status = document.getElementById('imgbb-status');
-    if (keyIn) keyIn.placeholder = '••••••••' + imgbbKey.slice(-4);
-    if (status) status.textContent = '✅ ImgBB configured — photos will auto-upload for eBay URLs';
-  }
 })();
 // ── Login System ──────────────────────────────────────────────
 const SAVVY_USERS = {
@@ -524,14 +512,7 @@ function validateSettingsPin() {
   }
 }
 
-function openCfg(){
-  if(!_keysLoaded){
-    setTimeout(()=>openCfg(), 300);
-    return;
-  }
-  renderSt();
-  $('cfgOv').classList.add('on');
-}
+function openCfg(){renderSt();$('cfgOv').classList.add('on');}
 function closeCfg(){$('cfgOv').classList.remove('on');}
 
 // ── Savvy Universal Scanner (html5-qrcode) ───────────────────
@@ -598,14 +579,12 @@ async function startCam(){
   screen('cam');
   savvyStopScan('qr-video');
   savvyStartScan('qr-video', async txt => {
-    savvyStopScan('qr-video');
-    screen('res');
-    pgLookupUPC(txt.replace(/\D/g,''));
+    analyze(txt.replace(/\D/g,''));
   });
 }
 async function stopCam(){
   savvyStopScan('qr-video');
-  screen('res');
+  screen('idle');
 }
 
 
@@ -1462,20 +1441,16 @@ function renderPackTable(ebayLow){
 function buildSmartTitle(prod, packs) {
   packs = packs || 2;
   if (!prod || (!prod.name && !prod.brand)) return '';
-  const SKIP_WORDS = new Set(['the','a','an','by','for','with','and','or','of','from','in','on','at','to','new','brand','unknown','generic','2pk','2pk-','1pk','3pk','4pk','gen']);
-  let brand = (prod.brand || '').trim();
-  const name = (prod.name || '').trim();
-  if (!brand || SKIP_WORDS.has(brand.toLowerCase()) || brand.length <= 2) {
-    const words = name.split(/\s+/);
-    for (var i = 0; i < Math.min(4, words.length); i++) {
-      var w = words[i].replace(/[^a-zA-Z0-9]/g, '');
-      if (w.length > 2 && !SKIP_WORDS.has(w.toLowerCase()) && !/^\d/.test(w)) { brand = words[i]; break; }
-    }
-  }
+  const brand    = (prod.brand || '').trim();
+  const name     = (prod.name  || '').trim();
+  // Remove brand from start of name to avoid "Neutrogena Neutrogena..."
   const cleanName = (brand && name.toLowerCase().startsWith(brand.toLowerCase()))
-    ? name.substring(brand.length).trim() : name;
+    ? name.substring(brand.length).trim()
+    : name;
+  // Extract size/count if present (oz, ct, ml, lb, mg, g, fl oz)
   const sizeMatch = cleanName.match(/\b(\d+\.?\d*\s*(?:oz|fl oz|ct|count|ml|l|lb|lbs|mg|g|kg|pack|pc|pcs|pieces?))\b/i);
   const sizeStr   = sizeMatch ? sizeMatch[0] : '';
+  // Build clean name without the size (to reorder: brand + name + size + pack + new)
   const nameNoSize = sizeStr ? cleanName.replace(sizeStr, '').replace(/\s{2,}/g,' ').trim() : cleanName;
   const packStr = packs > 1 ? 'Pack of ' + packs : '';
   const parts = [brand, nameNoSize, sizeStr, packStr, 'New'].filter(Boolean);
@@ -1548,10 +1523,9 @@ DATOS DEL PRODUCTO:
 REGLAS DE DECISIÓN SAVVY vs DWI (aplica EN ESTE ORDEN):
 1. Si NO está en eBay o no tiene precio → DWI (no podemos saber si vende)
 2. Si está en eBay pero tiene 0 ventas en 90 días → DWI (no se vende)
-3. FÓRMULA DE RENTABILIDAD: precio_minimo_venta = ($2×N + $10_envio + $1_handling + $10_ganancia) / 0.87
-   Si el bundle de ${optimalPack} unidades a $${bundlePrice} NO cubre ese mínimo → DWI
-4. Si el bundle de ${optimalPack} unidades a $${bundlePrice} SÍ cubre el mínimo Y tiene ventas → SAVVY
-5. Si el precio unitario en eBay × pack ya supera el mínimo → SAVVY
+3. Si el bundle de ${optimalPack} unidad(es) a $${bundlePrice} es MENOR a $${MIN_BUNDLE} → DWI (no cubre envío+fees)
+4. Si tiene ventas Y el bundle es viable (≥$${MIN_BUNDLE}) → SAVVY
+5. Si el precio unitario ya es ≥$${MIN_BUNDLE} → SAVVY con pack de 1 o 2
 
 PACK SIZE RECOMENDADO: ${optimalPack} unidades a $${bundlePrice} precio total
 (Este es el pack mínimo para ser rentable. Puedes sugerir un pack mayor si tiene muchas ventas)
@@ -1577,8 +1551,8 @@ Responde ÚNICAMENTE con este JSON (sin markdown, sin explicación):
 {"verdict":"SAVVY o DWI","reason":"1 oración en español explicando el veredicto con el dato clave de eBay","title":"título eBay MAX 80 chars","price":${bundlePrice||'NUMERO_precio'},"packSize":${optimalPack},"category":"ID_categoria_ebay","categoryName":"nombre categoría","description":"Bundle of [N] [product name]. [key benefit/use]. Brand new, factory sealed. Fast shipping from North Carolina.","brand":"marca exacta"}
 
 CRITERIO SAVVY vs DWI:
-- SAVVY: precio eBay unitario permite cubrir $2 costo + $10 envío + $1 handling + $10 ganancia mínima con el pack recomendado
-- DWI: precio demasiado bajo para ser rentable aunque hagas pack de 12, o sin demanda en eBay
+- SAVVY: producto conocido con demanda real, precio eBay > $5 unidad, categoría con rotación
+- DWI: precio eBay < $3 unidad, sin demanda, producto no identificado, o artículo restringido
 
 REGLA CRÍTICA DEL TÍTULO: NUNCA incluyas el UPC, código de barras, o frases como "2-Pack Bundle UPC 12345". El título DEBE empezar con la BRAND seguida del NOMBRE del producto.
 Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no hay datos eBay, usa estimado conservador por categoría.`;
@@ -1619,26 +1593,14 @@ function fallback(upc,prod,ebay){
   const found=prod&&prod.found;
   const packs=2;
   const cid=catId((prod&&prod.name)||'');
-  const SKIP_FB = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
-  let brand=(prod&&prod.brand)||'';
-  if(!brand||SKIP_FB.has(brand.toLowerCase())){
-    const nm=(prod&&prod.name)||'';
-    const words=nm.split(/\s+/);
-    for(var i=0;i<Math.min(4,words.length);i++){
-      var w=words[i].replace(/[^a-zA-Z0-9]/g,'');
-      if(w.length>2&&!SKIP_FB.has(w.toLowerCase())&&!/^\d/.test(w)){brand=words[i];break;}
-    }
-  }
+  // Smart title — never expose UPC
   let title='';
   if(found) title=buildSmartTitle(prod,packs);
-  if(!title&&ebay&&ebay.topTitles&&ebay.topTitles[0]){
+  else if(ebay&&ebay.topTitles&&ebay.topTitles[0]){
     const t=ebay.topTitles[0];
     title=String(typeof t==='object'?t.title:t).substring(0,80);
-  }
-  if(!title||title.includes(upc)||/unable|unavailable|error|no data|not found|unknown product/i.test(title)){
-    const nm=(prod&&prod.name)||'';
-    title=nm?buildSmartTitle(prod,packs):(brand&&brand!=='GEN'?brand+' New Product Pack of '+packs+' New':'New Product Pack of '+packs+' New');
-  }
+  } else title='New Product Pack of '+packs+' New';
+  const brand=(prod&&prod.brand)||'';
   return{verdict:found||(avg>3)?'SAVVY':'DWI',
     reason:found?'Estimado sin API':'No data suficientes',
     title,price:calcBundlePrice(ebay,packs),packSize:packs,
@@ -1648,13 +1610,9 @@ function fallback(upc,prod,ebay){
 }
 
 // Main
-async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railwaySellersCount){
+async function analyze(upc){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
-  railwayPriceHint    = parseFloat(railwayPriceHint)    || 0;
-  railwayName         = String(railwayName         || '').trim();
-  railwayBrand        = String(railwayBrand        || '').trim();
-  railwaySellersCount = parseInt(railwaySellersCount)    || 0;
   screen('load');$('lp').textContent='UPC: '+upc;
 
   let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
@@ -1725,33 +1683,28 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railway
     // Map ebayFull to legacy ebay format expected by callClaude
     ebay = {
       found:          ebayFull.found,
-      activeListings: ebayFull.activeListings || railwaySellersCount || 0,
+      activeListings: ebayFull.activeListings || 0,
       soldCount:      ebayFull.soldCount || 0,
       cheapestPrice:  ebayFull.cheapestPrice || 0,
       cheapestTitle:  ebayFull.cheapestTitle || '',
-      prices:         ebayFull.prices || (railwayPriceHint > 0 ? {low: railwayPriceHint, avg: railwayPriceHint, high: railwayPriceHint} : null),
+      prices:         ebayFull.prices || null,
       topTitles:      ebayFull.topTitles || [],
       pricing:        ebayFull.pricing || {},
       category:       ebayFull.category || null,
-      priceSource:    ebayFull.priceSource || 'keyword',
+      priceSource:    ebayFull.priceSource || 'keyword', // 'gtin_exact' = most accurate
     };
-    const SKIP_INJ = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
-    if (railwayName && (!prod.found || !prod.name)) { prod.name = railwayName; prod.found = true; }
-    if (railwayBrand && (!prod.brand || SKIP_INJ.has(prod.brand.toLowerCase()))) prod.brand = railwayBrand;
-    if (railwayPriceHint > 0 && !ebay.found) ebay.found = true;
 
     step='claude';
     stat('Analyzing with Claude...');
     res=await callClaude(upc,prod,ebay);
 
     step='render';
-    const SKIP_POST = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','gen','']);
-    if(!res.brand||SKIP_POST.has(res.brand.toLowerCase().trim()))
-      res.brand = prod.brand || railwayBrand || '';
-    var BAD_TITLE = !res.title||res.title.length<8||res.title.includes(upc)
-      ||/unable|unavailable|error|no data|not found|product data|unknown product/i.test(res.title)
-      ||res.title.toLowerCase().includes(' upc ');
-    if(BAD_TITLE) res.title = buildSmartTitle(prod, res.packSize||2) || res.title;
+    if(!res.brand||res.brand.toLowerCase()==='generic'||res.brand.trim()===''){
+      res.brand = prod.brand||'';
+    }
+    if(!res.title||res.title.includes(upc)||res.title.toLowerCase().includes(' upc ')){
+      res.title = buildSmartTitle(prod, res.packSize||2) || res.title;
+    }
     // Validar categoría — si Claude pone categoría padre o default, recalcular desde título
     const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725'];
     const titleBasedCat = catId(res.title || prod.name || '');
@@ -1764,68 +1717,34 @@ async function analyze(upc, railwayPriceHint, railwayName, railwayBrand, railway
       }
     }
 
-    // ── LÓGICA SAVVY/DWI — Fórmula DWI/Savvy ─────────────────
-    // Costo por unidad: $2.00 | Envío: $10 | Handling: $1 | Fees eBay: 13% | Ganancia mínima: $10
+    // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
+    // Recalcular aquí en scope local de analyze()
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
-    const _mBase    = _low || _soldAvg || _avg || railwayPriceHint || 0;
+    const _mBase    = _low || _soldAvg || _avg || 0;
     const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
-
-    const COSTO_UNIT   = 2.00;
-    const ENVIO        = 10.00;
-    const HANDLING     = 1.00;
-    const EBAY_FEE     = 0.13;
-    const GANANCIA_MIN = 10.00;
-    const PACKS_LIST   = [1, 2, 3, 4, 5, 6, 8, 10, 12];
-
-    function calcMinSalePrice(n) {
-      return ((COSTO_UNIT * n) + ENVIO + HANDLING + GANANCIA_MIN) / (1 - EBAY_FEE);
-    }
-
-    let _optPack = null;
-    let _bPrice  = 0;
-    let _viable  = false;
-
+    const _MIN      = 15;
+    let   _optPack  = 1;
     if (_mBase > 0) {
-      for (let i = 0; i < PACKS_LIST.length; i++) {
-        const n = PACKS_LIST[i];
-        const minVenta = calcMinSalePrice(n);
-        const ebayPack = _mBase * n;
-        if (minVenta <= ebayPack) {
-          _optPack = n;
-          _bPrice  = (ebayPack * 0.95).toFixed(2);
-          _viable  = true;
-          break;
-        }
-      }
-      if (!_viable) {
-        _optPack = 12;
-        _bPrice  = (_mBase * 12 * 0.95).toFixed(2);
-        _viable  = parseFloat(_bPrice) >= calcMinSalePrice(12);
+      for (let p = 1; p <= 12; p++) {
+        if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
       }
     }
+    const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
+    const _viable   = parseFloat(_bPrice) >= _MIN;
 
-    function calcGananciaReal(n, precioVenta) {
-      var ingreso = parseFloat(precioVenta);
-      var costo   = (COSTO_UNIT * n) + ENVIO + HANDLING;
-      var fees    = ingreso * EBAY_FEE;
-      return (ingreso - costo - fees).toFixed(2);
-    }
-
-    if ((ebay.found || railwayPriceHint > 0) && _mBase > 0) {
+    if (ebay.found && _mBase > 0) {
       if (_viable) {
-        const _ganancia = calcGananciaReal(_optPack, _bPrice);
         res.verdict  = 'SAVVY';
         res.price    = _bPrice;
         res.packSize = _optPack;
-        res.reason   = `eBay precio unitario $${_mBase.toFixed(2)}. Pack de ${_optPack} → vender a $${_bPrice} → ganancia ~$${_ganancia}.`
-          + (_soldCnt > 0 ? ` ${_soldCnt} ventas en 90 días.` : ' Sin ventas registradas — monitorear.');
+        res.reason   = _soldCnt > 0
+          ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
+          : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
       } else {
-        const minVenta12 = calcMinSalePrice(12).toFixed(2);
-        const ebayMax    = (_mBase * 12 * 0.95).toFixed(2);
         res.verdict = 'DWI';
-        res.reason  = `eBay precio unitario $${_mBase.toFixed(2)}. Pack de 12 = $${ebayMax} pero necesitas $${minVenta12} para ganar $10. No es rentable.`;
+        res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
       }
     } else if (!ebay.found || _mBase === 0) {
       res.verdict = 'DWI';
@@ -2043,54 +1962,6 @@ function renderResult(r){
 
   let h=`<div class="badge ${sv?'sv':'dw'}">${sv?'✅ SAVVY':'❌ DWI'}</div>`;
 
-  // ── 0. MERCADO eBay (right after verdict) ─────────────────────
-  (function(){
-    const sold     = ebay.pricing && ebay.pricing.sold;
-    const soldCnt  = (sold && sold.count) || ebay.soldCount || 0;
-    const soldAvg  = (sold && (sold.avg || sold.median)) || 0;
-    const soldLow  = (sold && sold.low) || 0;
-    const actHigh  = (ebay.prices && ebay.prices.high) || 0;
-    const sellers  = ebay.activeListings || 0;
-    const hasData  = sellers > 0 || low > 0 || avg > 0 || soldCnt > 0;
-    if (!hasData) return;
-
-    const compColor = sellers >= 20 ? '#e74c3c' : sellers >= 8 ? '#ffab00' : '#00e676';
-    const compLabel = sellers >= 20 ? '⚠️ Alta competencia' : sellers >= 8 ? '⚡ Media' : '✅ Poca';
-
-    const demandColor = soldCnt >= 50 ? '#00e676' : soldCnt >= 15 ? '#ffab00' : soldCnt >= 1 ? '#ff9800' : '#888';
-    const demandLabel = soldCnt >= 50 ? '🔥 Alta demanda' : soldCnt >= 15 ? '📈 Demanda media' : soldCnt >= 1 ? '📉 Demanda baja' : '👀 Sin ventas registradas';
-
-    let rows = '';
-    if (sellers > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-      <span style="color:var(--mu);font-size:12px">🏪 Vendedores activos</span>
-      <span style="font-weight:700;font-size:13px">${sellers} <span style="color:${compColor};font-size:11px;font-weight:400">${compLabel}</span></span></div>`;
-
-    if (low > 0 || avg > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-      <span style="color:var(--mu);font-size:12px">💲 Precio activo (BIN)</span>
-      <span style="font-size:13px"><strong style="color:#00e676">${fmt(low)}</strong>${actHigh>0&&actHigh!==low?' – '+fmt(actHigh):''}${avg>0?' <span style="color:var(--mu);font-size:11px">avg '+fmt(avg)+'</span>':''}</span></div>`;
-
-    if (soldCnt > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-      <span style="color:var(--mu);font-size:12px">✅ Vendidos (90 días)</span>
-      <span style="font-weight:700;font-size:13px;color:${demandColor}">${soldCnt} uds — ${demandLabel}</span></div>`;
-
-    if (soldAvg > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0;border-bottom:1px solid rgba(255,255,255,.07)">
-      <span style="color:var(--mu);font-size:12px">💵 Precio vendido avg</span>
-      <span style="font-weight:700;font-size:13px">${fmt(soldAvg)}</span></div>`;
-
-    if (soldLow > 0) rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:6px 0">
-      <span style="color:var(--mu);font-size:12px">📉 Precio vendido mínimo</span>
-      <span style="font-size:13px">${fmt(soldLow)}</span></div>`;
-
-    const srcNote = (ebay.priceSource||'keyword') !== 'gtin_exact'
-      ? `<div style="margin-top:6px;background:rgba(255,171,0,.1);border-radius:8px;padding:6px 10px;font-size:11px;color:#ffab00">⚠️ Precios por keyword — verificar en eBay antes de listar</div>`
-      : `<div style="margin-top:6px;background:rgba(0,230,118,.08);border-radius:8px;padding:6px 10px;font-size:11px;color:var(--sv)">✅ UPC exacto — datos confiables</div>`;
-
-    h += `<div class="card" style="border-left:3px solid #0064d2;margin-top:6px">
-      <div class="lbl" style="color:#0064d2;margin-bottom:4px">📊 MERCADO eBay</div>
-      ${rows}${srcNote}
-    </div>`;
-  }());
-
   // ── 1. TITLE ─────────────────────────────────────────────────
   h+=`<div class="card" style="border-left:3px solid var(--ac)">
     <div class="lbl" style="color:var(--ac)">📝 eBay SEO Title</div>
@@ -2172,6 +2043,19 @@ function renderResult(r){
     :'<span style="background:rgba(255,107,0,.15);color:var(--ac);font-size:11px;padding:3px 10px;border-radius:10px">🔍 KEYWORD ONLY</span>';
   h+=`<div style="text-align:center;margin:8px 0">${srcBadge}</div>`;
 
+  // ── 6. EBAY MARKET DATA ──────────────────────────────────────
+  if(ebay.activeListings>0){
+    const sold=ebay.pricing&&ebay.pricing.sold;
+    h+=`<div class="card"><div class="lbl">eBay — Market Data (NEW, item+ship)</div>
+      <div class="val" style="font-size:13px;line-height:2">
+        🏷 Active BIN: <strong>${ebay.activeListings}</strong><br>
+        💰 Min: <strong>${fmt(low)}</strong> | Avg: <strong>${fmt(avg)}</strong> | Max: ${fmt(ebay.prices&&ebay.prices.high)}
+        ${sold?`<br>✅ Sold (90d): <strong>${sold.count}</strong> | Avg: <strong>${fmt(sold.avg)}</strong>`:''}
+      </div>
+      ${src!=='gtin_exact'?`<div style="font-size:11px;color:var(--mu);margin-top:4px">⚠️ Keyword prices — verify on eBay</div>`:''}
+    </div>`;
+  }
+
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
 
@@ -2222,14 +2106,10 @@ function clearBulkSession() {
 }
 
 function scanAnother() {
-  var upcInput = document.getElementById('upcIn');
-  if (upcInput) { upcInput.value = ''; setTimeout(function(){upcInput.focus();}, 100); }
+  const upcInput = document.getElementById('upcIn');
+  if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
   _lastBundleUrl = '';
-  var rb = $('resBody');
-  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
-  var bsr = $('ps-barcode-result');
-  if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
-  screen('res');
+  screen('idle');
 }
 
 function renderBulk(){
@@ -2866,66 +2746,7 @@ function toDash() {
 
 function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  var resScr = $('scr-res');
-  if (resScr) resScr.classList.add('on');
-  var rb = $('resBody');
-  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
-  var bsr = $('ps-barcode-result');
-  if (bsr) { bsr.style.display='none'; bsr.innerHTML=''; }
-  var upcIn = $('upcIn');
-  if (upcIn) upcIn.value = '';
-}
-
-async function pgLookupUPC(upc) {
-  if (!upc || upc.length < 8) return;
-  var resultDiv = $('ps-barcode-result');
-  if (resultDiv) {
-    resultDiv.style.display = 'block';
-    resultDiv.innerHTML = '<span style="color:var(--mu)">🔍 Searching eBay for ' + upc + '...</span>';
-  }
-  try {
-    var RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
-    var res = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    var data = await res.json();
-    if (!data.data || (!data.data.name && !data.data.brand)) {
-      if (resultDiv) resultDiv.innerHTML = '⚠️ Not found. Searching eBay catalog...';
-      analyze(upc);
-      return;
-    }
-    var p = data.data;
-    var itemPrice    = p.ebay_price || 0;
-    var shipping     = p.ebay_shipping || 0;
-    var total        = p.ebay_total || itemPrice;
-    var sellersCount = p.sellers_count || 0;
-    var SKIP_BR = new Set(['the','a','an','unknown','generic','brand','2pk','2pk-','1pk','3pk','4pk','by','new','for','with','']);
-    var brand = (p.brand || '').trim();
-    if (!brand || SKIP_BR.has(brand.toLowerCase())) {
-      var nameWords = (p.name || '').split(/\s+/);
-      brand = '';
-      for (var wi = 0; wi < Math.min(4, nameWords.length); wi++) {
-        var ww = nameWords[wi].replace(/[^a-zA-Z0-9]/g, '');
-        if (ww.length > 2 && !SKIP_BR.has(ww.toLowerCase()) && !/^\d/.test(ww)) { brand = nameWords[wi]; break; }
-      }
-      if (!brand) brand = 'GEN';
-    }
-    brand = brand.charAt(0).toUpperCase() + brand.slice(1).toLowerCase();
-    var ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(upc) + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
-    if (resultDiv) {
-      resultDiv.style.display = 'block';
-      resultDiv.innerHTML = '<div style="color:#00e676;font-weight:700;margin-bottom:4px">✅ Found! ' + (p.data_source || 'eBay') + '</div>'
-        + '<div>🏷️ <strong>Brand:</strong> ' + brand + '</div>'
-        + '<div style="margin:3px 0">📦 ' + (p.name || '').substring(0, 70) + '</div>'
-        + (total > 0
-          ? '<div>💰 $' + itemPrice.toFixed(2) + ' + envío $' + shipping.toFixed(2) + ' = <strong style="color:#00e676">$' + total.toFixed(2) + ' total</strong></div>'
-          : '<div style="color:var(--mu)">💰 Sin precio disponible</div>')
-        + '<a href="' + ebaySearchUrl + '" target="_blank" rel="noopener" style="display:block;margin-top:8px;background:#0064d2;border-radius:8px;padding:9px;color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">🔍 Ver precio real en eBay →</a>';
-    }
-    analyze(upc, total > 0 ? total : itemPrice, p.name || '', brand, sellersCount);
-  } catch(e) {
-    if (resultDiv) resultDiv.innerHTML = '❌ Error: ' + e.message;
-    analyze(upc);
-  }
+  $('scr-idle').classList.add('on');
 }
 
 function openClothing() {
@@ -2998,14 +2819,14 @@ const CL_SHOE_DEFECTS = [
 
 const CL_BRANDS = ['Nike','Adidas','Under Armour','Champion','Puma','Reebok','New Balance',
   'Levi\'s','Wrangler','Lee','Gap','Old Navy','H&M','Zara','Forever 21','American Eagle',
-  'Hollister','Abercrombie','Calvin Klein','Tommy Hilfiger','Ralph Lauren','Nautica',
+  'Hollister','Abercrombie','Calvin Klein','Tommy Hilfiger','Ralph Lauren','Polo Ralph Lauren','Nautica',
   'Columbia','North Face','Carhartt','Patagonia','Carter\'s','OshKosh','Other'];
 
 const CL_CATS = ['T-Shirt','Shirt','Shacket','Polo','Tank Top','Hoodie','Quarter Zip','Sweatshirt','Sweater',
   'Jacket','Coat','Vest','Pants','Jeans','Shorts','Dress','Skirt',
   'Activewear Top','Activewear Bottom','Swimwear','Scrubs','Other'];
 
-const CL_SIZES_ALPHA = ['XXS','XS','S','M','L','XL','XXL','3XL','4XL','XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT'];
+const CL_SIZES_ALPHA = ['XXS','XS','S','M','L','XL','XXL','3XL','4XL','XLT','1XB','2XB','2XLT','3XB','3XLT','4XB','4XLT'];
 const CL_SIZES_NUM   = ['28','30','32','34','36','38','40','42','44'];
 const CL_SIZES_KIDS  = ['NB','3M','6M','9M','12M','18M','2T','3T','4T','5T','5/6','7/8','10/12','14','14/16','16','18','20'];
 const CL_SIZES_SHOES = ['5','5.5','6','6.5','7','7.5','8','8.5','9','9.5','10','10.5','11','11.5','12','13'];
@@ -3017,7 +2838,7 @@ const CL_COLORS = [
   {name:'Red', hex:'#c62828'},  {name:'Pink', hex:'#e91e96'}, {name:'Coral', hex:'#ff6b6b'},
   {name:'Purple', hex:'#6a1b9a'},
   {name:'Green', hex:'#2e7d32'},{name:'Olive', hex:'#827717'},{name:'Yellow', hex:'#f9a825'},
-  {name:'Orange', hex:'#e65100'},{name:'Brown', hex:'#4e342e'},{name:'Beige', hex:'#d7ccc8'},
+  {name:'Orange', hex:'#e65100'},{name:'Brown', hex:'#4e342e'},{name:'Wine', hex:'#6d1b2e'},{name:'Beige', hex:'#d7ccc8'},
   {name:'Tan', hex:'#d2b48c'},
   {name:'Multicolor', hex:'linear-gradient(135deg,#f00,#0f0,#00f)'},{name:'Other', hex:'#333'}
 ];
@@ -4192,7 +4013,7 @@ function clInitSizeWheel() {
     ? (cl.gender==='kids'||cl.category&&cl.category.toLowerCase().includes('kids')?CL_SHOE_SIZES_KIDS:CL_SHOE_SIZES_US).concat(['Custom'])
     : [
     'XS','S','M','L','XL','XXL','3XL','4XL',
-    'XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT',
+    'XLT','1XB','2XB','2XLT','3XB','3XLT','4XB','4XLT',
     '26','27','28','29','30','31','32','33','34','35','36','38','40','42','44',
     '0-3M','3-6M','6-12M','18-24M','2T','3T','4T','5/6','7/8','10/12','14/16',
     'One Size','Custom'
@@ -5390,7 +5211,7 @@ function clCloseSheet() {
 function clInitSheetWheel() {
   const ALL_SIZES = [
     'XS','S','M','L','XL','XXL','3XL','4XL',
-    'XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT',
+    'XLT','1XB','2XB','2XLT','3XB','3XLT','4XB','4XLT',
     '26','27','28','29','30','31','32','33','34','35','36','38','40','42','44',
     '0-3M','3-6M','6-12M','18-24M','2T','3T','4T','5/6','7/8','10/12','14/16',
     'One Size','Custom'
@@ -5699,3 +5520,6 @@ function clShowExportOptions(csv, fname, count) {
     } else { ta.select(); document.execCommand('copy'); toast('✅ Copiado!'); }
   };
 }
+
+// Auto-open Product Scanner module on load
+document.addEventListener('DOMContentLoaded', function(){ if(typeof openScanner==='function') openScanner(); });
