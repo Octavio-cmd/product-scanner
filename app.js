@@ -28,7 +28,16 @@ let _keysLoaded = false;
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   _keysLoaded = true;
+  // Refresh Settings UI if open
   if (typeof renderSt === 'function') renderSt();
+  // Refresh ImgBB status display
+  const imgbbKey = DEFAULT_IMGBB_KEY;
+  if (imgbbKey) {
+    const keyIn = document.getElementById('imgbb-key-in');
+    const status = document.getElementById('imgbb-status');
+    if (keyIn) keyIn.placeholder = '••••••••' + imgbbKey.slice(-4);
+    if (status) status.textContent = '✅ ImgBB configured — photos will auto-upload for eBay URLs';
+  }
 })();
 // ── Login System ──────────────────────────────────────────────
 const SAVVY_USERS = {
@@ -517,7 +526,6 @@ function validateSettingsPin() {
 
 function openCfg(){
   if(!_keysLoaded){
-    // Keys still loading — wait and retry
     setTimeout(()=>openCfg(), 300);
     return;
   }
