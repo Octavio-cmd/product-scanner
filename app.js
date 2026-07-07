@@ -2750,11 +2750,6 @@ function openScanner() {
   $('scr-idle').classList.add('on');
 }
 
-function openScanner() {
-  document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  $('cl-sku').classList.add('on');
-  clRenderSKU();
-}
 
 function saveSheetsUrl() {
   const v = $('sheetsIn')?.value?.trim();
