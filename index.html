@@ -501,36 +501,9 @@
 
 <!-- DASHBOARD -->
 <div class="scr" id="scr-dash">
-  <div class="dash-tagline"><span>Savvy</span> Product Scanner</div>
-  <div class="dash-sub">Select a module to get started</div>
-  <div class="dash-grid">
-    <div class="dash-card scanner" onclick="openScanner()" style="cursor:pointer">
-      <div class="dc-icon">📦</div>
-      <div class="dc-title">Product Scanner</div>
-      <div class="dc-sub">UPC scanning · Pricing · Bulk eBay listings</div>
-    </div>
-    <div class="dash-card clothing" onclick="openClothing()">
-      <div class="dc-icon">👕👟</div>
-      <div class="dc-title">Clothing &amp; Shoes</div>
-      <div class="dc-sub">Intake · Photos · Google Sheets · Fast mode</div>
-    </div>
-  </div>
-  <div id="dash-session-panel" style="display:none;margin:0 16px 16px;background:var(--sf);border-radius:14px;border:1px solid var(--sv);padding:14px">
-    <div style="display:flex;align-items:center;gap:10px">
-      <div style="font-size:24px">💾</div>
-      <div style="flex:1">
-        <div style="font-size:13px;font-weight:800;color:var(--sv)">Saved Session</div>
-        <div id="dash-session-desc" style="font-size:12px;color:var(--mu);margin-top:2px"></div>
-      </div>
-    </div>
-    <div style="display:flex;gap:8px;margin-top:12px">
-      <button onclick="restoreSession()" style="flex:2;background:var(--sv);border:none;border-radius:10px;padding:11px;color:#000;font-size:14px;font-weight:800;cursor:pointer">✅ RESTORE SESSION</button>
-      <button onclick="discardSession()" style="flex:1;background:none;border:1px solid var(--bd);border-radius:10px;padding:11px;color:var(--mu);font-size:13px;cursor:pointer">🗑 Discard</button>
-    </div>
-  </div>
 </div>
 
-<div class="scr" id="scr-idle">
+<div class="scr on" id="scr-idle">
   <div class="hero"><h2>Scan a Product</h2><p>Smart resale on eBay</p></div>
   <button class="cam-b" id="camBtn">
     <div class="cam-ic">📷</div>
