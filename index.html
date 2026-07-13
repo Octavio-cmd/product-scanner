@@ -507,7 +507,7 @@
 
 <div class="scr on" id="scr-idle">
   <div class="hero"><h2>Scan a Product</h2><p>Smart resale on eBay</p></div>
-  <button class="cam-b" id="camBtn">
+  <button class="cam-b" id="camBtn" onclick="startCamSync(); return false;" style="cursor: pointer;">
     <div class="cam-ic">📷</div>
     <div class="cam-lb">SCAN BARCODE</div>
     <div class="cam-ht">Tap to open camera</div>
@@ -542,8 +542,8 @@
       <div id="ps-barcode-result" style="display:none;margin-bottom:8px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
 
       <button id="camBtnRes"
-        ontouchend="event.preventDefault();startCam();"
-        onclick="startCam();"
+        ontouchend="event.preventDefault();startCamSync();"
+        onclick="startCamSync();"
         style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
         📷 Scan Barcode
       </button>
