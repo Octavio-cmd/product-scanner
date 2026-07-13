@@ -1643,7 +1643,7 @@ async function analyze(upc){
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
   screen('load');$('lp').textContent='UPC: '+upc;
 
-  let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
+  let step='init';
   try{
     // ── Same reliable data source as Clothing & Shoes module ──
     // Railway /search-upc cascades: eBay official API → Algopix → UPCitemdb → OpenFoodFacts
@@ -1658,7 +1658,8 @@ async function analyze(upc){
       rwData = rwJson.data || null;
     }
 
-    // Build prod{} + ebayFull{} in the shape the rest of analyze() expects
+    // Build prod{} + ebayFull{} in the shape finishAnalyze() expects
+    let prod = {name:'',brand:'',found:false};
     let ebayFull = { found:false, product:null, prices:null, pricing:{}, topTitles:[], activeListings:0, soldCount:0, category:null, priceSource:'railway' };
 
     if (rwData && (rwData.name || rwData.brand)) {
@@ -1688,20 +1689,110 @@ async function analyze(upc){
       prod = { name:'', brand:'', found:false };
     }
 
-    // Map ebayFull to legacy ebay format expected by callClaude
-    ebay = {
-      found:          ebayFull.found,
-      activeListings: ebayFull.activeListings || 0,
-      soldCount:      ebayFull.soldCount || 0,
-      cheapestPrice:  ebayFull.cheapestPrice || 0,
-      cheapestTitle:  ebayFull.cheapestTitle || '',
-      prices:         ebayFull.prices || null,
-      topTitles:      ebayFull.topTitles || [],
-      pricing:        ebayFull.pricing || {},
-      category:       ebayFull.category || null,
-      priceSource:    ebayFull.priceSource || 'keyword', // 'gtin_exact' = most accurate
-    };
+    await finishAnalyze(upc, prod, ebayFull, step);
+  }catch(e){
+    console.error('Error en paso ['+step+']:',e);
+    renderAnalyzeError(step, e, upc, {name:'',brand:'',found:false}, {found:false});
+  }
+}
 
+// ── Paste eBay Listing URL — same approach as Clothing & Shoes module ──
+async function analyzeEbayUrl(urlStr){
+  if (!urlStr || !urlStr.trim()) { toast('⚠️ Paste an eBay URL first'); return; }
+  urlStr = urlStr.trim();
+  screen('load'); $('lp').textContent = 'Resolving eBay link...';
+
+  const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+  let itemId = null;
+  let step = 'resolve_url';
+
+  try {
+    // Short links (ebay.io) or any URL without /itm/ — resolve via Railway
+    if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//)) {
+      try {
+        stat('Resolving short link...');
+        const resolveRes = await fetch(RAILWAY_URL + '/resolve-url?url=' + encodeURIComponent(urlStr));
+        if (resolveRes.ok) {
+          const resolveData = await resolveRes.json();
+          if (resolveData.status === 'success' && resolveData.item_id) {
+            itemId = resolveData.item_id;
+          }
+        }
+      } catch(e) { console.warn('resolve-url error:', e.message); }
+    }
+
+    // Fallback: extract the item ID directly from the URL
+    if (!itemId) {
+      try {
+        const u = new URL(urlStr);
+        const pathMatch = u.pathname.match(/\/itm\/(?:[^\/]+\/)?(\d{10,13})/);
+        if (pathMatch) itemId = pathMatch[1];
+        if (!itemId) itemId = u.searchParams.get('item') || u.searchParams.get('itemId');
+        if (!itemId) {
+          const numMatch = u.pathname.match(/(\d{10,13})/);
+          if (numMatch) itemId = numMatch[1];
+        }
+      } catch(e) {
+        const numMatch2 = urlStr.match(/(\d{10,13})/);
+        if (numMatch2) itemId = numMatch2[1];
+      }
+    }
+
+    if (!itemId) {
+      toast('❌ Could not find eBay Item ID — try copying the link again');
+      screen('idle');
+      return;
+    }
+
+    step = 'ebay_item';
+    stat('Loading eBay item ' + itemId + '...');
+    $('lp').textContent = 'Item: ' + itemId;
+    const itemRes = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
+    if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('idle'); return; }
+    const json = await itemRes.json();
+    if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('idle'); return; }
+
+    const d = json.data;
+    const title = d.title || '';
+    const price = d.price || 0;
+    const shippingCost = d.shipping_cost || 0;
+    const totalPrice = d.total_price || (price + shippingCost);
+    const brand = d.brand || '';
+
+    const prod = { name: title, brand: brand, found: !!title, source: 'ebay_url' };
+    if (prod.found) $('lp').textContent = prod.name.substring(0, 50);
+
+    let ebayFull = { found:false, product:null, prices:null, pricing:{}, topTitles: title?[title]:[], activeListings:0, soldCount:0, category:null, priceSource:'ebay_url' };
+    if (totalPrice > 0) {
+      ebayFull.found = true;
+      ebayFull.prices = { low: totalPrice, avg: totalPrice };
+      ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: totalPrice } };
+    }
+
+    await finishAnalyze(itemId, prod, ebayFull, step);
+  } catch(e) {
+    console.error('analyzeEbayUrl error:', e);
+    renderAnalyzeError(step, e, itemId||urlStr, {name:'',brand:'',found:false}, {found:false});
+  }
+}
+
+// ── Shared processing: Claude title/category + verdict + render ──
+// Used by both analyze(upc) [barcode/manual UPC] and analyzeEbayUrl(urlStr) [paste eBay link]
+async function finishAnalyze(upc, prod, ebayFull, stepIn){
+  let step = stepIn || 'claude', res = null;
+  let ebay = {
+    found:          ebayFull.found,
+    activeListings: ebayFull.activeListings || 0,
+    soldCount:      ebayFull.soldCount || 0,
+    cheapestPrice:  ebayFull.cheapestPrice || 0,
+    cheapestTitle:  ebayFull.cheapestTitle || '',
+    prices:         ebayFull.prices || null,
+    topTitles:      ebayFull.topTitles || [],
+    pricing:        ebayFull.pricing || {},
+    category:       ebayFull.category || null,
+    priceSource:    ebayFull.priceSource || 'keyword',
+  };
+  try{
     step='claude';
     stat('Analyzing with Claude...');
     res=await callClaude(upc,prod,ebay);
@@ -1726,7 +1817,6 @@ async function analyze(upc){
     }
 
     // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
-    // Recalcular aquí en scope local de analyze()
     const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
     const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
     const _avg      = ebay?.prices?.avg || 0;
@@ -1780,38 +1870,41 @@ async function analyze(upc){
     }
   }catch(e){
     console.error('Error en paso ['+step+']:',e);
-    // Mostrar error en pantalla (no solo toast)
-    screen('res');
-    $('resBody').innerHTML=`
-      <div class="badge dw">❌ ERROR</div>
-      <div class="card">
-        <div class="lbl">Failed step</div>
-        <div class="val" style="font-family:monospace;color:var(--dw)">${step}</div>
-      </div>
-      <div class="card">
-        <div class="lbl">Error message</div>
-        <div class="val" style="font-size:12px;word-break:break-all">${e.message||'Error desconocido'}</div>
-      </div>
-      <div class="card">
-        <div class="lbl">Scanned UPC</div>
-        <div class="val" style="font-family:monospace">${upc}</div>
-      </div>
-      <div class="card">
-        <div class="lbl">Product found</div>
-        <div class="val">${prod.found?prod.name:'Not found in UPCitemdb'}</div>
-      </div>
-      <div class="card">
-        <div class="lbl">eBay Worker</div>
-        <div class="val">${ebay.found?'✅ '+ebay.activeListings+' listings':'❌ No data'}</div>
-      </div>
-      <div class="card">
-        <div class="lbl">Claude API Key</div>
-        <div class="val">${(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY)?'✅ Configurada':'❌ Not configured'}</div>
-      </div>
-      <button class="ag-btn" id="agBtn" style="margin-top:10px">🔄 TRY AGAIN</button>`;
-    $('agBtn').addEventListener('touchend',e=>{e.preventDefault();scanAnother();});
-    $('agBtn').addEventListener('click',scanAnother);
+    renderAnalyzeError(step, e, upc, prod, ebay);
   }
+}
+
+function renderAnalyzeError(step, e, upc, prod, ebay){
+  screen('res');
+  $('resBody').innerHTML=`
+    <div class="badge dw">❌ ERROR</div>
+    <div class="card">
+      <div class="lbl">Failed step</div>
+      <div class="val" style="font-family:monospace;color:var(--dw)">${step}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Error message</div>
+      <div class="val" style="font-size:12px;word-break:break-all">${e.message||'Error desconocido'}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Scanned UPC / Item</div>
+      <div class="val" style="font-family:monospace">${upc}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Product found</div>
+      <div class="val">${prod.found?prod.name:'Not found'}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">eBay Data</div>
+      <div class="val">${ebay.found?'✅ '+ebay.activeListings+' listings':'❌ No data'}</div>
+    </div>
+    <div class="card">
+      <div class="lbl">Claude API Key</div>
+      <div class="val">${(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY)?'✅ Configurada':'❌ Not configured'}</div>
+    </div>
+    <button class="ag-btn" id="agBtn" style="margin-top:10px">🔄 TRY AGAIN</button>`;
+  $('agBtn').addEventListener('touchend',e=>{e.preventDefault();scanAnother();});
+  $('agBtn').addEventListener('click',scanAnother);
 }
 
 
@@ -2448,6 +2541,14 @@ document.addEventListener('DOMContentLoaded',()=>{
   sb.addEventListener('touchend',e=>{e.preventDefault();doSearch();});
   sb.addEventListener('click',doSearch);
   ui.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+
+  const ebUi=$('ebayUrlIn'),ebBtn=$('ebayUrlBtn');
+  if(ebUi&&ebBtn){
+    function doEbayUrl(){const v=ebUi.value.trim();if(v.length>5)analyzeEbayUrl(v);}
+    ebBtn.addEventListener('touchend',e=>{e.preventDefault();doEbayUrl();});
+    ebBtn.addEventListener('click',doEbayUrl);
+    ebUi.addEventListener('keydown',e=>{if(e.key==='Enter')doEbayUrl();});
+  }
 
   function openBulk(){renderBulk();$('bulkOv').classList.add('on');}
   $('fab').addEventListener('touchend',e=>{e.preventDefault();openBulk();});
