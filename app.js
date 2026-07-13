@@ -5518,4 +5518,30 @@ function clShowExportOptions(csv, fname, count) {
 }
 
 // Auto-open Product Scanner module on load
+
+// ── PRODUCT SCANNER SPECIFIC SUPPORT ─────────────────────────
+// Support for the duplicate UPC field in ps-scanner-block (psUpc)
+// and product scanner button (psScanner)
+
+if (document.readyState === 'loading') {
+  document.addEventListener('DOMContentLoaded', setupPSSupport);
+} else {
+  setupPSSupport();
+}
+
+function setupPSSupport() {
+  const psUpcField = document.getElementById('psUpc');
+  if (psUpcField) {
+    psUpcField.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        const v = psUpcField.value.trim().replace(/\D/g, '');
+        if (v.length >= 8 && typeof pgLookupUPC === 'function') {
+          pgLookupUPC(v);
+        }
+      }
+    });
+    console.log('✅ PS UPC support loaded');
+  }
+}
+
 document.addEventListener('DOMContentLoaded', function(){ if(typeof openScanner==='function') openScanner(); });
