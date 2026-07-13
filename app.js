@@ -545,7 +545,18 @@ const SAVVY_SCAN_CONFIG = {
 };
 
 async function savvyStartScan(videoElementId, onResult) {
+  console.log('📷 savvyStartScan starting for element:', videoElementId);
   await savvyStopScan(videoElementId);
+  
+  const videoEl = document.getElementById(videoElementId);
+  if(!videoEl){
+    console.error('❌ Video element not found:', videoElementId);
+    toast('❌ Camera container not found');
+    return;
+  }
+  
+  console.log('✅ Video element found:', videoEl);
+  
   var scanner = new Html5Qrcode(videoElementId, {
     formatsToSupport: SAVVY_SCAN_CONFIG.formatsToSupport,
     experimentalFeatures: SAVVY_SCAN_CONFIG.experimentalFeatures,
@@ -553,6 +564,7 @@ async function savvyStartScan(videoElementId, onResult) {
   });
   _savvyScanners[videoElementId] = scanner;
   try {
+    console.log('📱 Requesting camera access...');
     await scanner.start(
       { facingMode: 'environment' },
       {
@@ -562,12 +574,15 @@ async function savvyStartScan(videoElementId, onResult) {
         disableFlip: SAVVY_SCAN_CONFIG.disableFlip,
       },
       (decoded) => {
+        console.log('✅ QR Code found:', decoded);
         savvyStopScan(videoElementId);
         onResult(decoded);
       },
       () => {}
     );
+    console.log('✅ Camera started successfully');
   } catch(e) {
+    console.error('❌ Camera error:', e.message);
     toast('❌ No camera access: ' + e.message);
     delete _savvyScanners[videoElementId];
   }
