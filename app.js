@@ -5568,3 +5568,195 @@ function setupPSSupport() {
 }
 
 document.addEventListener('DOMContentLoaded', function(){ if(typeof openScanner==='function') openScanner(); });
+
+
+// ═════════════════════════════════════════════════════════════════════════
+// CRITICAL FIX: Ensure startCam() always works
+// This section runs AFTER all other code to ensure camera functions are available
+// ═════════════════════════════════════════════════════════════════════════
+
+console.log('🎥 Camera system initialization...');
+
+// Make sure screen function exists
+if (typeof screen !== 'function') {
+  window.screen = function(n) {
+    console.log('📺 Changing screen to:', n);
+    document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
+    const el = document.getElementById('scr-' + n);
+    if (el) {
+      el.classList.add('on');
+      console.log('✅ Screen changed to scr-' + n);
+    } else {
+      console.error('❌ Screen element not found: scr-' + n);
+    }
+  };
+}
+
+// Make sure toast function exists
+if (typeof toast !== 'function') {
+  window.toast = function(msg, ms) {
+    console.log('📢 Toast:', msg);
+    const t = document.getElementById('toast');
+    if (t) {
+      t.textContent = msg;
+      t.classList.add('on');
+      setTimeout(() => t.classList.remove('on'), ms || 2600);
+    }
+  };
+}
+
+// Simplified startCam that works with Html5Qrcode
+window.startCam = async function() {
+  console.log('🎥 startCam() CALLED - OPENING CAMERA');
+  
+  try {
+    // Change to camera screen
+    screen('cam');
+    console.log('📺 Screen changed to cam');
+    
+    // Check if Html5Qrcode is available
+    if (typeof Html5Qrcode === 'undefined') {
+      console.error('❌ Html5Qrcode library not loaded');
+      toast('❌ Camera library not loaded. Refresh page.');
+      screen('idle');
+      return;
+    }
+    
+    console.log('✅ Html5Qrcode is available');
+    
+    // Get the video element
+    const videoElement = document.getElementById('qr-video');
+    if (!videoElement) {
+      console.error('❌ qr-video element not found');
+      toast('❌ Camera container missing');
+      screen('idle');
+      return;
+    }
+    
+    console.log('✅ qr-video element found');
+    
+    // Create scanner instance
+    const scanner = new Html5Qrcode('qr-video', {
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.UPC_A,
+        Html5QrcodeSupportedFormats.UPC_E,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.QR_CODE,
+      ],
+      experimentalFeatures: {
+        useBarCodeDetectorIfSupported: true
+      },
+      verbose: false
+    });
+    
+    console.log('✅ Scanner created');
+    
+    // Start scanning
+    await scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: 20,
+        qrbox: { width: 280, height: 120 }
+      },
+      (decodedText) => {
+        console.log('✅ BARCODE DETECTED:', decodedText);
+        const upc = decodedText.replace(/\D/g, '');
+        
+        // Stop scanner
+        try {
+          scanner.stop();
+        } catch (e) {
+          console.log('Scanner already stopped');
+        }
+        
+        // Go back to idle screen
+        screen('idle');
+        
+        // Update UPC field and analyze
+        const upcInput = document.getElementById('upcIn');
+        if (upcInput) {
+          upcInput.value = upc;
+        }
+        
+        // Call analyze if available
+        if (typeof analyze === 'function') {
+          console.log('📊 Calling analyze(' + upc + ')');
+          analyze(upc);
+        } else {
+          console.log('⚠️ analyze() function not available');
+          toast('✅ UPC: ' + upc);
+        }
+      },
+      () => {
+        // Empty error handler - ignore scanning errors
+      }
+    );
+    
+    console.log('✅ Scanner started successfully');
+    toast('📷 Camera is open - point at barcode');
+    
+  } catch (error) {
+    console.error('❌ Error in startCam():', error);
+    toast('❌ Camera error: ' + error.message);
+    screen('idle');
+  }
+};
+
+// Simple stopCam
+window.stopCam = function() {
+  console.log('🛑 stopCam() called');
+  screen('idle');
+  toast('Camera closed');
+};
+
+// Attach to buttons when DOM is ready
+function attachCameraButtons() {
+  const buttons = [
+    document.getElementById('camBtn'),
+    document.getElementById('psScanner')
+  ];
+  
+  buttons.forEach((btn, idx) => {
+    if (btn) {
+      console.log('🔗 Attaching startCam to button ' + idx);
+      btn.removeEventListener('click', window.startCam);
+      btn.removeEventListener('touchend', handleTouchCam);
+      btn.addEventListener('click', window.startCam);
+      btn.addEventListener('touchend', handleTouchCam);
+    }
+  });
+  
+  const stopBtn = document.getElementById('camStop');
+  if (stopBtn) {
+    console.log('🔗 Attaching stopCam to stop button');
+    stopBtn.removeEventListener('click', window.stopCam);
+    stopBtn.removeEventListener('touchend', handleTouchStop);
+    stopBtn.addEventListener('click', window.stopCam);
+    stopBtn.addEventListener('touchend', handleTouchStop);
+  }
+}
+
+function handleTouchCam(e) {
+  e.preventDefault();
+  window.startCam();
+}
+
+function handleTouchStop(e) {
+  e.preventDefault();
+  window.stopCam();
+}
+
+// Attach immediately
+attachCameraButtons();
+
+// Also attach after a small delay to catch any timing issues
+setTimeout(attachCameraButtons, 500);
+
+// Attach on any new DOM changes
+document.addEventListener('DOMContentLoaded', attachCameraButtons);
+
+console.log('✅ Camera system ready - startCam and stopCam functions are available');
+console.log('✅ Buttons attached to event listeners');
