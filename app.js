@@ -588,6 +588,17 @@ async function startCam(){
     analyze(txt.replace(/\D/g,''));
   });
 }
+
+// Sync wrapper for HTML onclick handler
+function startCamSync(){
+  console.log('📷 startCamSync called');
+  try {
+    startCam().catch(e => console.error('startCam error:', e));
+  } catch(e) {
+    console.error('Error calling startCam:', e);
+    toast('⚠️ Error starting camera');
+  }
+}
 async function stopCam(){
   savvyStopScan('qr-video');
   screen('idle');
@@ -2427,11 +2438,17 @@ document.addEventListener('DOMContentLoaded',()=>{
   $('cfgX').addEventListener('click',closeCfg);
 
   const camBtn=$('camBtn');
-  camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
-  camBtn.addEventListener('click',startCam);
+  if(camBtn){
+    camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
+    camBtn.addEventListener('click',startCam);
+  }else{
+    console.warn('⚠️ camBtn not found in DOM');
+  }
   const stopBtn=$('camStop');
-  stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
-  stopBtn.addEventListener('click',stopCam);
+  if(stopBtn){
+    stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
+    stopBtn.addEventListener('click',stopCam);
+  }
 
   const ui=$('upcIn'),sb=$('srchBtn');
   function chk(){sb.classList.toggle('on',ui.value.trim().replace(/\D/g,'').length>=8);}
