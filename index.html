@@ -507,7 +507,21 @@
 
 <div class="scr on" id="scr-idle">
   <div class="hero"><h2>Scan a Product</h2><p>Smart resale on eBay</p></div>
-  <button class="cam-b" id="camBtn" onclick="startCamSync(); return false;" style="cursor: pointer;">
+  <button class="cam-b" id="camBtn" type="button" style="cursor: pointer;" onclick="
+    console.log('📷 Camera button clicked!');
+    document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
+    document.getElementById('scr-cam').classList.add('on');
+    setTimeout(function(){
+      if(typeof savvyStartScan === 'function'){
+        savvyStartScan('qr-video', async txt => {
+          analyze(txt.replace(/\\D/g,''));
+        });
+      }else{
+        console.error('❌ savvyStartScan not defined!');
+      }
+    }, 100);
+    return false;
+  ">
     <div class="cam-ic">📷</div>
     <div class="cam-lb">SCAN BARCODE</div>
     <div class="cam-ht">Tap to open camera</div>
@@ -542,9 +556,23 @@
       <div id="ps-barcode-result" style="display:none;margin-bottom:8px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
 
       <button id="camBtnRes"
-        ontouchend="event.preventDefault();startCamSync();"
-        onclick="startCamSync();"
-        style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
+        type="button"
+        style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px"
+        onclick="
+          console.log('📷 Camera button (results) clicked!');
+          document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
+          document.getElementById('scr-cam').classList.add('on');
+          setTimeout(function(){
+            if(typeof savvyStartScan === 'function'){
+              savvyStartScan('qr-video', async txt => {
+                analyze(txt.replace(/\\D/g,''));
+              });
+            }else{
+              console.error('❌ savvyStartScan not defined!');
+            }
+          }, 100);
+          return false;
+        ">
         📷 Scan Barcode
       </button>
 
