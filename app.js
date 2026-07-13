@@ -1,9 +1,7 @@
 
-// Primary endpoint: Railway (savvy-ebay-prices service)
-// Fallback: Cloudflare Worker
-const WORKER_RAILWAY = 'https://savvy-ebay-prices-production.up.railway.app';
-const WORKER_CLOUDFLARE = 'https://savvy-ebay.octavio-9e2.workers.dev';
-let WORKER = WORKER_RAILWAY; // Start with Railway
+// eBay pricing endpoint - Cloudflare Worker
+// This worker searches eBay catalog and returns pricing data
+const WORKER = 'https://savvy-ebay.octavio-9e2.workers.dev';
 const SAVVY_CONFIG='https://savvy-config-production.up.railway.app';
 const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
 // ── Default API keys (loaded from savvy-config Railway server)
@@ -1060,56 +1058,57 @@ async function openReadyPhoto() {
 // ── PRODUCT LOOKUP — eBay Catalog + Browse + Finding ──────────
 // Single unified call replacing UPCitemdb + separate eBay calls
 async function lookupProduct(upc) {
-  console.log('🔍 lookupProduct() - UPC:', upc, '- Endpoint:', WORKER);
+  console.log('🔍 lookupProduct() called with UPC:', upc);
   
-  // Try Railway first (primary), then Cloudflare (fallback)
-  const endpoints = [
-    { url: WORKER_RAILWAY, name: 'Railway' },
-    { url: WORKER_CLOUDFLARE, name: 'Cloudflare' }
-  ];
-  
-  for (let endpointIdx = 0; endpointIdx < endpoints.length; endpointIdx++) {
-    const endpoint = endpoints[endpointIdx];
-    
-    for (let attempt = 1; attempt <= 2; attempt++) {
-      try {
-        stat(`Searching eBay (${endpoint.name})...`);
-        console.log(`🔗 Trying ${endpoint.name} endpoint (attempt ${attempt})`);
-        
-        const ctrl = new AbortController();
-        const timer = setTimeout(()=>ctrl.abort(), 15000);
-        const r = await fetch(endpoint.url + '/?upc=' + upc, { signal: ctrl.signal });
-        clearTimeout(timer);
-        
-        if (!r.ok) throw new Error('HTTP ' + r.status);
-        const d = await r.json();
-        
-        console.log(`✅ ${endpoint.name} responded:`, d);
-        
-        // Update WORKER for future calls
-        WORKER = endpoint.url;
-        console.log('🎯 WORKER updated to:', WORKER);
-        
-        // If eBay found pricing data, return immediately
-        if (d.found || d.prices?.low || d.pricing?.sold?.count) {
-          console.log('✅ Found pricing data from', endpoint.name);
-          return d;
-        }
-        // If no pricing but product found, return on first attempt
-        if (d.product?.name && attempt === 1) {
-          console.log('✅ Found product from', endpoint.name);
-          return d;
-        }
-      } catch(e) {
-        console.warn(`❌ ${endpoint.name} failed (attempt ${attempt}):`, e.message);
-        if (attempt === 1) {
-          await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
-        }
+  // Try eBay twice before giving up
+  for (let attempt = 1; attempt <= 2; attempt++) {
+    try {
+      stat(attempt === 1 ? 'Searching eBay...' : 'Retrying eBay search...');
+      console.log(`🌐 Fetching from Cloudflare Worker (attempt ${attempt})...`);
+      console.log(`📡 URL: ${WORKER}/?upc=${upc}`);
+      
+      const ctrl = new AbortController();
+      const timer = setTimeout(()=>ctrl.abort(), 15000);
+      
+      const r = await fetch(WORKER + '/?upc=' + upc, { signal: ctrl.signal });
+      clearTimeout(timer);
+      
+      console.log(`📍 Response status: ${r.status}`);
+      
+      if (!r.ok) {
+        console.error(`❌ HTTP Error ${r.status}`);
+        throw new Error('HTTP ' + r.status);
+      }
+      
+      const d = await r.json();
+      console.log('📦 Response data:', d);
+      
+      // If eBay found pricing data, return immediately
+      if (d.found || d.prices?.low || d.pricing?.sold?.count) {
+        console.log('✅ Found eBay pricing data');
+        return d;
+      }
+      
+      // If no pricing but product found, return on first attempt
+      if (d.product?.name && attempt === 1) {
+        console.log('✅ Found product name (no pricing yet)');
+        return d;
+      }
+      
+      console.log('⏸️ No data found, will retry...');
+      
+    } catch(e) {
+      console.error(`❌ Attempt ${attempt} failed:`, e.message);
+      if (attempt === 2) {
+        console.error('❌ eBay lookup failed both attempts');
+        toast('❌ eBay service not responding');
+      } else {
+        await new Promise(r => setTimeout(r, 1000)); // wait 1s before retry
       }
     }
   }
   
-  console.error('❌ All endpoints failed for UPC:', upc);
+  console.log('❌ Returning empty result - no eBay data found');
   return { found: false, product: null, pricing: {}, topTitles: [], prices: null };
 }
 
