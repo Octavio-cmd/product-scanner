@@ -566,7 +566,7 @@
 
       <div id="ps-barcode-result" style="display:none;margin-bottom:8px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
 
-      <button id="camBtn"
+      <button id="psScanner"
         ontouchend="event.preventDefault();startCam();"
         onclick="startCam();"
         style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
@@ -574,7 +574,7 @@
       </button>
 
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <input id="upcIn" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
+        <input id="psUpc" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
           style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:15px;outline:none"
           onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);}">
         <button
@@ -1310,171 +1310,6 @@ if (clUpcInput) {
 console.log('✅ Algopix integration loaded');
 
 console.log('✅ Pack Generator v4 loaded - Show image before confirming');
-
-
-<script>
-// ═══════════════════════════════════════════════════════════════════════
-// MISSING FUNCTIONS FOR PRODUCT SCANNER CAMERA
-// ═══════════════════════════════════════════════════════════════════════
-
-// Initialize html5-qrcode scanner
-let html5QrcodeScanner = null;
-
-// Start camera for barcode scanning
-function startCam() {
-    console.log('📷 startCam() called - opening camera');
-    toast('📷 Opening camera...');
-    
-    // Check if html5QrcodeScanner already exists
-    if (html5QrcodeScanner) {
-        try {
-            html5QrcodeScanner.render();
-            return;
-        } catch(e) {
-            console.log('Need to create new scanner');
-        }
-    }
-    
-    const qrVideoContainer = document.getElementById('qr-video');
-    if (!qrVideoContainer) {
-        console.error('❌ qr-video container not found');
-        toast('❌ Camera container not found');
-        return;
-    }
-    
-    // Use html5-qrcode library (already loaded from CDN)
-    html5QrcodeScanner = new Html5QrcodeScanner(
-        'qr-video',
-        {
-            fps: 10,
-            qrbox: { width: 250, height: 250 },
-            rememberLastUsedCamera: true,
-            videoConstraints: {
-                facingMode: 'environment'
-            }
-        },
-        false
-    );
-    
-    // Success callback
-    html5QrcodeScanner.render(
-        (decodedText) => {
-            console.log('✅ Barcode scanned:', decodedText);
-            
-            // Clean UPC (remove non-digits if it's a barcode)
-            const cleanUpc = decodedText.replace(/\D/g, '');
-            
-            // Stop scanner
-            if (html5QrcodeScanner) {
-                try {
-                    html5QrcodeScanner.clear();
-                    html5QrcodeScanner = null;
-                } catch(e) {
-                    console.log('Scanner already cleared');
-                }
-            }
-            
-            // Update input and search
-            const upcInput = document.getElementById('upcIn');
-            if (upcInput) {
-                upcInput.value = cleanUpc;
-                pgLookupUPC(cleanUpc);
-            }
-            
-            toast('✅ UPC: ' + cleanUpc);
-        },
-        (error) => {
-            // Ignore scanning errors
-        }
-    );
-}
-
-// Stop camera
-function stopCam() {
-    console.log('🛑 Stopping camera');
-    if (html5QrcodeScanner) {
-        try {
-            html5QrcodeScanner.clear();
-            html5QrcodeScanner = null;
-        } catch(e) {
-            console.error('Error stopping scanner:', e);
-        }
-    }
-}
-
-// Authentication functions
-function doLogin() {
-    console.log('🔐 Login requested');
-    const email = document.getElementById('login-email')?.value?.trim();
-    const pin = document.getElementById('login-pin')?.value?.trim();
-    
-    if (!email || !pin) {
-        toast('❌ Email and PIN required');
-        return;
-    }
-    
-    // Simple validation (in real app, this would authenticate)
-    if (pin.length < 4) {
-        toast('❌ PIN must be at least 4 digits');
-        return;
-    }
-    
-    localStorage.setItem('scannerUser', email);
-    localStorage.setItem('scannerAuth', 'true');
-    
-    // Show scanner screen
-    document.getElementById('screen-login')?.classList.remove('on');
-    document.getElementById('screen-scanner')?.classList.add('on');
-    
-    toast('✅ Logged in: ' + email);
-}
-
-function doLogout() {
-    console.log('🚪 Logout requested');
-    localStorage.removeItem('scannerUser');
-    localStorage.removeItem('scannerAuth');
-    
-    stopCam();
-    
-    document.getElementById('screen-scanner')?.classList.remove('on');
-    document.getElementById('screen-login')?.classList.add('on');
-    
-    toast('👋 Logged out');
-}
-
-// Navigation functions
-function openScanner() {
-    console.log('📷 Opening Product Scanner');
-    if (document.getElementById('screen-scanner')) {
-        document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-        document.getElementById('screen-scanner').classList.add('on');
-    }
-}
-
-function openClothing() {
-    console.log('👕 Opening Clothing Scanner');
-    // This redirects to the clothing-shoes module
-    window.location.href = 'https://octavio-cmd.github.io/clothing-shoes/';
-}
-
-// Check if user is already logged in on page load
-document.addEventListener('DOMContentLoaded', function() {
-    console.log('🚀 Product Scanner initialized');
-    
-    const isAuth = localStorage.getItem('scannerAuth');
-    const username = localStorage.getItem('scannerUser');
-    
-    if (!isAuth) {
-        document.getElementById('screen-login')?.classList.add('on');
-    } else if (document.getElementById('screen-scanner')) {
-        document.getElementById('screen-scanner').classList.add('on');
-        console.log('✅ User ' + username + ' already logged in');
-    }
-});
-
-console.log('✅ Missing scanner functions loaded - startCam, doLogin, doLogout, openScanner, openClothing');
-</script>
-
 </script>
 </body>
 </html>
