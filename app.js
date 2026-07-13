@@ -98,10 +98,6 @@ if (!localStorage.getItem('savvy_printer_ip')) {
 let bulk=[],cur=null;
 let _lastBundleUrl = ''; // URL pública de ImgBB del último bundle generado
 
-const $=id=>document.getElementById(id);
-const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
-const fmt=n=>(!n||isNaN(n))?'—':'$'+Number(n).toFixed(2);
-
 function screen(n){document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));$('scr-'+n).classList.add('on');}
 let _tt;
 function toast(msg,ms=2600){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('on'),ms);}
