@@ -1649,6 +1649,7 @@ async function analyze(upc){
     step='ebay_catalog';
     stat('Querying eBay Catalog...');
     const ebayFull = await lookupProduct(upc);
+    console.log('🔍 Catalog response:', JSON.stringify(ebayFull).substring(0,500));
 
     // Extract product info from Catalog response
     if (ebayFull.product && ebayFull.product.name) {
@@ -1682,10 +1683,11 @@ async function analyze(upc){
         clearTimeout(kwTimer);
         if (kwR.ok) {
           const kwD = await kwR.json();
+          console.log('🔍 Keyword response:', JSON.stringify(kwD).substring(0,500));
           // Merge prices if keyword search found better data
           if (kwD.prices?.low || kwD.topTitles?.length) {
-            if (!ebayFull.prices && kwD.prices) ebayFull.prices = kwD.prices;
-            if (!ebayFull.pricing?.sold && kwD.pricing) ebayFull.pricing = kwD.pricing;
+            if (!ebayFull.prices?.low && kwD.prices) ebayFull.prices = kwD.prices;
+            if (!ebayFull.pricing?.sold?.count && kwD.pricing) ebayFull.pricing = kwD.pricing;
             if (!ebayFull.topTitles?.length && kwD.topTitles?.length) ebayFull.topTitles = kwD.topTitles;
             if (!ebayFull.activeListings && kwD.activeListings) ebayFull.activeListings = kwD.activeListings;
             if (!ebayFull.soldCount && kwD.soldCount) ebayFull.soldCount = kwD.soldCount;
