@@ -577,11 +577,19 @@ async function savvyStopScan(videoElementId) {
 
 // Camera — main scanner
 async function startCam(){
-  screen('cam');
-  savvyStopScan('qr-video');
-  savvyStartScan('qr-video', async txt => {
-    analyze(txt.replace(/\D/g,''));
-  });
+  console.log('🎥 startCam() called - opening camera...');
+  try {
+    screen('cam');
+    savvyStopScan('qr-video');
+    console.log('🎥 About to start scan on qr-video');
+    savvyStartScan('qr-video', async txt => {
+      console.log('✅ Barcode scanned:', txt);
+      analyze(txt.replace(/\D/g,''));
+    });
+  } catch(e) {
+    console.error('❌ Error in startCam:', e);
+    toast('❌ Camera error: ' + e.message);
+  }
 }
 async function stopCam(){
   savvyStopScan('qr-video');
@@ -2421,12 +2429,27 @@ document.addEventListener('DOMContentLoaded',()=>{
   cfgBtn.addEventListener('click',openCfgWithPin);
   $('cfgX').addEventListener('click',closeCfg);
 
+  // Handle BOTH camera buttons: original (camBtn) and product scanner (psScanner)
   const camBtn=$('camBtn');
-  camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
-  camBtn.addEventListener('click',startCam);
+  const psScanner=$('psScanner');
+  
+  // Add listeners to original camera button if it exists
+  if(camBtn){
+    camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
+    camBtn.addEventListener('click',startCam);
+  }
+  
+  // Add listeners to product scanner button if it exists
+  if(psScanner){
+    psScanner.addEventListener('touchend',e=>{e.preventDefault();startCam();});
+    psScanner.addEventListener('click',startCam);
+  }
+  
   const stopBtn=$('camStop');
-  stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
-  stopBtn.addEventListener('click',stopCam);
+  if(stopBtn){
+    stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
+    stopBtn.addEventListener('click',stopCam);
+  }
 
   const ui=$('upcIn'),sb=$('srchBtn');
   function chk(){sb.classList.toggle('on',ui.value.trim().replace(/\D/g,'').length>=8);}
