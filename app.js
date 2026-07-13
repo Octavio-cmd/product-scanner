@@ -1645,70 +1645,47 @@ async function analyze(upc){
 
   let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
   try{
-    // ── Single call to eBay: Catalog + Browse + Finding ──────
-    step='ebay_catalog';
-    stat('Querying eBay Catalog...');
-    const ebayFull = await lookupProduct(upc);
-    console.log('🔍 Catalog response:', JSON.stringify(ebayFull).substring(0,500));
-
-    // Extract product info from Catalog response
-    if (ebayFull.product && ebayFull.product.name) {
-      prod = {
-        name:        ebayFull.product.name,
-        brand:       ebayFull.product.brand || '',
-        description: ebayFull.product.description || '',
-        aspects:     ebayFull.product.aspects || {},
-        found:       true,
-        source:      'ebay_catalog'
-      };
-      $('lp').textContent = prod.name.substring(0, 50);
-    } else {
-      // Fallback to UPCitemdb if Catalog found nothing
-      step='upcitemdb_fallback';
-      stat('Searching UPCitemdb...');
-      prod = await lookupUPCitemdb(upc);
-      if(prod.found) $('lp').textContent = prod.name.substring(0, 50);
+    // ── Same reliable data source as Clothing & Shoes module ──
+    // Railway /search-upc cascades: eBay official API → Algopix → UPCitemdb → OpenFoodFacts
+    step='railway_search';
+    stat('Querying eBay via Railway...');
+    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+    const rwRes = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
+    let rwData = null;
+    if (rwRes.ok) {
+      const rwJson = await rwRes.json();
+      console.log('🔍 Railway /search-upc response:', JSON.stringify(rwJson).substring(0,500));
+      rwData = rwJson.data || null;
     }
 
-    // ── KEYWORD PRICE FALLBACK: run whenever we don't have real price data yet ──
-    // This runs REGARDLESS of whether Catalog found a product name — a name match
-    // does not guarantee active/sold pricing came back with it.
-    const _hasPriceAlready = !!(ebayFull.prices?.low || ebayFull.pricing?.sold?.count);
-    if (!_hasPriceAlready) {
-      try {
-        stat('Searching eBay by keyword...');
-        const kwCtrl = new AbortController();
-        const kwTimer = setTimeout(()=>kwCtrl.abort(), 10000);
-        const kwR = await fetch(WORKER + '/?keywords=' + upc, { signal: kwCtrl.signal });
-        clearTimeout(kwTimer);
-        if (kwR.ok) {
-          const kwD = await kwR.json();
-          console.log('🔍 Keyword response:', JSON.stringify(kwD).substring(0,500));
-          // Merge prices if keyword search found better data
-          if (kwD.prices?.low || kwD.topTitles?.length) {
-            if (!ebayFull.prices?.low && kwD.prices) ebayFull.prices = kwD.prices;
-            if (!ebayFull.pricing?.sold?.count && kwD.pricing) ebayFull.pricing = kwD.pricing;
-            if (!ebayFull.topTitles?.length && kwD.topTitles?.length) ebayFull.topTitles = kwD.topTitles;
-            if (!ebayFull.activeListings && kwD.activeListings) ebayFull.activeListings = kwD.activeListings;
-            if (!ebayFull.soldCount && kwD.soldCount) ebayFull.soldCount = kwD.soldCount;
-            ebayFull.priceSource = 'keyword_upc';
-            if (!ebayFull.found) ebayFull.found = kwD.found || false;
-          }
-          // Extract product name from top eBay title ONLY if we still don't have one
-          if (!prod.found && kwD.topTitles && kwD.topTitles[0]) {
-            const topT = typeof kwD.topTitles[0] === 'object' ? kwD.topTitles[0].title : kwD.topTitles[0];
-            if (topT) {
-              prod.name = topT.substring(0, 120);
-              prod.found = true;
-              prod.source = 'ebay_keyword';
-              // Extract brand from title (first word usually)
-              const firstWord = topT.trim().split(/\s+/)[0];
-              if (firstWord && firstWord.length > 1) prod.brand = firstWord;
-              $('lp').textContent = prod.name.substring(0, 50);
-            }
-          }
-        }
-      } catch(e) { /* keyword search failed silently */ }
+    // Build prod{} + ebayFull{} in the shape the rest of analyze() expects
+    let ebayFull = { found:false, product:null, prices:null, pricing:{}, topTitles:[], activeListings:0, soldCount:0, category:null, priceSource:'railway' };
+
+    if (rwData && (rwData.name || rwData.brand)) {
+      prod = {
+        name:  rwData.name || '',
+        brand: rwData.brand || '',
+        found: true,
+        source: rwData.data_source || 'railway'
+      };
+      $('lp').textContent = prod.name.substring(0, 50);
+
+      // Prefer real eBay total, fall back to Amazon/Walmart/suggested price
+      const total = rwData.ebay_total || rwData.amazon_price || rwData.walmart_price || rwData.suggested_price || 0;
+      if (total > 0) {
+        ebayFull.found = true;
+        ebayFull.prices = { low: total, avg: total };
+        ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: total } };
+        ebayFull.topTitles = [prod.name];
+        ebayFull.activeListings = rwData.sellers_count || 0;
+      }
+      if (rwData.category) {
+        ebayFull.category = rwData.category;
+      }
+      ebayFull.priceSource = rwData.data_source || 'railway';
+    } else {
+      // Nothing found at all — same message the clothing module shows
+      prod = { name:'', brand:'', found:false };
     }
 
     // Map ebayFull to legacy ebay format expected by callClaude
