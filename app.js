@@ -1667,45 +1667,46 @@ async function analyze(upc){
       stat('Searching UPCitemdb...');
       prod = await lookupUPCitemdb(upc);
       if(prod.found) $('lp').textContent = prod.name.substring(0, 50);
+    }
 
-      // ── KEYWORD FALLBACK: if still no product name, search eBay by UPC as keyword
-      // This catches retired LEGO sets, discontinued items, etc.
-      // Trigger: no product name found yet (regardless of whether eBay found prices)
-      if (!prod.found) {
-        try {
-          stat('Searching eBay by keyword...');
-          const kwCtrl = new AbortController();
-          const kwTimer = setTimeout(()=>kwCtrl.abort(), 10000);
-          const kwR = await fetch(WORKER + '/?keywords=' + upc, { signal: kwCtrl.signal });
-          clearTimeout(kwTimer);
-          if (kwR.ok) {
-            const kwD = await kwR.json();
-            // Merge prices if keyword search found better data
-            if (kwD.prices?.low || kwD.topTitles?.length) {
-              if (!ebayFull.prices && kwD.prices) ebayFull.prices = kwD.prices;
-              if (!ebayFull.pricing?.sold && kwD.pricing) ebayFull.pricing = kwD.pricing;
-              if (!ebayFull.topTitles?.length && kwD.topTitles?.length) ebayFull.topTitles = kwD.topTitles;
-              if (!ebayFull.activeListings && kwD.activeListings) ebayFull.activeListings = kwD.activeListings;
-              if (!ebayFull.soldCount && kwD.soldCount) ebayFull.soldCount = kwD.soldCount;
-              ebayFull.priceSource = 'keyword_upc';
-              if (!ebayFull.found) ebayFull.found = kwD.found || false;
-            }
-            // Extract product name from top eBay title
-            if (kwD.topTitles && kwD.topTitles[0]) {
-              const topT = typeof kwD.topTitles[0] === 'object' ? kwD.topTitles[0].title : kwD.topTitles[0];
-              if (topT) {
-                prod.name = topT.substring(0, 120);
-                prod.found = true;
-                prod.source = 'ebay_keyword';
-                // Extract brand from title (first word usually)
-                const firstWord = topT.trim().split(/\s+/)[0];
-                if (firstWord && firstWord.length > 1) prod.brand = firstWord;
-                $('lp').textContent = prod.name.substring(0, 50);
-              }
+    // ── KEYWORD PRICE FALLBACK: run whenever we don't have real price data yet ──
+    // This runs REGARDLESS of whether Catalog found a product name — a name match
+    // does not guarantee active/sold pricing came back with it.
+    const _hasPriceAlready = !!(ebayFull.prices?.low || ebayFull.pricing?.sold?.count);
+    if (!_hasPriceAlready) {
+      try {
+        stat('Searching eBay by keyword...');
+        const kwCtrl = new AbortController();
+        const kwTimer = setTimeout(()=>kwCtrl.abort(), 10000);
+        const kwR = await fetch(WORKER + '/?keywords=' + upc, { signal: kwCtrl.signal });
+        clearTimeout(kwTimer);
+        if (kwR.ok) {
+          const kwD = await kwR.json();
+          // Merge prices if keyword search found better data
+          if (kwD.prices?.low || kwD.topTitles?.length) {
+            if (!ebayFull.prices && kwD.prices) ebayFull.prices = kwD.prices;
+            if (!ebayFull.pricing?.sold && kwD.pricing) ebayFull.pricing = kwD.pricing;
+            if (!ebayFull.topTitles?.length && kwD.topTitles?.length) ebayFull.topTitles = kwD.topTitles;
+            if (!ebayFull.activeListings && kwD.activeListings) ebayFull.activeListings = kwD.activeListings;
+            if (!ebayFull.soldCount && kwD.soldCount) ebayFull.soldCount = kwD.soldCount;
+            ebayFull.priceSource = 'keyword_upc';
+            if (!ebayFull.found) ebayFull.found = kwD.found || false;
+          }
+          // Extract product name from top eBay title ONLY if we still don't have one
+          if (!prod.found && kwD.topTitles && kwD.topTitles[0]) {
+            const topT = typeof kwD.topTitles[0] === 'object' ? kwD.topTitles[0].title : kwD.topTitles[0];
+            if (topT) {
+              prod.name = topT.substring(0, 120);
+              prod.found = true;
+              prod.source = 'ebay_keyword';
+              // Extract brand from title (first word usually)
+              const firstWord = topT.trim().split(/\s+/)[0];
+              if (firstWord && firstWord.length > 1) prod.brand = firstWord;
+              $('lp').textContent = prod.name.substring(0, 50);
             }
           }
-        } catch(e) { /* keyword search failed silently */ }
-      }
+        }
+      } catch(e) { /* keyword search failed silently */ }
     }
 
     // Map ebayFull to legacy ebay format expected by callClaude
