@@ -103,6 +103,19 @@ let _tt;
 function toast(msg,ms=2600){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('on'),ms);}
 function stat(m){const e=$('ls');if(e)e.textContent=m;}
 
+// Show the loading spinner INSIDE resBody (scr-res stays the visible screen the whole time —
+// no more jumping to a separate loading screen). Also brings us back from scr-cam if we were scanning.
+function showLoadingInline(initialMsg){
+  screen('res');
+  const rb=$('resBody');
+  if(!rb) return;
+  rb.innerHTML = '<div class="lw" style="padding:20px 0 8px">'
+    + '<div class="sp"></div>'
+    + '<div id="lp" style="font-size:16px;font-weight:700;margin:10px 0 6px;text-align:center">' + (initialMsg||'Scanning...') + '</div>'
+    + '<div id="ls" style="color:var(--mu);font-size:13px;text-align:center">Querying eBay...</div>'
+    + '</div>';
+}
+
 // SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
 function makeSKU(brand,upc,packs,title){
   packs=packs||2; title=title||'';
@@ -1641,7 +1654,7 @@ function fallback(upc,prod,ebay){
 async function analyze(upc){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
-  screen('load');$('lp').textContent='UPC: '+upc;
+  showLoadingInline('UPC: '+upc);
 
   let step='init';
   try{
@@ -1700,7 +1713,7 @@ async function analyze(upc){
 async function analyzeEbayUrl(urlStr){
   if (!urlStr || !urlStr.trim()) { toast('⚠️ Paste an eBay URL first'); return; }
   urlStr = urlStr.trim();
-  screen('load'); $('lp').textContent = 'Resolving eBay link...';
+  showLoadingInline('Resolving eBay link...');
 
   const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
   let itemId = null;
