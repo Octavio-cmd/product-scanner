@@ -612,7 +612,7 @@ function startCamSync(){
 }
 async function stopCam(){
   savvyStopScan('qr-video');
-  screen('idle');
+  screen('res');
 }
 
 
@@ -1740,7 +1740,7 @@ async function analyzeEbayUrl(urlStr){
 
     if (!itemId) {
       toast('❌ Could not find eBay Item ID — try copying the link again');
-      screen('idle');
+      screen('res');
       return;
     }
 
@@ -1748,9 +1748,9 @@ async function analyzeEbayUrl(urlStr){
     stat('Loading eBay item ' + itemId + '...');
     $('lp').textContent = 'Item: ' + itemId;
     const itemRes = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
-    if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('idle'); return; }
+    if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('res'); return; }
     const json = await itemRes.json();
-    if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('idle'); return; }
+    if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('res'); return; }
 
     const d = json.data;
     const title = d.title || '';
@@ -2207,10 +2207,16 @@ function clearBulkSession() {
 }
 
 function scanAnother() {
-  const upcInput = document.getElementById('upcIn');
+  const upcInput = document.getElementById('upcInRes');
   if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
+  const ebayUrlInput = document.getElementById('ps-ebay-url');
+  if (ebayUrlInput) ebayUrlInput.value = '';
+  const barcodeResult = document.getElementById('ps-barcode-result');
+  if (barcodeResult) { barcodeResult.style.display='none'; barcodeResult.innerHTML=''; }
+  const rb = document.getElementById('resBody');
+  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
   _lastBundleUrl = '';
-  screen('idle');
+  screen('res');
 }
 
 function renderBulk(){
@@ -2534,21 +2540,11 @@ document.addEventListener('DOMContentLoaded',()=>{
     stopBtn.addEventListener('click',stopCam);
   }
 
-  const ui=$('upcIn'),sb=$('srchBtn');
-  function chk(){sb.classList.toggle('on',ui.value.trim().replace(/\D/g,'').length>=8);}
-  ui.addEventListener('input',chk);ui.addEventListener('change',chk);ui.addEventListener('paste',()=>setTimeout(chk,50));
-  function doSearch(){const v=ui.value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);}
-  sb.addEventListener('touchend',e=>{e.preventDefault();doSearch();});
-  sb.addEventListener('click',doSearch);
-  ui.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
+  // NOTE: upcIn/srchBtn from the old idle screen were removed — scr-res
+  // (upcInRes + its 🔍 button) is now the single home screen and is wired
+  // via inline onclick/onkeydown attributes directly in the HTML.
 
-  const ebUi=$('ebayUrlIn'),ebBtn=$('ebayUrlBtn');
-  if(ebUi&&ebBtn){
-    function doEbayUrl(){const v=ebUi.value.trim();if(v.length>5)analyzeEbayUrl(v);}
-    ebBtn.addEventListener('touchend',e=>{e.preventDefault();doEbayUrl();});
-    ebBtn.addEventListener('click',doEbayUrl);
-    ebUi.addEventListener('keydown',e=>{if(e.key==='Enter')doEbayUrl();});
-  }
+  // eBay URL paste box lives in scr-res (ps-ebay-url) and is wired inline in the HTML.
 
   function openBulk(){renderBulk();$('bulkOv').classList.add('on');}
   $('fab').addEventListener('touchend',e=>{e.preventDefault();openBulk();});
@@ -2871,7 +2867,7 @@ function toDash() {
 
 function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  $('scr-idle').classList.add('on');
+  $('scr-res').classList.add('on');
 }
 
 function openClothing() {
