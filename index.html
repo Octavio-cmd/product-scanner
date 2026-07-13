@@ -541,7 +541,7 @@
 
       <div id="ps-barcode-result" style="display:none;margin-bottom:8px;background:var(--sf2);border-radius:10px;padding:10px;font-size:13px"></div>
 
-      <button id="camBtn"
+      <button id="camBtnRes"
         ontouchend="event.preventDefault();startCam();"
         onclick="startCam();"
         style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">
@@ -549,12 +549,12 @@
       </button>
 
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
-        <input id="upcIn" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
+        <input id="upcInRes" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
           style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:15px;outline:none"
           onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);}">
         <button
-          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
-          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
+          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcInRes').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
+          onclick="(function(){var v=document.getElementById('upcInRes').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
           style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 16px;color:var(--tx);font-size:20px;cursor:pointer;flex-shrink:0">🔍</button>
       </div>
 
