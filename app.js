@@ -1,3 +1,7 @@
+// ── HELPER FUNCTIONS ──────────────────────────────────────────
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');
+const fmt=n=>(!n||isNaN(n))?'—':'$'+Number(n).toFixed(2);
 
 const WORKER='https://savvy-ebay.octavio-9e2.workers.dev';
 const SAVVY_CONFIG='https://savvy-config-production.up.railway.app';
@@ -2773,11 +2777,5 @@ function saveSheetsUrl() {
   localStorage.setItem('cl_sheets_url', v);
   toast('✅ Sheets URL saved');
   setTimeout(closeCfg, 700);
-}
-
-function screen(n) {
-  document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  const el = $('scr-' + n);
-  if (el) el.classList.add('on');
 }
 
