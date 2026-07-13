@@ -576,10 +576,10 @@
       <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
         <input id="upcIn" type="text" inputmode="numeric" placeholder="Or type UPC manually..."
           style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:12px;color:var(--tx);font-size:15px;outline:none"
-          onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);}">
+          onkeydown="if(event.key==='Enter'){var v=this.value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);}">
         <button
-          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);})();"
-          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)pgLookupUPC(v);})();"
+          ontouchend="event.preventDefault();(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
+          onclick="(function(){var v=document.getElementById('upcIn').value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);})();"
           style="background:var(--sf2);border:1px solid var(--bd);border-radius:10px;padding:11px 16px;color:var(--tx);font-size:20px;cursor:pointer;flex-shrink:0">🔍</button>
       </div>
 
@@ -598,6 +598,7 @@
 </div>
 
 <button class="fab" id="fab">📋 CSV <div class="fbc" id="fabN">0</div></button>
-<button class="fab" id="fab">📋 CSV <div class="fbc" id="fabN">0</div></button>
+
+<script src="app.js"></script>
 </body>
 </html>
