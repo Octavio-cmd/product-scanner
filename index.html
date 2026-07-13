@@ -505,39 +505,6 @@
 <div class="scr" id="scr-dash">
 </div>
 
-<div class="scr on" id="scr-idle">
-  <div class="hero"><h2>Scan a Product</h2><p>Smart resale on eBay</p></div>
-  <button class="cam-b" id="camBtn" type="button" style="cursor: pointer;" onclick="
-    console.log('📷 Camera button clicked!');
-    document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
-    document.getElementById('scr-cam').classList.add('on');
-    setTimeout(function(){
-      if(typeof savvyStartScan === 'function'){
-        savvyStartScan('qr-video', async txt => {
-          analyze(txt.replace(/\\D/g,''));
-        });
-      }else{
-        console.error('❌ savvyStartScan not defined!');
-      }
-    }, 100);
-    return false;
-  ">
-    <div class="cam-ic">📷</div>
-    <div class="cam-lb">SCAN BARCODE</div>
-    <div class="cam-ht">Tap to open camera</div>
-  </button>
-  <div class="div-row"><div class="dl"></div><div class="dt">OR ENTER UPC</div><div class="dl"></div></div>
-  <div class="ir">
-    <input class="ui" id="upcIn" type="number" placeholder="UPC Code..." inputmode="numeric">
-    <button class="sb" id="srchBtn">SEARCH</button>
-  </div>
-  <div class="div-row"><div class="dl"></div><div class="dt">OR PASTE eBay LISTING URL</div><div class="dl"></div></div>
-  <div class="ir">
-    <input class="ui" id="ebayUrlIn" type="text" placeholder="https://ebay.com/itm/... or ebay.io/...">
-    <button class="sb" id="ebayUrlBtn" style="background:#0064d2">🛒 eBay</button>
-  </div>
-</div>
-
 <div class="scr" id="scr-cam">
   <div id="qr-video" style="width:100%;height:400px;border-radius:12px;overflow:hidden;background:#000;display:flex;align-items:center;justify-content:center;color:#fff;font-size:14px"></div>
   <button class="cam-st" id="camStop" onclick="
@@ -546,7 +513,7 @@
       savvyStopScan('qr-video');
     }
     document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));
-    document.getElementById('scr-idle').classList.add('on');
+    document.getElementById('scr-res').classList.add('on');
     return false;
   ">✕ CANCEL</button>
 </div>
@@ -560,7 +527,7 @@
   </div>
 </div>
 
-<div class="scr" id="scr-res">
+<div class="scr on" id="scr-res">
   <!-- ── SCANNER INTEGRADO (idéntico a Clothing & Shoes) ───── -->
   <div id="ps-scanner-block" style="margin-bottom:12px">
     <div style="background:var(--sf);border:1.5px solid var(--ac);border-radius:14px;padding:14px 14px 10px">
