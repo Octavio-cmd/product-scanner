@@ -2126,6 +2126,101 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
 }
 
 // Render result
+// ── BULK SPLIT CALCULATOR — reparte el inventario de un embarque entre los
+// tamaños de paquete 1/3/6/12 según la demanda real de eBay (soldCount 90 días) ──
+const DEMAND_TIERS = {
+  alta:  { label:'🔥 Alta demanda',              min:20, weights:{1:0.60,3:0.20,6:0.12,12:0.08} },
+  media: { label:'📊 Demanda media',              min:5,  weights:{1:0.35,3:0.30,6:0.20,12:0.15} },
+  baja:  { label:'🐢 Demanda baja / mov. lento',  min:0,  weights:{1:0.15,3:0.20,6:0.30,12:0.35} }
+};
+const DEMAND_TIER_ORDER = ['alta','media','baja'];
+
+function getDemandTier(soldCount){
+  if (soldCount >= DEMAND_TIERS.alta.min)  return 'alta';
+  if (soldCount >= DEMAND_TIERS.media.min) return 'media';
+  return 'baja';
+}
+
+// Reparte totalUnits en múltiplos exactos de cada tamaño de paquete.
+// Procesa de paquete grande a chico; el sobrante siempre cae en pack de 1
+// (que nunca deja remanente, porque son unidades sueltas).
+function computeSplit(totalUnits, tierKey){
+  const weights = (DEMAND_TIERS[tierKey] || DEMAND_TIERS.media).weights;
+  const order = [12,6,3];
+  let remaining = totalUnits;
+  const result = {};
+  for (const p of order) {
+    const targetUnits = Math.round(totalUnits * weights[p]);
+    const listings = Math.floor(Math.min(targetUnits, remaining) / p);
+    const used = listings * p;
+    result[p] = { listings, units: used };
+    remaining -= used;
+  }
+  result[1] = { listings: remaining, units: remaining };
+  return result;
+}
+
+function renderSplitCalculatorHTML(ebay){
+  const soldCount = (ebay && (ebay.soldCount || (ebay.pricing && ebay.pricing.sold && ebay.pricing.sold.count))) || 0;
+  const autoTier = getDemandTier(soldCount);
+  return `<div class="card" id="split-calc-card" data-auto-tier="${autoTier}" data-sold-count="${soldCount}">
+    <div class="lbl">🚛 Reparto de Inventario (Bulk Split)</div>
+    <div style="font-size:12px;color:var(--mu);margin-bottom:10px">¿Cuántas unidades llegaron de este producto? Sugerimos cómo repartirlas entre 1pk / 3pk / 6pk / 12pk según la demanda real en eBay.</div>
+    <div class="extra-field">
+      <div class="extra-label">Unidades totales en este envío</div>
+      <input class="extra-input" id="split-total-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="ej. 1000" oninput="updateSplitCalc()">
+    </div>
+    <div style="margin-top:8px;font-size:12px;color:var(--mu)">
+      Demanda detectada: <strong id="split-tier-label" style="color:var(--ac)"></strong>
+      (${soldCount} vendidos en 90 días)
+      — <span style="text-decoration:underline;cursor:pointer;color:var(--ac)" onclick="cycleSplitTier()">cambiar</span>
+    </div>
+    <div id="split-results" style="margin-top:12px"></div>
+  </div>`;
+}
+
+function updateSplitCalc(){
+  const inp = $('split-total-input');
+  const card = $('split-calc-card');
+  if(!inp || !card) return;
+  const total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
+  const tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
+  card.dataset.tier = tierKey;
+  const tierInfo = DEMAND_TIERS[tierKey];
+  const lbl = $('split-tier-label');
+  if (lbl) lbl.textContent = tierInfo.label;
+
+  const out = $('split-results');
+  if (!out) return;
+  if (total <= 0) {
+    out.innerHTML = '<div style="color:var(--mu);font-size:12px">Ingresa el total de unidades para ver el reparto sugerido.</div>';
+    return;
+  }
+
+  const split = computeSplit(total, tierKey);
+  let rows = '';
+  [1,3,6,12].forEach(function(p){
+    const d = split[p];
+    rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
+      <div style="font-weight:800">${p}pk</div>
+      <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
+      <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
+    </div>`;
+  });
+  out.innerHTML = rows + `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${total} unidades exactas</div>`;
+}
+
+function cycleSplitTier(){
+  const card = $('split-calc-card');
+  if(!card) return;
+  const current = card.dataset.tier || card.dataset.autoTier || 'media';
+  const idx = DEMAND_TIER_ORDER.indexOf(current);
+  const next = DEMAND_TIER_ORDER[(idx+1) % DEMAND_TIER_ORDER.length];
+  card.dataset.tier = next;
+  updateSplitCalc();
+}
+
+
 function renderResult(r){
   if(!r)return;
   const sv=r.verdict==='SAVVY';
@@ -2218,6 +2313,10 @@ function renderResult(r){
     return h2;
   }());
 
+  // ── 4b. BULK SPLIT CALCULATOR — reparte unidades del camión entre 1/3/6/12
+  // según la demanda real de eBay (soldCount de los últimos 90 días) ──
+  h+=renderSplitCalculatorHTML(ebay);
+
   // ── 3. BUNDLE PHOTO GENERATOR ────────────────────────────────
   h+=`<div class="bundle-photo-card">
     <div class="lbl">📸 LISTING PHOTO — Bundle Image Generator</div>
@@ -2290,6 +2389,7 @@ function renderResult(r){
        display:document.getElementById('pack-sel-display')});
     var si=document.getElementById('shade-input');
     if(si&&window.cur&&cur._shade) si.value=cur._shade;
+    updateSplitCalc();
   },80);
 }
 
