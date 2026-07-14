@@ -1831,14 +1831,43 @@ function applyVerdict(res){
 
 // ── Called when the user taps the "eBay Lowest" price box to correct it manually ──
 // e.g. after tapping "Ver precio real en eBay →" and seeing the actual listing price.
+// Uses a real numeric-only keyboard (inputmode="decimal") instead of prompt()'s
+// alphanumeric keyboard.
 function editLowPrice(){
   if(!cur){ toast('⚠️ Scan a product first'); return; }
   if(!cur.ebay) cur.ebay = { found:true, prices:{}, pricing:{} };
   if(!cur.ebay.prices) cur.ebay.prices = {};
   const currentLow = cur.ebay.prices.low || 0;
-  const input = prompt('Precio real visto en eBay (item + envío):', currentLow>0 ? currentLow.toFixed(2) : '');
-  if(input===null) return; // cancelled
-  const val = parseFloat(String(input).replace(/[^0-9.]/g,''));
+
+  document.querySelectorAll('.price-edit-ov').forEach(e=>e.remove());
+
+  var ov = document.createElement('div');
+  ov.className = 'price-edit-ov';
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
+  ov.innerHTML = '<div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:320px">'
+    + '<div style="font-size:16px;font-weight:800;margin-bottom:4px;text-align:center">✏️ Precio real en eBay</div>'
+    + '<div style="font-size:12px;color:var(--mu);margin-bottom:16px;text-align:center">Item + envío, visto en el link de eBay</div>'
+    + '<div style="display:flex;align-items:center;gap:6px;background:var(--sf2);border:2px solid var(--ac);border-radius:12px;padding:10px 14px;margin-bottom:18px">'
+    + '<span style="font-size:22px;font-weight:800;color:var(--ac)">$</span>'
+    + '<input id="price-edit-input" type="text" inputmode="decimal" pattern="[0-9]*\\.?[0-9]*" '
+    + 'style="flex:1;background:none;border:none;outline:none;color:var(--tx);font-size:24px;font-weight:800;text-align:left" '
+    + 'value="' + (currentLow>0 ? currentLow.toFixed(2) : '') + '" placeholder="0.00" '
+    + 'onkeydown="if(event.key===\'Enter\')_confirmEditLowPrice();">'
+    + '</div>'
+    + '<button onclick="_confirmEditLowPrice()" style="width:100%;padding:13px;background:linear-gradient(135deg,#FF6B35,#E71D36);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px;display:block">✅ Actualizar precio</button>'
+    + '<button onclick="document.querySelectorAll(\'.price-edit-ov\').forEach(e=>e.remove())" style="width:100%;padding:10px;background:none;border:1px solid #555;border-radius:10px;color:#888;cursor:pointer;display:block">Cancelar</button>'
+    + '</div>';
+  document.body.appendChild(ov);
+  setTimeout(function(){
+    var inp = document.getElementById('price-edit-input');
+    if(inp){ inp.focus(); inp.select(); }
+  }, 100);
+}
+
+function _confirmEditLowPrice(){
+  const inp = document.getElementById('price-edit-input');
+  if(!inp) return;
+  const val = parseFloat(String(inp.value).replace(/[^0-9.]/g,''));
   if(isNaN(val) || val<=0){ toast('❌ Precio inválido'); return; }
 
   cur.ebay.prices.low = val;
@@ -1846,6 +1875,7 @@ function editLowPrice(){
   cur.ebay.priceSource = 'manual_override';
   applyVerdict(cur);
   renderResult(cur);
+  document.querySelectorAll('.price-edit-ov').forEach(e=>e.remove());
   toast('✅ Precio actualizado — bundle recalculado');
 }
 
@@ -2253,7 +2283,7 @@ function renderResult(r){
 
   setTimeout(function(){
     var ebayPrices=(r.ebay&&r.ebay.prices)?r.ebay.prices:null;
-    initPackWheel(Number(packs)||2,ebayPrices,r.title||'',r.upc||'',r.brand||'',
+    initPackWheel(Number(packs)||1,ebayPrices,r.title||'',r.upc||'',r.brand||'',
       {sku:document.getElementById('pack-sku-display'),
        title:document.getElementById('pack-title-display'),
        price:document.getElementById('pack-bundle-price'),
