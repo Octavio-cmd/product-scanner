@@ -2219,6 +2219,32 @@ function clearBulkSession() {
   document.body.appendChild(ov);
 }
 
+function emptyStateHTML(){
+  return `<div class="badge" style="background:var(--sf2);color:var(--mu);border:1px solid var(--bd)">⏳ AWAITING SCAN</div>
+    <div class="card" style="border-left:3px solid var(--bd)">
+      <div class="lbl" style="color:var(--mu)">📝 eBay SEO Title</div>
+      <div class="val" style="font-size:15px;font-weight:700;line-height:1.5;color:var(--mu)">Scan a barcode, type a UPC, or paste an eBay link to begin</div>
+    </div>
+    <div class="card"><div class="lbl">SKU</div><div class="val" style="font-family:monospace;font-size:14px;color:var(--mu)">—</div></div>
+    <div class="card"><div class="lbl">Category</div><div class="val" style="color:var(--mu)">—</div></div>
+    <div class="price-row">
+      <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low" style="color:var(--mu)">—</div></div>
+      <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg" style="color:var(--mu)">—</div></div>
+      <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" style="color:var(--mu)">—</div></div>
+    </div>
+    <div class="card">
+      <div class="lbl">📦 SELECT PACK SIZE</div>
+      <div class="pack-chips" style="opacity:.35;pointer-events:none">
+        <div class="pack-chip"><div class="pc-n">1pk</div></div>
+        <div class="pack-chip sel"><div class="pc-n">2pk</div></div>
+        <div class="pack-chip"><div class="pc-n">3pk</div></div>
+        <div class="pack-chip"><div class="pc-n">4pk</div></div>
+        <div class="pack-chip"><div class="pc-n">5pk</div></div>
+      </div>
+      <div style="font-size:12px;color:var(--mu);margin-top:4px">Pack size will be suggested automatically</div>
+    </div>`;
+}
+
 function scanAnother() {
   const upcInput = document.getElementById('upcInRes');
   if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
@@ -2227,7 +2253,7 @@ function scanAnother() {
   const barcodeResult = document.getElementById('ps-barcode-result');
   if (barcodeResult) { barcodeResult.style.display='none'; barcodeResult.innerHTML=''; }
   const rb = document.getElementById('resBody');
-  if (rb) rb.innerHTML = '<div style="margin-top:24px;text-align:center;color:var(--mu);font-size:13px;line-height:2">📷 Scan a barcode<br>⌨️ Type UPC manually<br>🔗 Paste an eBay URL</div>';
+  if (rb) rb.innerHTML = emptyStateHTML();
   _lastBundleUrl = '';
   screen('res');
 }
