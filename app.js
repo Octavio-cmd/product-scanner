@@ -1039,6 +1039,113 @@ async function openBundlePhoto() {
 }
 
 // Subir foto ya lista (bundle hecho manualmente)
+// ── Compress an image file to a data URL (same approach as Clothing & Shoes) ──
+function clCompressImage(file, maxW=900, quality=0.75) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(maxW/img.width, maxW/img.height, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+// ── Upload a data URL to ImgBB, return the public URL ──
+async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
+  try {
+    const b64 = dataUrl ? dataUrl.split(',')[1] : null;
+    if (!b64) { console.warn('ImgBB: no image data'); return null; }
+    const fd = new FormData();
+    fd.append('key', key);
+    fd.append('image', b64);
+    fd.append('name', (slotName || 'photo') + '-' + Date.now() + '.png');
+    const res = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body: fd });
+    const d = await res.json();
+    if (d.success) {
+      let imgUrl = d.data.image?.url || d.data.display_url || d.data.url;
+      return imgUrl;
+    } else {
+      const errMsg = d.error?.message || JSON.stringify(d.error) || 'unknown error';
+      console.error('ImgBB upload failed:', errMsg);
+      toast('⚠️ ImgBB error: ' + errMsg);
+      return null;
+    }
+  } catch(e) {
+    console.error('ImgBB network error:', e.message);
+    toast('⚠️ ImgBB network error: ' + e.message);
+    return null;
+  }
+}
+
+// ── PASO 1: capturar foto (front/back), quitar fondo con Railway rembg,
+// subir el PNG resultante a ImgBB. El armado de paquetes es un paso aparte. ──
+async function psCapturePhoto(slotId){
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto
+  input.onchange = async function(e){
+    var file = e.target.files[0];
+    if(!file) return;
+
+    var slot = document.getElementById('ps-slot-' + slotId);
+    if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">Comprimiendo...</div></div>';
+
+    try{
+      var dataUrl = await clCompressImage(file, 1600, 0.92);
+
+      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">🚂 Quitando fondo...</div></div>';
+
+      const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
+      const b64 = dataUrl.split(',')[1];
+      const rbgRes = await fetch(RAILWAY_RBG, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ image: b64 })
+      });
+      if(!rbgRes.ok) throw new Error('Railway rembg error ' + rbgRes.status);
+      const rbgData = await rbgRes.json();
+      if(!rbgData.success || !rbgData.image) throw new Error('rembg no devolvió imagen');
+
+      const pngUrl = 'data:image/png;base64,' + rbgData.image;
+
+      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">📤 Subiendo...</div></div>';
+
+      const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+      let finalUrl = pngUrl;
+      if (imgbbKey) {
+        const uploaded = await clUploadPhotoToImgBB(pngUrl, imgbbKey, slotId);
+        if (uploaded) finalUrl = uploaded;
+      }
+
+      if (window.cur) {
+        if (slotId === 'front') cur._frontImg = finalUrl;
+        else cur._backImg = finalUrl;
+      }
+
+      if (slot) {
+        slot.innerHTML = '<img src="' + finalUrl + '" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">';
+      }
+      toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
+    }catch(err){
+      console.error('psCapturePhoto error:', err);
+      toast('❌ Error: ' + err.message);
+      if(slot) slot.innerHTML = '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+    }
+  };
+  input.click();
+}
+
+
 async function openReadyPhoto() {
   var input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*';
@@ -2317,24 +2424,23 @@ function renderResult(r){
   // según la demanda real de eBay (soldCount de los últimos 90 días) ──
   h+=renderSplitCalculatorHTML(ebay);
 
-  // ── 3. BUNDLE PHOTO GENERATOR ────────────────────────────────
+  // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
+  // (El armado de los paquetes 1/3/6/12 con estas fotos es el Paso 2, todavía no implementado)
+  const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+  const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
   h+=`<div class="bundle-photo-card">
-    <div class="lbl">📸 LISTING PHOTO — Bundle Image Generator</div>
-    <div style="background:rgba(255,171,0,.1);border:1px solid rgba(255,171,0,.4);border-radius:8px;padding:8px 12px;margin:6px 0 10px;font-size:11px;line-height:1.6">
-      💡 <strong>Background tip for best results:</strong><br>
-      🖤 Light/white products (vitamins, lotion) → use <strong>BLACK or DARK background</strong><br>
-      ⬜ Dark products (dark bottles, sprays) → use <strong>WHITE or LIGHT background</strong>
+    <div class="lbl">📸 Front &amp; Back Photos (background removed)</div>
+    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos del producto. Se les quita el fondo automáticamente. El armado de paquetes (1/3/6/12) es el siguiente paso.</div>
+    <div style="display:flex;gap:10px">
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">FRONT${r._frontImg?' ✅':''}</div>
+        <div id="ps-slot-front" onclick="psCapturePhoto('front')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${frontThumb}</div>
+      </div>
+      <div style="flex:1">
+        <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">BACK${r._backImg?' ✅':''}</div>
+        <div id="ps-slot-back" onclick="psCapturePhoto('back')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
+      </div>
     </div>
-    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
-      <button id="bundle-gen-btn" onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
-        📦 Generate Pack with AI (Remove Background + Bundle)
-      </button>
-      <button onclick="openReadyPhoto()" style="width:100%;background:#1a472a;border:2px solid #2ecc71;border-radius:10px;padding:13px;color:#2ecc71;font-size:14px;font-weight:800;cursor:pointer">
-        📦 Generate Pack with AI (Quitar Fondo + Bundle)
-      </button>
-    </div>
-    <div id="bundle-generating" class="bundle-generating" style="display:none">⏳ Processing...</div>
-    <div id="bundle-preview" class="bundle-preview" style="display:none"></div>
   </div>`;
 
   // ── 5. UPC MATCH BADGE ───────────────────────────────────────
