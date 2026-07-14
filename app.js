@@ -2093,6 +2093,17 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
+  // ── 3b. VER PRECIO REAL EN eBay — same link pattern as Clothing & Shoes ──
+  if (r.upc) {
+    const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(r.upc)
+      + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
+    h+=`<a href="${ebaySearchUrl}" target="_blank" rel="noopener"
+      style="display:block;margin-bottom:12px;background:#0064d2;border-radius:10px;padding:12px 14px;
+             color:#fff;font-weight:700;font-size:14px;text-decoration:none;text-align:center">
+      🔍 Ver precio real en eBay →
+    </a>`;
+  }
+
   // ── 4. PACK SELECTOR ─────────────────────────────────────────
   h+=`<div class="price-row">
     <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
