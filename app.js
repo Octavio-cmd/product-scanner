@@ -118,7 +118,7 @@ function showLoadingInline(initialMsg){
 
 // SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
 function makeSKU(brand,upc,packs,title){
-  packs=packs||2; title=title||'';
+  packs=packs||1; title=title||'';
   let src=(brand||'').trim();
   if(!src||src.toLowerCase()==='generic') src='';
   if(!src&&title){
@@ -1140,7 +1140,7 @@ async function lookupUPCitemdb(upc) {
 
 // Price calculation
 function calcBundlePrice(ebay,packs){
-  packs=packs||2;
+  packs=packs||1;
   // Priority: sold avg (real) > sold low > active low > active avg
   const soldAvg = ebay?.pricing?.sold?.avg || 0;
   const soldLow = ebay?.pricing?.sold?.low || 0;
@@ -1323,7 +1323,7 @@ function rebuildAndApplyTitle(n) {
 }
 
 // ── PACK SIZE WHEEL ──────────────────────────────────────────
-const PACK_SIZES = [1, 2, 3, 4, 5, 6, 8, 10, 12];
+const PACK_SIZES = [1, 3, 6, 12];
 
 // Rebuild title with correct format: Brand Product Count Pack of N New
 // Convierte "May 2027" → "Exp 05/27" (compacto para el título)
@@ -1451,7 +1451,7 @@ function updateShadeColor(shade) {
 
 
 function calcPacks(ebayLow,costPerUnit){
-  const sizes=[2,3,4,6,8,10,12];
+  const sizes=PACK_SIZES;
   const FEE=0.1325,FEE_F=0.30;
   function ship(n){return n<=2?5.50:n<=4?7.50:n<=6?9.50:n<=8?11.50:13.50;}
   return sizes.map(n=>{
@@ -1519,13 +1519,14 @@ async function callClaude(upc,prod,ebay){
 
   // ── Bundle optimizer: find smallest pack that makes it profitable
   // Min bundle revenue = $15 (after $6.50 shipping + 13% eBay fees)
+  // Only pack sizes 1, 3, 6, 12 are used (matches PACK_SIZES)
   const MIN_BUNDLE = 15;
-  const MAX_PACK   = 12;
   let optimalPack = 1;
   if (marketLow > 0) {
-    for (let p = 1; p <= MAX_PACK; p++) {
+    for (const p of PACK_SIZES) {
       if (marketLow * p * 0.95 >= MIN_BUNDLE) { optimalPack = p; break; }
     }
+    if (marketLow * optimalPack * 0.95 < MIN_BUNDLE) { optimalPack = PACK_SIZES[PACK_SIZES.length-1]; }
   }
   const bundlePrice = marketLow > 0 ? (marketLow * optimalPack * 0.95).toFixed(2) : 0;
   const bundleViable = bundlePrice >= MIN_BUNDLE;
@@ -1632,7 +1633,7 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
 function fallback(upc,prod,ebay){
   const avg=ebay&&ebay.prices&&ebay.prices.avg||0;
   const found=prod&&prod.found;
-  const packs=2;
+  const packs=1;
   const cid=catId((prod&&prod.name)||'');
   // Smart title — never expose UPC
   let title='';
@@ -1789,6 +1790,66 @@ async function analyzeEbayUrl(urlStr){
   }
 }
 
+// ── Recalculates verdict/price/packSize/reason from res.ebay ──
+// Called after the initial scan AND after the user manually corrects the eBay price.
+function applyVerdict(res){
+  const ebay = res.ebay || {};
+  const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
+  const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
+  const _avg      = ebay?.prices?.avg || 0;
+  const _mBase    = _low || _soldAvg || _avg || 0;
+  const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
+  const _MIN      = 15;
+  let   _optPack  = 1;
+  if (_mBase > 0) {
+    for (const p of PACK_SIZES) {
+      if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
+    }
+    // Si ni con el paquete más grande (12) se llega al mínimo, usar el más grande disponible
+    if (_mBase * _optPack * 0.95 < _MIN) { _optPack = PACK_SIZES[PACK_SIZES.length-1]; }
+  }
+  const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
+  const _viable   = parseFloat(_bPrice) >= _MIN;
+
+  if (ebay.found && _mBase > 0) {
+    if (_viable) {
+      res.verdict  = 'SAVVY';
+      res.price    = _bPrice;
+      res.packSize = _optPack;
+      res.reason   = _soldCnt > 0
+        ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
+        : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
+    } else {
+      res.verdict = 'DWI';
+      res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
+    }
+  } else if (!ebay.found || _mBase === 0) {
+    res.verdict = 'DWI';
+    res.reason  = 'No se encontró precio activo en eBay. Sin datos de mercado.';
+  }
+}
+
+// ── Called when the user taps the "eBay Lowest" price box to correct it manually ──
+// e.g. after tapping "Ver precio real en eBay →" and seeing the actual listing price.
+function editLowPrice(){
+  if(!cur){ toast('⚠️ Scan a product first'); return; }
+  if(!cur.ebay) cur.ebay = { found:true, prices:{}, pricing:{} };
+  if(!cur.ebay.prices) cur.ebay.prices = {};
+  const currentLow = cur.ebay.prices.low || 0;
+  const input = prompt('Precio real visto en eBay (item + envío):', currentLow>0 ? currentLow.toFixed(2) : '');
+  if(input===null) return; // cancelled
+  const val = parseFloat(String(input).replace(/[^0-9.]/g,''));
+  if(isNaN(val) || val<=0){ toast('❌ Precio inválido'); return; }
+
+  cur.ebay.prices.low = val;
+  cur.ebay.found = true;
+  cur.ebay.priceSource = 'manual_override';
+  applyVerdict(cur);
+  renderResult(cur);
+  toast('✅ Precio actualizado — bundle recalculado');
+}
+
+
 // ── Shared processing: Claude title/category + verdict + render ──
 // Used by both analyze(upc) [barcode/manual UPC] and analyzeEbayUrl(urlStr) [paste eBay link]
 async function finishAnalyze(upc, prod, ebayFull, stepIn){
@@ -1815,7 +1876,7 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
       res.brand = prod.brand||'';
     }
     if(!res.title||res.title.includes(upc)||res.title.toLowerCase().includes(' upc ')){
-      res.title = buildSmartTitle(prod, res.packSize||2) || res.title;
+      res.title = buildSmartTitle(prod, res.packSize||1) || res.title;
     }
     // Validar categoría — si Claude pone categoría padre o default, recalcular desde título
     const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725'];
@@ -1830,37 +1891,8 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     }
 
     // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
-    const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
-    const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
-    const _avg      = ebay?.prices?.avg || 0;
-    const _mBase    = _low || _soldAvg || _avg || 0;
-    const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
-    const _MIN      = 15;
-    let   _optPack  = 1;
-    if (_mBase > 0) {
-      for (let p = 1; p <= 12; p++) {
-        if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
-      }
-    }
-    const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
-    const _viable   = parseFloat(_bPrice) >= _MIN;
-
-    if (ebay.found && _mBase > 0) {
-      if (_viable) {
-        res.verdict  = 'SAVVY';
-        res.price    = _bPrice;
-        res.packSize = _optPack;
-        res.reason   = _soldCnt > 0
-          ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
-          : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
-      } else {
-        res.verdict = 'DWI';
-        res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
-      }
-    } else if (!ebay.found || _mBase === 0) {
-      res.verdict = 'DWI';
-      res.reason  = 'No se encontró precio activo en eBay. Sin datos de mercado.';
-    }
+    res.ebay = ebay;
+    applyVerdict(res);
 
     cur=res;
     cur._singleProductImg=null; // limpiar foto anterior al escanear nuevo producto
@@ -1957,7 +1989,7 @@ async function addBulk() {
   }
 
   if (!cur) return;
-  const packs = cur._selectedPack || cur.packSize || 2;
+  const packs = cur._selectedPack || cur.packSize || 1;
   var skuEl   = document.getElementById('pack-sku-display');
   var titleEl = document.getElementById('pack-title-display');
   var usedTitle = cur._selectedTitle || (titleEl && titleEl.dataset.val) || rebuildTitle(cur.title||'', packs);
@@ -2070,9 +2102,26 @@ function renderResult(r){
   const ebay=r.ebay||{};
   const low =ebay.prices&&ebay.prices.low||0;
   const avg =ebay.prices&&ebay.prices.avg||0;
-  const packs=r.packSize||2;
+  const packs=r.packSize||1;
   const sku=makeSKU(r.brand,r.upc,packs,r.title);
   const bundlePrice=calcBundlePrice(ebay,packs);
+
+  // ── COMPACT SUMMARY CARD (same structure as Clothing & Shoes "✅ Found!") ──
+  const bcResult = $('ps-barcode-result');
+  if (bcResult) {
+    const sourceLabel = ebay.priceSource === 'manual_override' ? 'Manual' : (ebay.priceSource || '');
+    bcResult.innerHTML = `
+      <div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found! ${esc(sourceLabel)}</div>
+      <div>🏷️ <strong>Brand:</strong> ${esc(r.brand||'—')}</div>
+      <div style="margin:4px 0">📦 ${esc((r.title||'').substring(0,80))}${(r.title||'').length>80?'...':''}</div>
+      ${low>0 ? `
+        <div>💰 <strong>Precio:</strong> <strong style="color:#00e676">$${low.toFixed(2)} total</strong> (item + envío)</div>
+        <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
+      ` : '<div style="color:var(--mu)">💰 Sin precio disponible — toca "eBay Lowest" abajo para ingresarlo manual</div>'}
+      <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${esc(r.categoryName||'Other')}</div>
+      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>`;
+    bcResult.style.display = 'block';
+  }
 
   let h=`<div class="badge ${sv?'sv':'dw'}">${sv?'✅ SAVVY':'❌ DWI'}</div>`;
 
@@ -2106,7 +2155,7 @@ function renderResult(r){
 
   // ── 4. PACK SELECTOR ─────────────────────────────────────────
   h+=`<div class="price-row">
-    <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
+    <div class="pc editable" onclick="editLowPrice()"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
     <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
     <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
   </div>`+
@@ -2247,10 +2296,9 @@ function emptyStateHTML(){
       <div class="lbl">📦 SELECT PACK SIZE</div>
       <div class="pack-chips" style="opacity:.35;pointer-events:none">
         <div class="pack-chip"><div class="pc-n">1pk</div></div>
-        <div class="pack-chip sel"><div class="pc-n">2pk</div></div>
-        <div class="pack-chip"><div class="pc-n">3pk</div></div>
-        <div class="pack-chip"><div class="pc-n">4pk</div></div>
-        <div class="pack-chip"><div class="pc-n">5pk</div></div>
+        <div class="pack-chip sel"><div class="pc-n">3pk</div></div>
+        <div class="pack-chip"><div class="pc-n">6pk</div></div>
+        <div class="pack-chip"><div class="pc-n">12pk</div></div>
       </div>
       <div style="font-size:12px;color:var(--mu);margin-top:4px">Pack size will be suggested automatically</div>
     </div>`;
