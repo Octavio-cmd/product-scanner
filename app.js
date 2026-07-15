@@ -1145,6 +1145,184 @@ async function psCapturePhoto(slotId){
   input.click();
 }
 
+// ══════════════════════════════════════════════════════════════
+// PASO 2: GENERADOR DE IMÁGENES DE PAQUETE (1/3/6/12)
+// Portado de la herramienta eBay-Pack-Generator de Manuel — misma
+// matemática de acomodo (gL), mismo distintivo circular (dB).
+// FRONT (ya sin fondo) se multiplica × pack + distintivo.
+// BACK (ya sin fondo) se usa como foto secundaria única, sin distintivo.
+// ══════════════════════════════════════════════════════════════
+
+const PACK_BADGE_COLOR = '#0F97DB';
+
+function psLoadImage(src){
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.crossOrigin = 'anonymous'; // necesario para exportar el canvas si la foto viene de ImgBB
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
+}
+
+// Calcula el mejor acomodo (columnas/filas) para `count` copias de una foto
+// dentro de un canvas cuadrado de tamaño `sz`, dado el aspect ratio de la foto.
+function psComputeLayout(count, sz, imgAspect){
+  if (count === 1) {
+    const h = sz*.95, w = h*imgAspect;
+    let s = 1; if (w > sz*.95) s = (sz*.95)/w;
+    return [{x:sz/2, y:sz/2, w:w*s, h:h*s}];
+  }
+  const maxFill = 0.97, gapPct = 0.01;
+  let minCols, maxCols;
+  if (count === 2) { minCols=2; maxCols=2; }
+  else if (count === 3) { minCols=3; maxCols=3; }
+  else if (count === 4) { minCols=2; maxCols=4; }
+  else if (count <= 6) { minCols=2; maxCols=Math.min(count,6); }
+  else if (count <= 10) { minCols=3; maxCols=Math.min(count,5); }
+  else { minCols=3; maxCols=Math.min(count,6); }
+
+  let bestCols=minCols, bestArea=0, bestProdW=0, bestProdH=0;
+  for (let cols=minCols; cols<=maxCols; cols++) {
+    const rows = Math.ceil(count/cols);
+    const availW = sz*maxFill - sz*gapPct*(cols-1);
+    const availH = sz*maxFill - sz*gapPct*(rows-1);
+    const cellW = availW/cols, cellH = availH/rows;
+    let pw, ph2;
+    const cellAspect = cellW/cellH;
+    if (imgAspect >= cellAspect) { pw=cellW; ph2=cellW/imgAspect; }
+    else { ph2=cellH; pw=cellH*imgAspect; }
+    const area = pw*ph2;
+    if (area > bestArea) { bestArea=area; bestCols=cols; bestProdW=pw; bestProdH=ph2; }
+  }
+  const co=bestCols, ar=Math.ceil(count/co), gap=sz*gapPct;
+  const positions = [];
+  for (let i=0; i<count; i++) {
+    const rw=Math.floor(i/co), cl=i%co;
+    const ir = rw===ar-1 ? count-rw*co : co;
+    const rowW = ir*bestProdW + (ir-1)*gap;
+    const ox = (sz-rowW)/2;
+    const totalH = ar*bestProdH + (ar-1)*gap;
+    const oy = (sz-totalH)/2;
+    positions.push({
+      x: ox+cl*(bestProdW+gap)+bestProdW/2,
+      y: oy+rw*(bestProdH+gap)+bestProdH/2,
+      w: bestProdW, h: bestProdH
+    });
+  }
+  return positions;
+}
+
+// Dibuja el distintivo circular "N Pack" — igual al de la herramienta de Manuel
+function psDrawBadge(ctx, count, sz){
+  const r = Math.round(sz*.09), x = sz-r-Math.round(sz*.018), y = r+Math.round(sz*.018);
+  ctx.save();
+  ctx.shadowColor='rgba(0,0,0,.3)'; ctx.shadowBlur=25; ctx.shadowOffsetX=4; ctx.shadowOffsetY=4;
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=PACK_BADGE_COLOR; ctx.fill();
+  ctx.restore();
+  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.strokeStyle='#fff'; ctx.lineWidth=Math.round(r*.07); ctx.stroke();
+  ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
+  const numSz = count>=10 ? Math.round(r*.75) : Math.round(r*.95);
+  ctx.font = `900 ${numSz}px "Arial Black","Impact",Arial,sans-serif`;
+  ctx.fillText(count, x, y-r*.14);
+  ctx.font = `700 ${Math.round(r*.35)}px "Arial Black","Impact",Arial,sans-serif`;
+  ctx.fillText('Pack', x, y+r*.4);
+}
+
+// Genera la imagen del paquete: `count` copias de `img` + distintivo (si count>1)
+function psGeneratePackImage(img, count){
+  const sz=2048, cv=document.createElement('canvas'); cv.width=sz; cv.height=sz;
+  const cx=cv.getContext('2d'); cx.fillStyle='#FFF'; cx.fillRect(0,0,sz,sz);
+  const positions = psComputeLayout(count, sz, img.width/img.height);
+  positions.forEach(p => cx.drawImage(img, p.x-p.w/2, p.y-p.h/2, p.w, p.h));
+  if (count > 1) psDrawBadge(cx, count, sz);
+  return cv.toDataURL('image/jpeg', .92);
+}
+
+// Genera la foto secundaria (BACK) centrada sola, sin distintivo, sin duplicar
+function psGenerateSingleImage(img){
+  const sz=2048, cv=document.createElement('canvas'); cv.width=sz; cv.height=sz;
+  const cx=cv.getContext('2d'); cx.fillStyle='#FFF'; cx.fillRect(0,0,sz,sz);
+  const a=img.width/img.height, pd=sz*.02, mw=sz-pd*2, mh=sz-pd*2;
+  let w,h; if(a>1){w=mw;h=mw/a;} else {h=mh;w=mh*a;}
+  if(w>mw){w=mw;h=w/a;} if(h>mh){h=mh;w=h*a;}
+  cx.drawImage(img, (sz-w)/2, (sz-h)/2, w, h);
+  return cv.toDataURL('image/jpeg', .92);
+}
+
+// Genera las 4 imágenes de pack (1/3/6/12) usando FRONT + una imagen BACK compartida
+async function psGenerateAllPacks(){
+  if(!cur || !cur._frontImg || !cur._backImg){
+    toast('⚠️ Necesitas la foto FRONT y BACK primero');
+    return;
+  }
+  const btn = $('ps-gen-packs-btn');
+  const statusEl = $('ps-pack-gen-status');
+  if(btn){ btn.disabled=true; btn.textContent='⏳ Generando...'; }
+  if(statusEl) statusEl.textContent = 'Cargando fotos...';
+
+  try{
+    const frontImg = await psLoadImage(cur._frontImg);
+    const backImg  = await psLoadImage(cur._backImg);
+
+    if(!cur._packImages) cur._packImages = {};
+    const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+
+    // La foto BACK es la misma para los 4 tamaños de paquete — se genera una sola vez
+    if(statusEl) statusEl.textContent = 'Generando foto secundaria (back)...';
+    const backDataUrl = psGenerateSingleImage(backImg);
+    let backUrl = backDataUrl;
+    if (imgbbKey) {
+      const uploaded = await clUploadPhotoToImgBB(backDataUrl, imgbbKey, 'pack-back');
+      if (uploaded) backUrl = uploaded;
+    }
+
+    for (const packSize of PACK_SIZES) {
+      if(statusEl) statusEl.textContent = `Generando pack de ${packSize}...`;
+      const frontDataUrl = psGeneratePackImage(frontImg, packSize);
+      let frontUrl = frontDataUrl;
+      if (imgbbKey) {
+        const uploaded = await clUploadPhotoToImgBB(frontDataUrl, imgbbKey, 'pack-' + packSize);
+        if (uploaded) frontUrl = uploaded;
+      }
+      cur._packImages[packSize] = { front: frontUrl, back: backUrl };
+    }
+
+    if(statusEl) statusEl.textContent = '';
+    toast('✅ 4 paquetes generados (1, 3, 6, 12)');
+    renderPackImagesPreview();
+  }catch(err){
+    console.error('psGenerateAllPacks error:', err);
+    toast('❌ Error generando paquetes: ' + err.message);
+    if(statusEl) statusEl.textContent = '❌ ' + err.message;
+  }finally{
+    if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; }
+  }
+}
+
+function renderPackImagesPreview(){
+  const el = $('ps-pack-images-preview');
+  if(!el || !cur || !cur._packImages) return;
+  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">';
+  PACK_SIZES.forEach(function(p){
+    const imgs = cur._packImages[p];
+    if(!imgs) return;
+    h += `<div style="background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
+      <div style="font-size:11px;font-weight:800;color:var(--ac);margin-bottom:4px">${p} Pack</div>
+      <img src="${esc(imgs.front)}" style="width:100%;border-radius:6px;margin-bottom:4px">
+      <a href="${esc(imgs.front)}" download="pack-${p}-front.jpg" style="font-size:10px;color:var(--mu);text-decoration:underline">⬇️ front</a>
+    </div>`;
+  });
+  h += '</div>';
+  if (cur._packImages[PACK_SIZES[0]] && cur._packImages[PACK_SIZES[0]].back) {
+    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
+      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:4px">Back (compartida en los 4 packs)</div>
+      <img src="${esc(cur._packImages[PACK_SIZES[0]].back)}" style="width:50%;border-radius:6px">
+    </div>`;
+  }
+  el.innerHTML = h;
+}
+
 
 async function openReadyPhoto() {
   var input = document.createElement('input');
@@ -2425,12 +2603,11 @@ function renderResult(r){
   h+=renderSplitCalculatorHTML(ebay);
 
   // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
-  // (El armado de los paquetes 1/3/6/12 con estas fotos es el Paso 2, todavía no implementado)
   const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
   const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
   h+=`<div class="bundle-photo-card">
     <div class="lbl">📸 Front &amp; Back Photos (background removed)</div>
-    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos del producto. Se les quita el fondo automáticamente. El armado de paquetes (1/3/6/12) es el siguiente paso.</div>
+    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos del producto. Se les quita el fondo automáticamente.</div>
     <div style="display:flex;gap:10px">
       <div style="flex:1">
         <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">FRONT${r._frontImg?' ✅':''}</div>
@@ -2441,6 +2618,23 @@ function renderResult(r){
         <div id="ps-slot-back" onclick="psCapturePhoto('back')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
       </div>
     </div>
+  </div>`;
+
+  // ── 3b. PACK IMAGE GENERATOR — Paso 2: 1/3/6/12 con distintivo ──
+  const hasPhotos = !!(r._frontImg && r._backImg);
+  h+=`<div class="bundle-photo-card">
+    <div class="lbl">🎁 Generar Imágenes de Pack (1/3/6/12)</div>
+    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">
+      ${hasPhotos
+        ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
+        : '⚠️ Primero toma las fotos FRONT y BACK de arriba.'}
+    </div>
+    <button id="ps-gen-packs-btn" onclick="psGenerateAllPacks()" ${hasPhotos?'':'disabled'}
+      style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;opacity:${hasPhotos?'1':'.4'}">
+      🎁 Generar Imágenes de Pack (1/3/6/12)
+    </button>
+    <div id="ps-pack-gen-status" style="font-size:11px;color:var(--mu);margin-top:6px;text-align:center"></div>
+    <div id="ps-pack-images-preview"></div>
   </div>`;
 
   // ── 5. UPC MATCH BADGE ───────────────────────────────────────
@@ -2496,6 +2690,7 @@ function renderResult(r){
     var si=document.getElementById('shade-input');
     if(si&&window.cur&&cur._shade) si.value=cur._shade;
     updateSplitCalc();
+    if(window.cur && cur._packImages) renderPackImagesPreview();
   },80);
 }
 
