@@ -1,3 +1,79 @@
+// ── ON-SCREEN DEBUG CONSOLE — para ver errores directo en el iPhone,
+// sin necesitar Mac ni Safari Web Inspector. Toca el logo 5 veces para abrir/cerrar. ──
+(function setupDebugConsole(){
+  var logs = [];
+  var maxLogs = 80;
+  var panel = null;
+
+  function ensurePanel(){
+    if(panel) return panel;
+    panel = document.createElement('div');
+    panel.id = 'debug-console-panel';
+    panel.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.96);z-index:999999;overflow-y:auto;padding:12px;font-family:monospace;font-size:11px;color:#0f0;white-space:pre-wrap;word-break:break-all';
+    var closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ Cerrar Debug Console';
+    closeBtn.style.cssText = 'position:sticky;top:0;width:100%;padding:12px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-weight:800;margin-bottom:10px;z-index:2';
+    closeBtn.onclick = function(){ panel.style.display = 'none'; };
+    panel.appendChild(closeBtn);
+    var logsDiv = document.createElement('div');
+    logsDiv.id = 'debug-console-logs';
+    panel.appendChild(logsDiv);
+    document.body.appendChild(panel);
+    return panel;
+  }
+
+  function render(){
+    ensurePanel();
+    var logsDiv = document.getElementById('debug-console-logs');
+    if(logsDiv) logsDiv.textContent = logs.join('\n\n');
+  }
+
+  function push(type, args){
+    try{
+      var msg = Array.prototype.map.call(args, function(a){
+        if(typeof a === 'object'){ try{ return JSON.stringify(a); }catch(e){ return String(a); } }
+        return String(a);
+      }).join(' ');
+      var time = new Date().toLocaleTimeString();
+      logs.push('[' + time + '] ' + type + ': ' + msg);
+      if(logs.length > maxLogs) logs.shift();
+      if(panel && panel.style.display !== 'none') render();
+    }catch(e){}
+  }
+
+  var origLog = console.log, origErr = console.error, origWarn = console.warn;
+  console.log   = function(){ push('LOG',  arguments); origLog.apply(console, arguments); };
+  console.error = function(){ push('ERROR', arguments); origErr.apply(console, arguments); };
+  console.warn  = function(){ push('WARN', arguments); origWarn.apply(console, arguments); };
+
+  // Capturar también errores no atrapados (uncaught) y promesas rechazadas
+  window.addEventListener('error', function(e){
+    push('UNCAUGHT ERROR', [e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||'')]);
+  });
+  window.addEventListener('unhandledrejection', function(e){
+    push('UNHANDLED PROMISE', [e.reason && e.reason.message ? e.reason.message : String(e.reason)]);
+  });
+
+  window.toggleDebugConsole = function(){
+    ensurePanel();
+    panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
+    if(panel.style.display === 'block') render();
+  };
+
+  // Toca el logo del header 5 veces seguidas para abrir la consola de debug
+  document.addEventListener('DOMContentLoaded', function(){
+    var logo = document.querySelector('.hdr') || document.querySelector('.lg') || document.body;
+    var tapCount = 0, tapTimer = null;
+    logo.addEventListener('click', function(){
+      tapCount++;
+      clearTimeout(tapTimer);
+      tapTimer = setTimeout(function(){ tapCount = 0; }, 1500);
+      if(tapCount >= 5){ tapCount = 0; window.toggleDebugConsole(); }
+    });
+  });
+})();
+
+
 // ── HELPER FUNCTIONS ──────────────────────────────────────────
 const $=id=>document.getElementById(id);
 const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');
