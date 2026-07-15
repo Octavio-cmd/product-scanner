@@ -1308,19 +1308,15 @@ async function psGenerateAllPacks(){
   }
 }
 
-// Habilita el botón "Generar Imágenes de Pack" en cuanto existen FRONT y BACK,
-// sin necesidad de re-renderizar toda la tarjeta de resultados.
+// Actualiza el texto de ayuda en cuanto existen FRONT y BACK.
+// El botón SIEMPRE es clickeable — psGenerateAllPacks() valida internamente
+// y avisa con un toast si faltan fotos, en vez de depender de disabled/enabled.
 function updatePackGenButtonState(){
   if(!window.cur) return;
-  const btn = $('ps-gen-packs-btn');
   const hasPhotos = !!(cur._frontImg && cur._backImg);
-  if(btn){
-    btn.disabled = !hasPhotos;
-    btn.style.opacity = hasPhotos ? '1' : '.4';
-  }
-  const desc = btn && btn.previousElementSibling; // el div de texto justo arriba del botón
-  if(desc){
-    desc.textContent = hasPhotos
+  const hint = $('ps-pack-gen-hint');
+  if(hint){
+    hint.textContent = hasPhotos
       ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
       : '⚠️ Primero toma las fotos FRONT y BACK de arriba.';
   }
@@ -2546,6 +2542,7 @@ function renderResult(r){
   const bcResult = $('ps-barcode-result');
   if (bcResult) {
     const sourceLabel = ebay.priceSource === 'manual_override' ? 'Manual' : (ebay.priceSource || '');
+    const soldTop = ebay.pricing && ebay.pricing.sold;
     bcResult.innerHTML = `
       <div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found! ${esc(sourceLabel)}</div>
       <div>🏷️ <strong>Brand:</strong> ${esc(r.brand||'—')}</div>
@@ -2555,7 +2552,13 @@ function renderResult(r){
         <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
       ` : '<div style="color:var(--mu)">💰 Sin precio disponible — toca "eBay Lowest" abajo para ingresarlo manual</div>'}
       <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${esc(r.categoryName||'Other')}</div>
-      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>`;
+      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>
+      ${ebay.activeListings>0 ? `
+      <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;line-height:1.8">
+        🏷 <strong>Active BIN:</strong> ${ebay.activeListings}
+        &nbsp;|&nbsp; Min: <strong>${fmt(low)}</strong> · Avg: <strong>${fmt(avg)}</strong> · Max: ${fmt(ebay.prices&&ebay.prices.high)}
+        ${soldTop?`<br>✅ <strong>Sold (90d):</strong> ${soldTop.count} · Avg: ${fmt(soldTop.avg)}`:''}
+      </div>` : ''}`;
     bcResult.style.display = 'block';
   }
 
@@ -2577,20 +2580,6 @@ function renderResult(r){
     <div class="val">${esc(r.categoryName||'Health & Beauty')}
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
-
-  // ── 3c. EBAY MARKET DATA — junto con el resto de la info del producto ──
-  if(ebay.activeListings>0){
-    const sold=ebay.pricing&&ebay.pricing.sold;
-    const _srcTop = ebay.priceSource||'keyword';
-    h+=`<div class="card"><div class="lbl">eBay — Market Data (NEW, item+ship)</div>
-      <div class="val" style="font-size:13px;line-height:2">
-        🏷 Active BIN: <strong>${ebay.activeListings}</strong><br>
-        💰 Min: <strong>${fmt(low)}</strong> | Avg: <strong>${fmt(avg)}</strong> | Max: ${fmt(ebay.prices&&ebay.prices.high)}
-        ${sold?`<br>✅ Sold (90d): <strong>${sold.count}</strong> | Avg: <strong>${fmt(sold.avg)}</strong>`:''}
-      </div>
-      ${_srcTop!=='gtin_exact'?`<div style="font-size:11px;color:var(--mu);margin-top:4px">⚠️ Keyword prices — verify on eBay</div>`:''}
-    </div>`;
-  }
 
   // ── 3b. VER PRECIO REAL EN eBay — same link pattern as Clothing & Shoes ──
   if (r.upc) {
@@ -2664,13 +2653,13 @@ function renderResult(r){
   const hasPhotos = !!(r._frontImg && r._backImg);
   h+=`<div class="bundle-photo-card">
     <div class="lbl">🎁 Generar Imágenes de Pack (1/3/6/12)</div>
-    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">
+    <div id="ps-pack-gen-hint" style="font-size:11px;color:var(--mu);margin:4px 0 10px">
       ${hasPhotos
         ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
         : '⚠️ Primero toma las fotos FRONT y BACK de arriba.'}
     </div>
-    <button id="ps-gen-packs-btn" onclick="psGenerateAllPacks()" ${hasPhotos?'':'disabled'}
-      style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer;opacity:${hasPhotos?'1':'.4'}">
+    <button id="ps-gen-packs-btn" onclick="psGenerateAllPacks()"
+      style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
       🎁 Generar Imágenes de Pack (1/3/6/12)
     </button>
     <div id="ps-pack-gen-status" style="font-size:11px;color:var(--mu);margin-top:6px;text-align:center"></div>
@@ -2686,7 +2675,7 @@ function renderResult(r){
     :'<span style="background:rgba(255,107,0,.15);color:var(--ac);font-size:11px;padding:3px 10px;border-radius:10px">🔍 KEYWORD ONLY</span>';
   h+=`<div style="text-align:center;margin:8px 0">${srcBadge}</div>`;
 
-  // ── 6. (Market Data movida arriba, junto a Category — ver sección 3c) ──
+  // ── 6. (Market Data ahora vive en la tarjeta compacta de arriba, junto a Brand/Precio/SKU) ──
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
