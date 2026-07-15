@@ -1077,7 +1077,7 @@ async function generateBundleImage(productDataUrl, packSize) {
 function downloadBundleImg(src) {
   var a = document.createElement('a');
   a.href = src;
-  a.download = 'bundle-' + ((window.cur && cur.upc) || 'product') + '.jpg';
+  a.download = 'bundle-' + ((cur && cur.upc) || 'product') + '.jpg';
   a.click();
 }
 
@@ -1109,7 +1109,7 @@ async function openBundlePhoto() {
     if (driveUrl) {
       try {
         if(genDiv) genDiv.textContent='☁️ Subiendo foto a Google Drive...';
-        var sku = (window.cur && cur.upc) ? cur.upc : 'foto';
+        var sku = (cur && cur.upc) ? cur.upc : 'foto';
         var fname = sku + '-' + Date.now() + '.jpg';
         // Enviar imagen base64 directamente al Apps Script
         var b64 = dataUrl.split(',')[1];
@@ -1126,7 +1126,7 @@ async function openBundlePhoto() {
       }
     }
 
-    if(window.cur) { cur._rawPhoto = photoUrl; cur._imgUrl = photoUrl; }
+    if(cur) { cur._rawPhoto = photoUrl; cur._imgUrl = photoUrl; }
 
     if(genDiv) genDiv.style.display='none';
     if(preDiv) {
@@ -1227,7 +1227,7 @@ async function psCapturePhoto(slotId){
         if (uploaded) finalUrl = uploaded;
       }
 
-      if (window.cur) {
+      if (cur) {
         if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = pngUrl; }
         else { cur._backImg = finalUrl; cur._backImgLocal = pngUrl; }
       }
@@ -1433,7 +1433,7 @@ async function psGenerateAllPacks(){
 // El botón SIEMPRE es clickeable — psGenerateAllPacks() valida internamente
 // y avisa con un toast si faltan fotos, en vez de depender de disabled/enabled.
 function updatePackGenButtonState(){
-  if(!window.cur) return;
+  if(!cur) return;
   const hasPhotos = !!(cur._frontImg && cur._backImg);
   const hint = $('ps-pack-gen-hint');
   if(hint){
@@ -1491,7 +1491,7 @@ async function openReadyPhoto() {
       }
     }
 
-    if(window.cur) {
+    if(cur) {
       cur._bundleImg = finalUrl;
       cur._imgUrl = finalUrl;
       cur._singleProductImg = dataUrl;
@@ -1617,7 +1617,7 @@ function clearExpDate() {
   }
   _dateSelected = false;
   if (window._packState) window._packState.expDate = '';
-  if (window.cur) { cur._expDate = ''; cur._selectedTitle = ''; }
+  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; }
   var el = document.getElementById('date-result-display');
   if (el) el.innerHTML = '';
   // Regenerar título sin fecha
@@ -1679,7 +1679,7 @@ function updateDateDisplay() {
   var exp = getExpDate();
   if (el) el.innerHTML = '📅 <strong style="color:var(--ac)">' + exp + '</strong>';
   // Guardar en _packState y reconstruir título (incluye shade + expDate juntos)
-  if (window.cur) cur._expDate = exp; // siempre guardar en cur
+  if (cur) cur._expDate = exp; // siempre guardar en cur
   if (window._packState) {
     window._packState.expDate = exp;
     rebuildAndApplyTitle(window._packState.curPack);
@@ -1697,12 +1697,12 @@ function rebuildAndApplyTitle(n) {
   var title   = rebuildTitle(state.baseTitle, n || state.curPack, shade, expDate);
   var titleEl = document.getElementById('pack-title-display');
   if (titleEl) { titleEl.textContent = title; titleEl.dataset.val = title; }
-  if (window.cur) cur._selectedTitle = title;
+  if (cur) cur._selectedTitle = title;
   // Actualizar botón y regenerar si ya hay imagen
   var genBtn = document.getElementById('bundle-gen-btn');
   if (genBtn) genBtn.textContent = '📷 Take Product Photo → Generate Pack of ' + (n || state.curPack);
   // Si ya hay imagen guardada, regenerar con nuevo pack
-  if (window.cur && cur._singleProductImg) {
+  if (cur && cur._singleProductImg) {
     var newPack = n || state.curPack;
     var genDiv  = document.getElementById('bundle-generating');
     var preDiv  = document.getElementById('bundle-preview');
@@ -1842,7 +1842,7 @@ function pickPack(n) {
   rebuildAndApplyTitle(n);
 
   // Save on cur
-  if (window.cur) {
+  if (cur) {
     cur._selectedPack  = n;
     cur._selectedPrice = price ? parseFloat(price.replace('$', '')) : null;
     cur._selectedSKU   = sku;
@@ -1859,12 +1859,12 @@ function pickPack(n) {
       badge.className = 'badge sv';
       badge.innerHTML = '✅ SAVVY';
       if (addBtn) { addBtn.className = 'add-btn'; addBtn.textContent = '➕ ADD TO CSV'; }
-      if (window.cur) cur.verdict = 'SAVVY';
+      if (cur) cur.verdict = 'SAVVY';
     } else {
       badge.className = 'badge dw';
       badge.innerHTML = '✗ DWI';
       if (addBtn) { addBtn.className = 'ov-add-btn'; addBtn.textContent = '➕ Add anyway (DWI override)'; }
-      if (window.cur) cur.verdict = 'DWI';
+      if (cur) cur.verdict = 'DWI';
     }
   }
 }
@@ -1873,7 +1873,7 @@ function updateShadeColor(shade) {
   var state = window._packState;
   if (!state) return;
   state.shade = shade;                   // guardar en _packState
-  if (window.cur) cur._shade = shade;
+  if (cur) cur._shade = shade;
   rebuildAndApplyTitle(state.curPack);   // reconstruye con shade + expDate juntos
 }
 
@@ -2833,9 +2833,9 @@ function renderResult(r){
        price:document.getElementById('pack-bundle-price'),
        display:document.getElementById('pack-sel-display')});
     var si=document.getElementById('shade-input');
-    if(si&&window.cur&&cur._shade) si.value=cur._shade;
+    if(si&&cur&&cur._shade) si.value=cur._shade;
     updateSplitCalc();
-    if(window.cur && cur._packImages) renderPackImagesPreview();
+    if(cur && cur._packImages) renderPackImagesPreview();
   },80);
 }
 
