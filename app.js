@@ -35,9 +35,18 @@
         return String(a);
       }).join(' ');
       var time = new Date().toLocaleTimeString();
-      logs.push('[' + time + '] ' + type + ': ' + msg);
+      var line = '[' + time + '] ' + type + ': ' + msg;
+      logs.push(line);
       if(logs.length > maxLogs) logs.shift();
       if(panel && panel.style.display !== 'none') render();
+
+      // También lo escribe en el cuadro de debug SIEMPRE VISIBLE junto al botón de packs,
+      // si existe en pantalla en este momento — sin necesitar ningún gesto especial.
+      var miniLog = document.getElementById('ps-debug-log');
+      if(miniLog){
+        miniLog.textContent = (miniLog.textContent === 'Esperando acción...' ? '' : miniLog.textContent + '\n') + line;
+        miniLog.scrollTop = miniLog.scrollHeight;
+      }
     }catch(e){}
   }
 
@@ -72,6 +81,21 @@
     });
   });
 })();
+
+// Función directa y a prueba de fallos — escribe inmediatamente en el cuadro
+// visible junto al botón de packs, sin depender de nada más.
+window._psDebug = function(msg){
+  try{
+    var box = document.getElementById('ps-debug-log');
+    if(box){
+      var time = new Date().toLocaleTimeString();
+      var line = '[' + time + '] ' + msg;
+      box.textContent = (box.textContent === 'Esperando acción...' ? '' : box.textContent + '\n') + line;
+      box.scrollTop = box.scrollHeight;
+    }
+  }catch(e){}
+  try{ console.log('_psDebug:', msg); }catch(e){}
+};
 
 
 // ── HELPER FUNCTIONS ──────────────────────────────────────────
@@ -2755,12 +2779,18 @@ function renderResult(r){
         ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
         : '⚠️ Primero toma las fotos FRONT y BACK de arriba.'}
     </div>
-    <button id="ps-gen-packs-btn" onclick="psGenerateAllPacks()"
+    <button id="ps-gen-packs-btn"
+      onclick="window._psDebug('onclick disparado');psGenerateAllPacks()"
+      ontouchend="event.preventDefault();window._psDebug('ontouchend disparado');psGenerateAllPacks()"
       style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
       🎁 Generar Imágenes de Pack (1/3/6/12)
     </button>
     <div id="ps-pack-gen-status" style="font-size:11px;color:var(--mu);margin-top:6px;text-align:center"></div>
     <div id="ps-pack-images-preview"></div>
+    <div style="margin-top:10px;background:#000;border-radius:8px;padding:8px;max-height:140px;overflow-y:auto">
+      <div style="font-size:9px;color:#666;margin-bottom:4px">🐛 DEBUG LOG (siempre visible):</div>
+      <div id="ps-debug-log" style="font-family:monospace;font-size:10px;color:#0f0;white-space:pre-wrap;word-break:break-all">Esperando acción...</div>
+    </div>
   </div>`;
 
   // ── 5. UPC MATCH BADGE ───────────────────────────────────────
