@@ -1159,9 +1159,11 @@ const PACK_BADGE_COLOR = '#0F97DB';
 function psLoadImage(src){
   return new Promise((resolve, reject) => {
     const img = new Image();
-    img.crossOrigin = 'anonymous'; // necesario para exportar el canvas si la foto viene de ImgBB
-    img.onload = () => resolve(img);
-    img.onerror = reject;
+    // crossOrigin solo hace falta para URLs externas (ImgBB) — en data: URIs no afecta
+    if (typeof src === 'string' && !src.startsWith('data:')) img.crossOrigin = 'anonymous';
+    const timer = setTimeout(() => reject(new Error('Timeout cargando imagen (10s)')), 10000);
+    img.onload = () => { clearTimeout(timer); resolve(img); };
+    img.onerror = (e) => { clearTimeout(timer); console.error('psLoadImage onerror:', e); reject(new Error('No se pudo cargar la imagen')); };
     img.src = src;
   });
 }
@@ -1253,58 +1255,77 @@ function psGenerateSingleImage(img){
 
 // Genera las 4 imágenes de pack (1/3/6/12) usando FRONT + una imagen BACK compartida
 async function psGenerateAllPacks(){
+  console.log('🎁 psGenerateAllPacks: click detectado');
   if(!cur || !cur._frontImg || !cur._backImg){
     toast('⚠️ Necesitas la foto FRONT y BACK primero');
     return;
   }
   const btn = $('ps-gen-packs-btn');
   const statusEl = $('ps-pack-gen-status');
-  if(btn){ btn.disabled=true; btn.textContent='⏳ Generando...'; }
-  if(statusEl) statusEl.textContent = 'Cargando fotos...';
+  const resetBtn = () => { if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; } };
 
   try{
+    if(btn){ btn.disabled=true; btn.textContent='⏳ Generando...'; }
+    if(statusEl) statusEl.textContent = '📥 Cargando fotos...';
+
     const frontSrc = cur._frontImgLocal || cur._frontImg;
     const backSrc  = cur._backImgLocal  || cur._backImg;
+    console.log('Front source:', frontSrc.substring(0,40));
+    console.log('Back source:', backSrc.substring(0,40));
+
     const frontImg = await psLoadImage(frontSrc);
     const backImg  = await psLoadImage(backSrc);
+    console.log('✅ Fotos cargadas en memoria:', frontImg.width+'x'+frontImg.height, backImg.width+'x'+backImg.height);
 
     if(!cur._packImages) cur._packImages = {};
     const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+    console.log('ImgBB key disponible:', !!imgbbKey);
 
-    // La foto BACK es la misma para los 4 tamaños de paquete — se genera una sola vez
-    if(statusEl) statusEl.textContent = 'Generando foto secundaria (back)...';
+    // 1) Generar TODAS las imágenes primero — esto es solo Canvas, no usa internet, es instantáneo
+    if(statusEl) statusEl.textContent = '🖼️ Dibujando imágenes...';
     const backDataUrl = psGenerateSingleImage(backImg);
-    let backUrl = backDataUrl;
-    if (imgbbKey) {
-      const uploaded = await clUploadPhotoToImgBB(backDataUrl, imgbbKey, 'pack-back');
-      if (uploaded) backUrl = uploaded;
+    const frontDataUrls = {};
+    PACK_SIZES.forEach(function(p){ frontDataUrls[p] = psGeneratePackImage(frontImg, p); });
+    console.log('✅ 5 imágenes dibujadas en canvas (back + 4 packs)');
+
+    // 2) Subir todas EN PARALELO con timeout de 20s cada una — si una falla o tarda
+    // demasiado, se usa la imagen local en su lugar en vez de trabar todo el proceso.
+    if(statusEl) statusEl.textContent = '📤 Subiendo imágenes (puede tardar unos segundos)...';
+    function uploadWithTimeout(dataUrl, name){
+      if(!imgbbKey) return Promise.resolve(dataUrl);
+      const timeoutPromise = new Promise(function(resolve){
+        setTimeout(function(){ console.warn('⏱️ Timeout subiendo '+name+', usando imagen local'); resolve(dataUrl); }, 20000);
+      });
+      const uploadPromise = clUploadPhotoToImgBB(dataUrl, imgbbKey, name)
+        .then(function(url){ return url || dataUrl; })
+        .catch(function(e){ console.warn('⚠️ Error subiendo '+name+':', e.message); return dataUrl; });
+      return Promise.race([uploadPromise, timeoutPromise]);
     }
 
-    for (const packSize of PACK_SIZES) {
-      if(statusEl) statusEl.textContent = `Generando pack de ${packSize}...`;
-      const frontDataUrl = psGeneratePackImage(frontImg, packSize);
-      let frontUrl = frontDataUrl;
-      if (imgbbKey) {
-        const uploaded = await clUploadPhotoToImgBB(frontDataUrl, imgbbKey, 'pack-' + packSize);
-        if (uploaded) frontUrl = uploaded;
-      }
-      cur._packImages[packSize] = { front: frontUrl, back: backUrl };
-    }
+    const results = await Promise.all([
+      uploadWithTimeout(backDataUrl, 'pack-back'),
+      ...PACK_SIZES.map(function(p){ return uploadWithTimeout(frontDataUrls[p], 'pack-'+p); })
+    ]);
+    const backUrl = results[0];
+    PACK_SIZES.forEach(function(p, i){
+      cur._packImages[p] = { front: results[i+1], back: backUrl };
+    });
+    console.log('✅ Todo listo:', cur._packImages);
 
     if(statusEl) statusEl.textContent = '';
     toast('✅ 4 paquetes generados (1, 3, 6, 12)');
     renderPackImagesPreview();
   }catch(err){
-    console.error('psGenerateAllPacks error:', err);
+    console.error('❌ psGenerateAllPacks error:', err);
     const isTainted = /tainted|SecurityError|insecure/i.test(err.message||'') || err.name==='SecurityError';
     toast(isTainted
       ? '❌ Error de seguridad con la foto — vuelve a tomar FRONT/BACK y prueba de nuevo'
-      : '❌ Error generando paquetes: ' + err.message);
+      : '❌ Error: ' + (err.message||'desconocido'));
     if(statusEl) statusEl.textContent = isTainted
       ? '❌ Foto bloqueada por seguridad (CORS) — retoma FRONT y BACK'
-      : '❌ ' + err.message;
+      : '❌ ' + (err.message||'Error desconocido');
   }finally{
-    if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; }
+    resetBtn();
   }
 }
 
