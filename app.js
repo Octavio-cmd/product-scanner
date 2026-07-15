@@ -1128,13 +1128,14 @@ async function psCapturePhoto(slotId){
       }
 
       if (window.cur) {
-        if (slotId === 'front') cur._frontImg = finalUrl;
-        else cur._backImg = finalUrl;
+        if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = pngUrl; }
+        else { cur._backImg = finalUrl; cur._backImgLocal = pngUrl; }
       }
 
       if (slot) {
         slot.innerHTML = '<img src="' + finalUrl + '" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">';
       }
+      updatePackGenButtonState();
       toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
     }catch(err){
       console.error('psCapturePhoto error:', err);
@@ -1262,8 +1263,10 @@ async function psGenerateAllPacks(){
   if(statusEl) statusEl.textContent = 'Cargando fotos...';
 
   try{
-    const frontImg = await psLoadImage(cur._frontImg);
-    const backImg  = await psLoadImage(cur._backImg);
+    const frontSrc = cur._frontImgLocal || cur._frontImg;
+    const backSrc  = cur._backImgLocal  || cur._backImg;
+    const frontImg = await psLoadImage(frontSrc);
+    const backImg  = await psLoadImage(backSrc);
 
     if(!cur._packImages) cur._packImages = {};
     const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
@@ -1293,10 +1296,33 @@ async function psGenerateAllPacks(){
     renderPackImagesPreview();
   }catch(err){
     console.error('psGenerateAllPacks error:', err);
-    toast('❌ Error generando paquetes: ' + err.message);
-    if(statusEl) statusEl.textContent = '❌ ' + err.message;
+    const isTainted = /tainted|SecurityError|insecure/i.test(err.message||'') || err.name==='SecurityError';
+    toast(isTainted
+      ? '❌ Error de seguridad con la foto — vuelve a tomar FRONT/BACK y prueba de nuevo'
+      : '❌ Error generando paquetes: ' + err.message);
+    if(statusEl) statusEl.textContent = isTainted
+      ? '❌ Foto bloqueada por seguridad (CORS) — retoma FRONT y BACK'
+      : '❌ ' + err.message;
   }finally{
     if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; }
+  }
+}
+
+// Habilita el botón "Generar Imágenes de Pack" en cuanto existen FRONT y BACK,
+// sin necesidad de re-renderizar toda la tarjeta de resultados.
+function updatePackGenButtonState(){
+  if(!window.cur) return;
+  const btn = $('ps-gen-packs-btn');
+  const hasPhotos = !!(cur._frontImg && cur._backImg);
+  if(btn){
+    btn.disabled = !hasPhotos;
+    btn.style.opacity = hasPhotos ? '1' : '.4';
+  }
+  const desc = btn && btn.previousElementSibling; // el div de texto justo arriba del botón
+  if(desc){
+    desc.textContent = hasPhotos
+      ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
+      : '⚠️ Primero toma las fotos FRONT y BACK de arriba.';
   }
 }
 
@@ -2552,6 +2578,20 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
+  // ── 3c. EBAY MARKET DATA — junto con el resto de la info del producto ──
+  if(ebay.activeListings>0){
+    const sold=ebay.pricing&&ebay.pricing.sold;
+    const _srcTop = ebay.priceSource||'keyword';
+    h+=`<div class="card"><div class="lbl">eBay — Market Data (NEW, item+ship)</div>
+      <div class="val" style="font-size:13px;line-height:2">
+        🏷 Active BIN: <strong>${ebay.activeListings}</strong><br>
+        💰 Min: <strong>${fmt(low)}</strong> | Avg: <strong>${fmt(avg)}</strong> | Max: ${fmt(ebay.prices&&ebay.prices.high)}
+        ${sold?`<br>✅ Sold (90d): <strong>${sold.count}</strong> | Avg: <strong>${fmt(sold.avg)}</strong>`:''}
+      </div>
+      ${_srcTop!=='gtin_exact'?`<div style="font-size:11px;color:var(--mu);margin-top:4px">⚠️ Keyword prices — verify on eBay</div>`:''}
+    </div>`;
+  }
+
   // ── 3b. VER PRECIO REAL EN eBay — same link pattern as Clothing & Shoes ──
   if (r.upc) {
     const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(r.upc)
@@ -2646,18 +2686,7 @@ function renderResult(r){
     :'<span style="background:rgba(255,107,0,.15);color:var(--ac);font-size:11px;padding:3px 10px;border-radius:10px">🔍 KEYWORD ONLY</span>';
   h+=`<div style="text-align:center;margin:8px 0">${srcBadge}</div>`;
 
-  // ── 6. EBAY MARKET DATA ──────────────────────────────────────
-  if(ebay.activeListings>0){
-    const sold=ebay.pricing&&ebay.pricing.sold;
-    h+=`<div class="card"><div class="lbl">eBay — Market Data (NEW, item+ship)</div>
-      <div class="val" style="font-size:13px;line-height:2">
-        🏷 Active BIN: <strong>${ebay.activeListings}</strong><br>
-        💰 Min: <strong>${fmt(low)}</strong> | Avg: <strong>${fmt(avg)}</strong> | Max: ${fmt(ebay.prices&&ebay.prices.high)}
-        ${sold?`<br>✅ Sold (90d): <strong>${sold.count}</strong> | Avg: <strong>${fmt(sold.avg)}</strong>`:''}
-      </div>
-      ${src!=='gtin_exact'?`<div style="font-size:11px;color:var(--mu);margin-top:4px">⚠️ Keyword prices — verify on eBay</div>`:''}
-    </div>`;
-  }
+  // ── 6. (Market Data movida arriba, junto a Category — ver sección 3c) ──
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
