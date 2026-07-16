@@ -2697,6 +2697,11 @@ function renderResult(r){
         ${soldTop?`<br>✅ <strong>Sold (90d):</strong> ${soldTop.count} · Avg: ${fmt(soldTop.avg)}`:''}
       </div>`;
     }
+    mh += `<div class="price-row" style="margin-top:8px">
+      <div class="pc editable" onclick="editLowPrice()"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
+      <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
+      <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
+    </div>`;
     marketSlot.innerHTML = mh;
   }
 
@@ -2723,11 +2728,9 @@ function renderResult(r){
   // en #ps-market-data-slot, justo debajo de "paste eBay listing URL")
 
   // ── 4. PACK SELECTOR ─────────────────────────────────────────
-  h+=`<div class="price-row">
-    <div class="pc editable" onclick="editLowPrice()"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
-    <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
-    <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
-  </div>`+
+  // (Los 3 cuadros de precio -Lowest/Avg/Bundle- ahora viven arriba,
+  // en #ps-market-data-slot, junto con Active BIN — ver más arriba)
+  h+=
   (function(){
     var _cb=low||avg||0;
     var h2='<div class="card"><div class="lbl">📦 SELECT PACK SIZE</div>';
