@@ -2812,6 +2812,7 @@ async function psCheckShipStationLocation(sku, idx){
     const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
     const data = await res.json();
     const loc = data.exists ? (data.warehouse_location || '') : '';
+    if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"
     const statusLine = data.exists
       ? (loc
           ? '📍 Ubicación actual: <strong style="color:#00e676">' + esc(loc) + '</strong>'
@@ -2819,11 +2820,19 @@ async function psCheckShipStationLocation(sku, idx){
       : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
 
     const locInputId = 'ps-ssloc-input-' + idx;
+    // Botones según haya o no ubicación existente:
+    // - Sin ubicación: solo "📍 Guardar"
+    // - Con ubicación: "➕ Añadir" (agrega sin borrar) y "🔄 Reemplazar"
+    const buttonsHtml = loc
+      ? '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'append\')" style="padding:8px 10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">➕ Añadir</button>'
+        + '<button id="ps-ssloc-btn-rep-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'replace\')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">🔄 Reemplazar</button>'
+      : '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'replace\')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>';
+
     el.innerHTML = '<span id="ps-ssloc-line-' + idx + '">' + statusLine + '</span>'
       + '<div style="display:flex;gap:6px;margin-top:6px">'
-      + '<input id="' + locInputId + '" type="text" placeholder="Ej: A-12 (nueva o existente)" value="' + esc(loc) + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
+      + '<input id="' + locInputId + '" type="text" placeholder="' + (loc ? 'Nueva ubicación adicional...' : 'Ej: A-12') + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
       + '<button onclick="psScanLocation(' + idx + ')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:16px;cursor:pointer">📷</button>'
-      + '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>'
+      + buttonsHtml
       + '</div>'
       + '<div id="ps-ssloc-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>';
   }catch(err){
@@ -2857,18 +2866,38 @@ function psScanLocation(idx){
   }, 100);
 }
 
-async function psSaveShipStationLocation(idx){
-  console.log('📍 psSaveShipStationLocation llamado, idx=' + idx);
+async function psSaveShipStationLocation(idx, mode){
+  mode = mode || 'replace';
+  console.log('📍 psSaveShipStationLocation llamado, idx=' + idx + ', mode=' + mode);
   const p = (_psSellbriteProducts || {})[idx];
   const confirmEl = $('ps-ssloc-confirm-' + idx);
   const btnEl = $('ps-ssloc-btn-' + idx);
   if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $('ps-ssloc-input-' + idx);
-  const location = (input && input.value || '').trim();
-  if(!location){ toast('⚠️ Escribe una ubicación primero'); return; }
+  const newLoc = (input && input.value || '').trim();
+  if(!newLoc){ toast('⚠️ Escribe o escanea una ubicación primero'); return; }
+
+  // ── Modo AÑADIR: combinar con la ubicación existente sin borrarla ──
+  let location = newLoc;
+  if(mode === 'append' && p.currentLoc){
+    // Evitar duplicados exactos (ignorando mayúsculas/espacios)
+    const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); });
+    const already = parts.some(function(s){ return s.toLowerCase() === newLoc.toLowerCase(); });
+    if(already){ toast('⚠️ Esa ubicación ya está en la lista'); return; }
+    location = p.currentLoc + ', ' + newLoc;
+  }
+  // ShipStation limita warehouseLocation a ~100 caracteres
+  if(location.length > 100){
+    toast('⚠️ Demasiadas ubicaciones (límite ~100 caracteres). Considera reemplazar.');
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ El texto combinado excede el límite de ShipStation (' + location.length + '/100 caracteres)</span>';
+    return;
+  }
+
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
 
+  const btnRep = $('ps-ssloc-btn-rep-' + idx);
   if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳...'; }
+  if(btnRep){ btnRep.disabled = true; }
 
   // ── ESTRATEGIA DOBLE ──
   // 1. Sellbrite (bin_location) — SIEMPRE funciona, fuente de verdad desde el día uno
@@ -2928,7 +2957,9 @@ async function psSaveShipStationLocation(idx){
     toast('❌ No se pudo guardar la ubicación');
     if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ Falló en ambos sistemas. ShipStation: ' + esc(ssErr||'—') + '</span>';
   }
-  if(btnEl){ btnEl.disabled = false; btnEl.textContent = '📍 Guardar'; }
+  if(btnEl){ btnEl.disabled = false; btnEl.textContent = (p.currentLoc ? '➕ Añadir' : '📍 Guardar'); }
+  const btnRep2 = $('ps-ssloc-btn-rep-' + idx);
+  if(btnRep2){ btnRep2.disabled = false; }
 }
 
 function psAdjustSbQty(inputId, delta){
