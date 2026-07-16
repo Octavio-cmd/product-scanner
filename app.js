@@ -196,6 +196,7 @@ if (!localStorage.getItem('savvy_printer_ip')) {
 }
 
 let bulk=[],cur=null;
+let _psSellbriteProducts = {};
 let _lastBundleUrl = ''; // URL pública de ImgBB del último bundle generado
 
 function screen(n){document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));$('scr-'+n).classList.add('on');}
@@ -2770,14 +2771,26 @@ async function psCheckSellbrite(upc){
     }
 
     const products = data.products;
+    _psSellbriteProducts = {}; // guardar info para el update por SKU
     let html = '📦 <strong style="color:#00e676">En Sellbrite: ' + products.length + ' listado' + (products.length>1?'s':'') + '</strong>';
     products.forEach(function(p, idx){
       const inv = p.inventory || {};
-      const qty = inv.total_quantity || 0;
-      html += '<div style="margin-top:4px;padding-left:8px;border-left:2px solid var(--bd)">'
-        + '<span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
-        + ' — ' + qty + ' disponibles'
-        + '<span id="ps-ssloc-' + idx + '" style="display:block;font-size:11px;color:var(--mu);margin-top:2px">📍 Consultando ShipStation...</span>'
+      const totalQty = inv.total_quantity || 0;
+      const totalOnHand = inv.total_on_hand || 0;
+      const wh = (inv.channels||[])[0]?.warehouse_uuid || '';
+      const inputId = 'ps-sbqty-' + idx;
+      window._psSellbriteProducts[idx] = { sku: p.sku, warehouse_uuid: wh, inputId: inputId };
+
+      html += '<div style="margin-top:8px;padding:8px;background:var(--sf);border-radius:8px;border-left:2px solid var(--bd)">'
+        + '<div><span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
+        + ' — ' + totalQty + ' disponibles</div>'
+        + '<span id="ps-ssloc-' + idx + '" style="display:block;font-size:11px;color:var(--mu);margin:4px 0">📍 Consultando ShipStation...</span>'
+        + '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">'
+        + '<button onclick="psAdjustSbQty(\'' + inputId + '\',-1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">−</button>'
+        + '<input id="' + inputId + '" type="number" inputmode="numeric" value="' + totalOnHand + '" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:15px;text-align:center">'
+        + '<button onclick="psAdjustSbQty(\'' + inputId + '\',1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">+</button>'
+        + '</div>'
+        + '<button onclick="psUpdateSellbriteInventory(' + idx + ')" style="width:100%;margin-top:6px;padding:10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✅ Actualizar inventario</button>'
         + '</div>';
     });
     statusEl.innerHTML = html;
@@ -2808,6 +2821,42 @@ async function psCheckShipStationLocation(sku, idx){
   }catch(err){
     console.error('psCheckShipStationLocation error:', err);
     el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
+  }
+}
+
+function psAdjustSbQty(inputId, delta){
+  const input = $(inputId);
+  if(!input) return;
+  const val = parseInt(input.value||'0', 10) + delta;
+  input.value = Math.max(0, val);
+}
+
+async function psUpdateSellbriteInventory(idx){
+  const p = (_psSellbriteProducts || {})[idx];
+  if(!p){ toast('⚠️ No se cargó el producto'); return; }
+  const input = $(p.inputId);
+  const newQty = parseInt((input && input.value) || '0', 10);
+  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+
+  toast('📤 Actualizando inventario...');
+  try{
+    const res = await fetch(RAILWAY_SB + '/sb/update-inventory', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        sku: p.sku,
+        warehouse_uuid: p.warehouse_uuid || '',
+        quantity: newQty
+      })
+    });
+    const result = await res.json();
+    if(!res.ok || result.status === 'error'){
+      throw new Error(result.error || 'Update failed');
+    }
+    toast('✅ ' + p.sku + ' actualizado a ' + newQty + ' unidades', 3000);
+  }catch(err){
+    console.error('psUpdateSellbriteInventory error:', err);
+    toast('❌ Error al actualizar: ' + (err.message||err));
   }
 }
 
