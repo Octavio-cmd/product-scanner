@@ -2779,7 +2779,7 @@ async function psCheckSellbrite(upc){
       const totalOnHand = inv.total_on_hand || 0;
       const wh = (inv.channels||[])[0]?.warehouse_uuid || '';
       const inputId = 'ps-sbqty-' + idx;
-      window._psSellbriteProducts[idx] = { sku: p.sku, warehouse_uuid: wh, inputId: inputId };
+      _psSellbriteProducts[idx] = { sku: p.sku, warehouse_uuid: wh, inputId: inputId };
 
       html += '<div style="margin-top:8px;padding:8px;background:var(--sf);border-radius:8px;border-left:2px solid var(--bd)">'
         + '<div><span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
