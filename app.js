@@ -2821,12 +2821,38 @@ async function psCheckShipStationLocation(sku, idx){
     el.innerHTML = statusLine
       + '<div style="display:flex;gap:6px;margin-top:6px">'
       + '<input id="' + locInputId + '" type="text" placeholder="Ej: A-12 (nueva o existente)" value="' + esc(loc) + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
+      + '<button onclick="psScanLocation(' + idx + ')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:16px;cursor:pointer">📷</button>'
       + '<button onclick="psSaveShipStationLocation(' + idx + ')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>'
       + '</div>';
   }catch(err){
     console.error('psCheckShipStationLocation error:', err);
     el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
   }
+}
+
+// ── Escanear la ubicación con la cámara (código de barras del anaquel/caja) ──
+// Reutiliza el mismo escáner (savvyStartScan) que ya usa el resto de la app.
+function psScanLocation(idx){
+  document.querySelectorAll('.scr').forEach(function(s){ s.classList.remove('on'); });
+  var camScreen = document.getElementById('scr-cam');
+  if(camScreen) camScreen.classList.add('on');
+  setTimeout(function(){
+    if(typeof savvyStartScan !== 'function'){
+      console.error('❌ savvyStartScan not defined!');
+      toast('❌ Error: escáner no disponible');
+      return;
+    }
+    savvyStartScan('qr-video', function(txt){
+      if(typeof savvyStopScan === 'function') savvyStopScan('qr-video');
+      document.querySelectorAll('.scr').forEach(function(s){ s.classList.remove('on'); });
+      var resScreen = document.getElementById('scr-res');
+      if(resScreen) resScreen.classList.add('on');
+      var input = document.getElementById('ps-ssloc-input-' + idx);
+      var value = String(txt||'').trim();
+      if(input) input.value = value;
+      toast('📷 Ubicación escaneada: ' + value);
+    });
+  }, 100);
 }
 
 async function psSaveShipStationLocation(idx){
