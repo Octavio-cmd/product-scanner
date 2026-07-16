@@ -2856,12 +2856,14 @@ function psScanLocation(idx){
 }
 
 async function psSaveShipStationLocation(idx){
+  console.log('📍 psSaveShipStationLocation llamado, idx=' + idx);
   const p = (_psSellbriteProducts || {})[idx];
-  if(!p){ toast('⚠️ No se cargó el producto'); return; }
+  if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $('ps-ssloc-input-' + idx);
   const location = (input && input.value || '').trim();
   if(!location){ toast('⚠️ Escribe una ubicación primero'); return; }
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+  console.log('📤 Enviando a /ss/create-product:', JSON.stringify({sku:p.sku, warehouse_location:location}));
 
   toast('📤 Guardando en ShipStation...');
   try{
@@ -2875,14 +2877,16 @@ async function psSaveShipStationLocation(idx){
         upc: p.upc || ''
       })
     });
+    console.log('📥 Respuesta /ss/create-product, status:', res.status);
     const result = await res.json();
-    if(!res.ok || result.status === 'error'){ throw new Error(result.error || 'Error'); }
+    console.log('📥 Body:', JSON.stringify(result));
+    if(!res.ok || result.status === 'error'){ throw new Error(result.error || ('HTTP ' + res.status)); }
 
     toast('✅ ' + (result.message || ('Ubicación ' + location + ' guardada')), 3000);
     // Refresca para mostrar la ubicación recién guardada como "actual"
     psCheckShipStationLocation(p.sku, idx);
   }catch(err){
-    console.error('psSaveShipStationLocation error:', err);
+    console.error('❌ psSaveShipStationLocation error:', err.message, err);
     toast('❌ Error: ' + (err.message||err));
   }
 }
@@ -2895,11 +2899,13 @@ function psAdjustSbQty(inputId, delta){
 }
 
 async function psUpdateSellbriteInventory(idx){
+  console.log('✅ psUpdateSellbriteInventory llamado, idx=' + idx);
   const p = (_psSellbriteProducts || {})[idx];
-  if(!p){ toast('⚠️ No se cargó el producto'); return; }
+  if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $(p.inputId);
   const newQty = parseInt((input && input.value) || '0', 10);
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+  console.log('📤 Enviando a /sb/update-inventory:', JSON.stringify({sku:p.sku, warehouse_uuid:p.warehouse_uuid, quantity:newQty}));
 
   toast('📤 Actualizando inventario...');
   try{
@@ -2912,13 +2918,15 @@ async function psUpdateSellbriteInventory(idx){
         quantity: newQty
       })
     });
+    console.log('📥 Respuesta /sb/update-inventory, status:', res.status);
     const result = await res.json();
+    console.log('📥 Body:', JSON.stringify(result));
     if(!res.ok || result.status === 'error'){
-      throw new Error(result.error || 'Update failed');
+      throw new Error(result.error || ('HTTP ' + res.status));
     }
     toast('✅ ' + p.sku + ' actualizado a ' + newQty + ' unidades', 3000);
   }catch(err){
-    console.error('psUpdateSellbriteInventory error:', err);
+    console.error('❌ psUpdateSellbriteInventory error:', err.message, err);
     toast('❌ Error al actualizar: ' + (err.message||err));
   }
 }
