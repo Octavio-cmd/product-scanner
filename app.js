@@ -2783,14 +2783,15 @@ async function psCheckSellbrite(upc){
 
       html += '<div style="margin-top:8px;padding:8px;background:var(--sf);border-radius:8px;border-left:2px solid var(--bd)">'
         + '<div><span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
-        + ' — ' + totalQty + ' disponibles</div>'
+        + ' — <span id="ps-sbqty-avail-' + idx + '">' + totalQty + '</span> disponibles</div>'
         + '<span id="ps-ssloc-' + idx + '" style="display:block;font-size:11px;color:var(--mu);margin:4px 0">📍 Consultando ShipStation...</span>'
         + '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">'
         + '<button onclick="psAdjustSbQty(\'' + inputId + '\',-1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">−</button>'
         + '<input id="' + inputId + '" type="number" inputmode="numeric" value="' + totalOnHand + '" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:15px;text-align:center">'
         + '<button onclick="psAdjustSbQty(\'' + inputId + '\',1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">+</button>'
         + '</div>'
-        + '<button onclick="psUpdateSellbriteInventory(' + idx + ')" style="width:100%;margin-top:6px;padding:10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✅ Actualizar inventario</button>'
+        + '<button id="ps-sbqty-btn-' + idx + '" onclick="psUpdateSellbriteInventory(' + idx + ')" style="width:100%;margin-top:6px;padding:10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✅ Actualizar inventario</button>'
+        + '<div id="ps-sbqty-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>'
         + '</div>';
     });
     statusEl.innerHTML = html;
@@ -2818,12 +2819,13 @@ async function psCheckShipStationLocation(sku, idx){
       : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
 
     const locInputId = 'ps-ssloc-input-' + idx;
-    el.innerHTML = statusLine
+    el.innerHTML = '<span id="ps-ssloc-line-' + idx + '">' + statusLine + '</span>'
       + '<div style="display:flex;gap:6px;margin-top:6px">'
       + '<input id="' + locInputId + '" type="text" placeholder="Ej: A-12 (nueva o existente)" value="' + esc(loc) + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
       + '<button onclick="psScanLocation(' + idx + ')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:16px;cursor:pointer">📷</button>'
-      + '<button onclick="psSaveShipStationLocation(' + idx + ')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>'
-      + '</div>';
+      + '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>'
+      + '</div>'
+      + '<div id="ps-ssloc-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>';
   }catch(err){
     console.error('psCheckShipStationLocation error:', err);
     el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
@@ -2858,6 +2860,8 @@ function psScanLocation(idx){
 async function psSaveShipStationLocation(idx){
   console.log('📍 psSaveShipStationLocation llamado, idx=' + idx);
   const p = (_psSellbriteProducts || {})[idx];
+  const confirmEl = $('ps-ssloc-confirm-' + idx);
+  const btnEl = $('ps-ssloc-btn-' + idx);
   if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $('ps-ssloc-input-' + idx);
   const location = (input && input.value || '').trim();
@@ -2865,7 +2869,8 @@ async function psSaveShipStationLocation(idx){
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
   console.log('📤 Enviando a /ss/create-product:', JSON.stringify({sku:p.sku, warehouse_location:location}));
 
-  toast('📤 Guardando en ShipStation...');
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳...'; }
+  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 Guardando en ShipStation...</span>';
   try{
     const res = await fetch(RAILWAY_SB + '/ss/create-product', {
       method: 'POST',
@@ -2883,11 +2888,15 @@ async function psSaveShipStationLocation(idx){
     if(!res.ok || result.status === 'error'){ throw new Error(result.error || ('HTTP ' + res.status)); }
 
     toast('✅ ' + (result.message || ('Ubicación ' + location + ' guardada')), 3000);
-    // Refresca para mostrar la ubicación recién guardada como "actual"
-    psCheckShipStationLocation(p.sku, idx);
+    // Refresca para mostrar la ubicación recién guardada como "actual" (esto ya
+    // reemplaza todo el bloque, incluyendo este mensaje de confirmación, con el
+    // estado fresco — así que la propia "Ubicación actual" en verde ES la confirmación)
+    await psCheckShipStationLocation(p.sku, idx);
   }catch(err){
     console.error('❌ psSaveShipStationLocation error:', err.message, err);
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ No se guardó: ' + esc(err.message||String(err)) + '</span>';
     toast('❌ Error: ' + (err.message||err));
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '📍 Guardar'; }
   }
 }
 
@@ -2901,13 +2910,16 @@ function psAdjustSbQty(inputId, delta){
 async function psUpdateSellbriteInventory(idx){
   console.log('✅ psUpdateSellbriteInventory llamado, idx=' + idx);
   const p = (_psSellbriteProducts || {})[idx];
+  const confirmEl = $('ps-sbqty-confirm-' + idx);
+  const btnEl = $('ps-sbqty-btn-' + idx);
   if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $(p.inputId);
   const newQty = parseInt((input && input.value) || '0', 10);
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
   console.log('📤 Enviando a /sb/update-inventory:', JSON.stringify({sku:p.sku, warehouse_uuid:p.warehouse_uuid, quantity:newQty}));
 
-  toast('📤 Actualizando inventario...');
+  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳ Actualizando...'; }
+  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 Enviando a Sellbrite...</span>';
   try{
     const res = await fetch(RAILWAY_SB + '/sb/update-inventory', {
       method: 'POST',
@@ -2924,10 +2936,17 @@ async function psUpdateSellbriteInventory(idx){
     if(!res.ok || result.status === 'error'){
       throw new Error(result.error || ('HTTP ' + res.status));
     }
+    // Confirmación VISIBLE y PERMANENTE dentro de la tarjeta (no solo un toast que desaparece)
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Confirmado por Sellbrite — ahora en ' + newQty + ' unidades</span>';
+    const availSpan = $('ps-sbqty-avail-' + idx);
+    if(availSpan) availSpan.textContent = newQty; // reflejar el nuevo número al instante
     toast('✅ ' + p.sku + ' actualizado a ' + newQty + ' unidades', 3000);
   }catch(err){
     console.error('❌ psUpdateSellbriteInventory error:', err.message, err);
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ No se pudo actualizar: ' + esc(err.message||String(err)) + '</span>';
     toast('❌ Error al actualizar: ' + (err.message||err));
+  }finally{
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
   }
 }
 
