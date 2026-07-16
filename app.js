@@ -2779,7 +2779,7 @@ async function psCheckSellbrite(upc){
       const totalOnHand = inv.total_on_hand || 0;
       const wh = (inv.channels||[])[0]?.warehouse_uuid || '';
       const inputId = 'ps-sbqty-' + idx;
-      _psSellbriteProducts[idx] = { sku: p.sku, warehouse_uuid: wh, inputId: inputId };
+      _psSellbriteProducts[idx] = { sku: p.sku, name: p.name || p.sku, upc: upcClean, warehouse_uuid: wh, inputId: inputId };
 
       html += '<div style="margin-top:8px;padding:8px;background:var(--sf);border-radius:8px;border-left:2px solid var(--bd)">'
         + '<div><span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
@@ -2810,17 +2810,54 @@ async function psCheckShipStationLocation(sku, idx){
   try{
     const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
     const data = await res.json();
-    if(data.exists){
-      const loc = data.warehouse_location || '';
-      el.innerHTML = loc
-        ? '📍 Ubicación: <strong style="color:#00e676">' + esc(loc) + '</strong>'
-        : '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>';
-    } else {
-      el.innerHTML = '📍 <span style="color:#ff9800">No está en ShipStation</span>';
-    }
+    const loc = data.exists ? (data.warehouse_location || '') : '';
+    const statusLine = data.exists
+      ? (loc
+          ? '📍 Ubicación actual: <strong style="color:#00e676">' + esc(loc) + '</strong>'
+          : '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>')
+      : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
+
+    const locInputId = 'ps-ssloc-input-' + idx;
+    el.innerHTML = statusLine
+      + '<div style="display:flex;gap:6px;margin-top:6px">'
+      + '<input id="' + locInputId + '" type="text" placeholder="Ej: A-12 (nueva o existente)" value="' + esc(loc) + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
+      + '<button onclick="psSaveShipStationLocation(' + idx + ')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>'
+      + '</div>';
   }catch(err){
     console.error('psCheckShipStationLocation error:', err);
     el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
+  }
+}
+
+async function psSaveShipStationLocation(idx){
+  const p = (_psSellbriteProducts || {})[idx];
+  if(!p){ toast('⚠️ No se cargó el producto'); return; }
+  const input = $('ps-ssloc-input-' + idx);
+  const location = (input && input.value || '').trim();
+  if(!location){ toast('⚠️ Escribe una ubicación primero'); return; }
+  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+
+  toast('📤 Guardando en ShipStation...');
+  try{
+    const res = await fetch(RAILWAY_SB + '/ss/create-product', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        sku: p.sku,
+        name: p.name || p.sku,
+        warehouse_location: location,
+        upc: p.upc || ''
+      })
+    });
+    const result = await res.json();
+    if(!res.ok || result.status === 'error'){ throw new Error(result.error || 'Error'); }
+
+    toast('✅ ' + (result.message || ('Ubicación ' + location + ' guardada')), 3000);
+    // Refresca para mostrar la ubicación recién guardada como "actual"
+    psCheckShipStationLocation(p.sku, idx);
+  }catch(err){
+    console.error('psSaveShipStationLocation error:', err);
+    toast('❌ Error: ' + (err.message||err));
   }
 }
 
