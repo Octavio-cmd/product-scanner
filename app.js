@@ -2812,12 +2812,24 @@ async function psCheckShipStationLocation(sku, idx){
     const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
     const data = await res.json();
     const loc = data.exists ? (data.warehouse_location || '') : '';
-    if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"
-    const statusLine = data.exists
-      ? (loc
-          ? '📍 Ubicación actual: <strong style="color:#00e676">' + esc(loc) + '</strong>'
-          : '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>')
-      : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
+    if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"/borrar
+
+    // Cada ubicación (separada por coma) se muestra como fichita con ✕ para borrarla individualmente
+    let statusLine;
+    if (loc) {
+      const parts = loc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      let chips = parts.map(function(part, pi){
+        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:14px;padding:3px 6px 3px 10px;margin:2px 3px 2px 0">'
+          + '<strong style="color:#00e676;font-size:12px">' + esc(part) + '</strong>'
+          + '<button onclick="psRemoveLocation(' + idx + ',' + pi + ')" style="width:18px;height:18px;background:rgba(255,82,82,.25);color:#ff8a80;border:none;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;padding:0">✕</button>'
+          + '</span>';
+      }).join('');
+      statusLine = '📍 Ubicaciones: <span style="display:inline">' + chips + '</span>';
+    } else {
+      statusLine = data.exists
+        ? '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>'
+        : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
+    }
 
     const locInputId = 'ps-ssloc-input-' + idx;
     // Botones según haya o no ubicación existente:
@@ -2893,6 +2905,29 @@ async function psSaveShipStationLocation(idx, mode){
     return;
   }
 
+  await psPersistLocation(idx, location);
+}
+
+// ── Borrar UNA ubicación individual (la ✕ de cada fichita) ──
+async function psRemoveLocation(idx, partIndex){
+  const p = (_psSellbriteProducts || {})[idx];
+  if(!p || !p.currentLoc){ toast('⚠️ No hay ubicaciones cargadas'); return; }
+  const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  if(partIndex < 0 || partIndex >= parts.length) return;
+  const removed = parts.splice(partIndex, 1)[0];
+  const newLocation = parts.join(', '); // puede quedar vacío = borrar todas
+  console.log('🗑️ Borrando ubicación "' + removed + '" → nueva lista: "' + newLocation + '"');
+  toast('🗑️ Quitando ' + removed + '...');
+  await psPersistLocation(idx, newLocation);
+}
+
+// ── Guardado compartido: escribe el texto de ubicación (o vacío para borrar)
+// en AMBOS sistemas: Sellbrite (bin_location) + ShipStation (pick ticket) ──
+async function psPersistLocation(idx, location){
+  const p = (_psSellbriteProducts || {})[idx];
+  if(!p) return;
+  const confirmEl = $('ps-ssloc-confirm-' + idx);
+  const btnEl = $('ps-ssloc-btn-' + idx);
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
 
   const btnRep = $('ps-ssloc-btn-rep-' + idx);
@@ -2940,11 +2975,14 @@ async function psSaveShipStationLocation(idx, mode){
   }catch(e){ ssErr = e.message || String(e); console.error('ShipStation error:', e); }
 
   // ── Resultado combinado, claro y permanente ──
+  const isClear = !location;
   if(sbOk && ssOk){
-    toast('✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
-    await psCheckShipStationLocation(p.sku, idx); // refresca — la "Ubicación actual" verde es la confirmación
+    toast(isClear ? '🗑️ Ubicación borrada en ambos sistemas' : '✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
+    await psCheckShipStationLocation(p.sku, idx); // refresca — las fichitas verdes son la confirmación
     const c2 = $('ps-ssloc-confirm-' + idx);
-    if(c2) c2.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
+    if(c2) c2.innerHTML = isClear
+      ? '<span style="color:#00e676;font-weight:700">🗑️ Ubicación(es) borrada(s) en Sellbrite + ShipStation</span>'
+      : '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
   } else if(sbOk && !ssOk){
     toast('✅ Guardada en Sellbrite (ShipStation pendiente)', 3500);
     if(confirmEl) confirmEl.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ Guardada en Sellbrite (bin location).<br>⚠️ ShipStation: ' + esc(ssErr) + '<br><span style="font-weight:400;font-size:11px;color:var(--mu)">Cuando llegue la primera orden de este SKU, ShipStation creará el producto y podrás guardar la ubicación ahí (o se puede automatizar después).</span></span>';
@@ -2957,7 +2995,8 @@ async function psSaveShipStationLocation(idx, mode){
     toast('❌ No se pudo guardar la ubicación');
     if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ Falló en ambos sistemas. ShipStation: ' + esc(ssErr||'—') + '</span>';
   }
-  if(btnEl){ btnEl.disabled = false; btnEl.textContent = (p.currentLoc ? '➕ Añadir' : '📍 Guardar'); }
+  const btnEl2 = $('ps-ssloc-btn-' + idx);
+  if(btnEl2){ btnEl2.disabled = false; btnEl2.textContent = (p.currentLoc ? '➕ Añadir' : '📍 Guardar'); }
   const btnRep2 = $('ps-ssloc-btn-rep-' + idx);
   if(btnRep2){ btnRep2.disabled = false; }
 }
