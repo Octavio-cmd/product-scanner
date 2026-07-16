@@ -2938,7 +2938,7 @@ async function psPersistLocation(idx, location){
   // 1. Sellbrite (bin_location) — SIEMPRE funciona, fuente de verdad desde el día uno
   // 2. ShipStation (warehouseLocation) — es lo que sale en el PICK TICKET; funciona
   //    solo si el producto ya existe ahí (ShipStation no permite crear por API)
-  let sbOk = false, ssOk = false, ssErr = '';
+  let sbOk = false, ssOk = false, ssErr = '', sbBinCleared = null;
 
   if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 1/2 Guardando en Sellbrite (bin location)...</span>';
   try{
@@ -2954,6 +2954,7 @@ async function psPersistLocation(idx, location){
     const sbResult = await sbRes.json();
     console.log('📥 Sellbrite bin_location:', sbRes.status, JSON.stringify(sbResult).substring(0,200));
     sbOk = sbRes.ok && sbResult.status !== 'error';
+    if('bin_cleared' in sbResult) sbBinCleared = sbResult.bin_cleared; // true/false/null
   }catch(e){ console.error('Sellbrite bin_location error:', e); }
 
   if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 2/2 Guardando en ShipStation (pick ticket)...</span>';
@@ -2977,12 +2978,18 @@ async function psPersistLocation(idx, location){
   // ── Resultado combinado, claro y permanente ──
   const isClear = !location;
   if(sbOk && ssOk){
-    toast(isClear ? '🗑️ Ubicación borrada en ambos sistemas' : '✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
+    toast(isClear ? '🗑️ Ubicación borrada' : '✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
     await psCheckShipStationLocation(p.sku, idx); // refresca — las fichitas verdes son la confirmación
     const c2 = $('ps-ssloc-confirm-' + idx);
-    if(c2) c2.innerHTML = isClear
-      ? '<span style="color:#00e676;font-weight:700">🗑️ Ubicación(es) borrada(s) en Sellbrite + ShipStation</span>'
-      : '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
+    if(c2){
+      if(isClear && sbBinCleared === false){
+        c2.innerHTML = '<span style="color:#ffab00;font-weight:700">🗑️ Borrada en ShipStation ✅ (pick ticket limpio)<br>⚠️ Sellbrite rechazó el borrado por API — quítala manualmente en app.sellbrite.com si te importa que quede limpio ahí</span>';
+      } else if(isClear){
+        c2.innerHTML = '<span style="color:#00e676;font-weight:700">🗑️ Ubicación(es) borrada(s) en Sellbrite + ShipStation</span>';
+      } else {
+        c2.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
+      }
+    }
   } else if(sbOk && !ssOk){
     toast('✅ Guardada en Sellbrite (ShipStation pendiente)', 3500);
     if(confirmEl) confirmEl.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ Guardada en Sellbrite (bin location).<br>⚠️ ShipStation: ' + esc(ssErr) + '<br><span style="font-weight:400;font-size:11px;color:var(--mu)">Cuando llegue la primera orden de este SKU, ShipStation creará el producto y podrás guardar la ubicación ahí (o se puede automatizar después).</span></span>';
