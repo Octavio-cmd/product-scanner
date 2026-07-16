@@ -3058,6 +3058,137 @@ async function psUpdateSellbriteInventory(idx){
   }
 }
 
+// ── DESCRIPCIÓN eBay generada con Claude ──────────────────────
+// Formato fijo pedido por Manuel:
+//   1. Introducción del producto
+//   2. Lista de beneficios con bullets
+//   3. Contenido detallado del paquete
+//   4. Disclaimer final (siempre igual, incluido en la descripción)
+const PS_DESC_DISCLAIMER = 'This multi-pack bundle was packaged by our store for your convenience. Each item is brand new, factory-sealed, and 100% authentic, made by the original manufacturer. Retail packaging may vary.';
+
+async function psGenerateDescription(){
+  if(!cur){ toast('⚠️ Escanea un producto primero'); return; }
+  const btn = $('ps-desc-btn');
+  const out = $('ps-desc-result');
+  const key = (localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY);
+  if(!key){ toast('❌ Claude API key no configurada'); return; }
+
+  const packs = cur.packSize || 1;
+  const title = cur.title || cur.prod && cur.prod.title || '';
+  const brand = cur.brand || '';
+  const prodTitle = (cur.prod && cur.prod.title) || title;
+  const category = cur.categoryName || 'Health & Beauty';
+
+  if(btn){ btn.disabled = true; btn.textContent = '⏳ Generando con Claude...'; }
+  if(out) out.innerHTML = '<div style="text-align:center;padding:12px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:11px;color:var(--mu)">Escribiendo descripción...</div></div>';
+
+  const prompt = `Write an eBay product description in ENGLISH for this listing:
+
+Product: ${prodTitle}
+Brand: ${brand}
+Pack size: ${packs} unit${packs>1?'s':''} (bundle of ${packs})
+Category: ${category}
+eBay title: ${title}
+
+STRICT FORMAT — respond ONLY with valid JSON (no markdown, no backticks):
+{
+ "intro": "2-3 sentence engaging product introduction paragraph",
+ "benefits": ["benefit 1", "benefit 2", "benefit 3", "benefit 4", "benefit 5"],
+ "package_contents": "Detailed description of what the package includes: exactly ${packs} unit(s) of the product, with size/count per unit if known"
+}
+
+Rules:
+- ENGLISH only
+- Do NOT invent medical claims; use safe marketing language ("supports", "helps promote")
+- Do NOT mention UPC or barcodes
+- NEVER use the words "assembled", "assembly", or anything implying WE manufacture the product — we only bundle factory-sealed retail products together
+- In package_contents, reinforce trust: items are brand new, factory-sealed, from the original manufacturer
+- benefits: 4 to 6 bullets, each under 12 words
+- package_contents must clearly state the quantity: ${packs} unit(s)`;
+
+  try{
+    const ctrl = new AbortController();
+    const timer = setTimeout(function(){ ctrl.abort(); }, 20000);
+    const r = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      signal: ctrl.signal,
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:800,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
+    });
+    clearTimeout(timer);
+    if(!r.ok) throw new Error('Claude HTTP ' + r.status);
+    const d = await r.json();
+    const txt = (d.content&&d.content[0]&&d.content[0].text||'').replace(/```json|```/g,'').trim();
+    const parsed = JSON.parse(txt);
+
+    cur._description = {
+      intro: parsed.intro || '',
+      benefits: Array.isArray(parsed.benefits) ? parsed.benefits : [],
+      package_contents: parsed.package_contents || '',
+      disclaimer: PS_DESC_DISCLAIMER
+    };
+    if(out) out.innerHTML = renderDescriptionHTML(cur._description);
+    toast('✅ Descripción generada');
+  }catch(err){
+    console.error('psGenerateDescription error:', err);
+    if(out) out.innerHTML = '<div style="color:#ff5252;font-size:12px;text-align:center">❌ ' + esc(err.name==='AbortError'?'Claude tardó demasiado — intenta de nuevo':(err.message||String(err))) + '</div>';
+    toast('❌ Error generando descripción');
+  }finally{
+    if(btn){ btn.disabled = false; btn.textContent = '✨ Generar Descripción'; }
+  }
+}
+
+// Convierte la descripción estructurada en HTML para mostrar + copiar
+function psDescriptionToText(desc){
+  let t = desc.intro + '\n\n';
+  t += 'BENEFITS:\n';
+  desc.benefits.forEach(function(b){ t += '• ' + b + '\n'; });
+  t += '\nPACKAGE CONTENTS:\n' + desc.package_contents + '\n\n';
+  t += desc.disclaimer;
+  return t;
+}
+
+function renderDescriptionHTML(desc){
+  if(!desc) return '';
+  let h = '<div style="background:var(--sf2);border-radius:10px;padding:12px;font-size:13px;line-height:1.6">';
+  h += '<div style="margin-bottom:10px">' + esc(desc.intro) + '</div>';
+  h += '<div style="font-weight:800;font-size:11px;color:var(--mu);margin-bottom:4px">BENEFITS:</div><ul style="margin:0 0 10px 18px;padding:0">';
+  desc.benefits.forEach(function(b){ h += '<li style="margin-bottom:3px">' + esc(b) + '</li>'; });
+  h += '</ul>';
+  h += '<div style="font-weight:800;font-size:11px;color:var(--mu);margin-bottom:4px">PACKAGE CONTENTS:</div>';
+  h += '<div style="margin-bottom:10px">' + esc(desc.package_contents) + '</div>';
+  h += '<div style="font-size:11px;color:var(--mu);font-style:italic;border-top:1px solid var(--bd);padding-top:8px">' + esc(desc.disclaimer) + '</div>';
+  h += '</div>';
+  h += '<div style="display:flex;gap:6px;margin-top:8px">'
+    + '<button onclick="psCopyDescription()" style="flex:1;padding:10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer">📋 Copiar</button>'
+    + '<button onclick="psGenerateDescription()" style="flex:1;padding:10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer">🔄 Regenerar</button>'
+    + '</div>';
+  return h;
+}
+
+function psCopyDescription(){
+  if(!cur || !cur._description){ toast('⚠️ Genera la descripción primero'); return; }
+  const text = psDescriptionToText(cur._description);
+  if(navigator.clipboard && navigator.clipboard.writeText){
+    navigator.clipboard.writeText(text).then(function(){ toast('📋 Descripción copiada'); })
+      .catch(function(){ psCopyDescriptionFallback(text); });
+  } else {
+    psCopyDescriptionFallback(text);
+  }
+}
+function psCopyDescriptionFallback(text){
+  var ta = document.createElement('textarea');
+  ta.value = text; document.body.appendChild(ta);
+  ta.select(); document.execCommand('copy');
+  document.body.removeChild(ta);
+  toast('📋 Descripción copiada');
+}
+
 function renderResult(r){
   if(!r)return;
   const sv=r.verdict==='SAVVY';
@@ -3134,6 +3265,13 @@ function renderResult(r){
     <div class="val">${esc(r.categoryName||'Health & Beauty')}
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
+
+  // ── 3.5 DESCRIPCIÓN eBay (generada con Claude) ──────────────
+  h+=`<div class="card" style="border-left:3px solid #7c4dff">
+    <div class="lbl" style="color:#b388ff">📄 eBay Description</div>
+    <button id="ps-desc-btn" onclick="psGenerateDescription()" style="width:100%;margin-top:6px;padding:12px;background:linear-gradient(135deg,#7c4dff,#5e35b1);border:none;border-radius:10px;color:#fff;font-weight:800;font-size:14px;cursor:pointer">✨ Generar Descripción</button>
+    <div id="ps-desc-result" style="margin-top:8px">${cur&&cur._description?renderDescriptionHTML(cur._description):''}</div>
+  </div>`;
 
   // (El botón "Ver precio real en eBay" y el Market Data ahora viven arriba,
   // en #ps-market-data-slot, justo debajo de "paste eBay listing URL")
