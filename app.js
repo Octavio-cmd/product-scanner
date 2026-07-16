@@ -2663,7 +2663,6 @@ function renderResult(r){
   const bcResult = $('ps-barcode-result');
   if (bcResult) {
     const sourceLabel = ebay.priceSource === 'manual_override' ? 'Manual' : (ebay.priceSource || '');
-    const soldTop = ebay.pricing && ebay.pricing.sold;
     bcResult.innerHTML = `
       <div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found! ${esc(sourceLabel)}</div>
       <div>🏷️ <strong>Brand:</strong> ${esc(r.brand||'—')}</div>
@@ -2673,14 +2672,32 @@ function renderResult(r){
         <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
       ` : '<div style="color:var(--mu)">💰 Sin precio disponible — toca "eBay Lowest" abajo para ingresarlo manual</div>'}
       <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${esc(r.categoryName||'Other')}</div>
-      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>
-      ${ebay.activeListings>0 ? `
-      <div style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;line-height:1.8">
+      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>`;
+    bcResult.style.display = 'block';
+  }
+
+  // ── VER PRECIO REAL EN eBay + MARKET DATA — juntos, debajo del scanner ──
+  const marketSlot = $('ps-market-data-slot');
+  if (marketSlot) {
+    let mh = '';
+    if (r.upc) {
+      const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(r.upc)
+        + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
+      mh += `<a href="${ebaySearchUrl}" target="_blank" rel="noopener"
+        style="display:block;margin-bottom:8px;background:#0064d2;border-radius:10px;padding:12px 14px;
+               color:#fff;font-weight:700;font-size:14px;text-decoration:none;text-align:center">
+        🔍 Ver precio real en eBay →
+      </a>`;
+    }
+    if (ebay.activeListings > 0) {
+      const soldTop = ebay.pricing && ebay.pricing.sold;
+      mh += `<div style="background:var(--sf2);border-radius:10px;padding:10px;font-size:12px;line-height:1.8">
         🏷 <strong>Active BIN:</strong> ${ebay.activeListings}
         &nbsp;|&nbsp; Min: <strong>${fmt(low)}</strong> · Avg: <strong>${fmt(avg)}</strong> · Max: ${fmt(ebay.prices&&ebay.prices.high)}
         ${soldTop?`<br>✅ <strong>Sold (90d):</strong> ${soldTop.count} · Avg: ${fmt(soldTop.avg)}`:''}
-      </div>` : ''}`;
-    bcResult.style.display = 'block';
+      </div>`;
+    }
+    marketSlot.innerHTML = mh;
   }
 
   let h=`<div class="badge ${sv?'sv':'dw'}">${sv?'✅ SAVVY':'❌ DWI'}</div>`;
@@ -2702,16 +2719,8 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
-  // ── 3b. VER PRECIO REAL EN eBay — same link pattern as Clothing & Shoes ──
-  if (r.upc) {
-    const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(r.upc)
-      + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
-    h+=`<a href="${ebaySearchUrl}" target="_blank" rel="noopener"
-      style="display:block;margin-bottom:12px;background:#0064d2;border-radius:10px;padding:12px 14px;
-             color:#fff;font-weight:700;font-size:14px;text-decoration:none;text-align:center">
-      🔍 Ver precio real en eBay →
-    </a>`;
-  }
+  // (El botón "Ver precio real en eBay" y el Market Data ahora viven arriba,
+  // en #ps-market-data-slot, justo debajo de "paste eBay listing URL")
 
   // ── 4. PACK SELECTOR ─────────────────────────────────────────
   h+=`<div class="price-row">
