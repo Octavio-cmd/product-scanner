@@ -2867,10 +2867,32 @@ async function psSaveShipStationLocation(idx){
   const location = (input && input.value || '').trim();
   if(!location){ toast('⚠️ Escribe una ubicación primero'); return; }
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
-  console.log('📤 Enviando a /ss/create-product:', JSON.stringify({sku:p.sku, warehouse_location:location}));
 
   if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳...'; }
-  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 Guardando en ShipStation...</span>';
+
+  // ── ESTRATEGIA DOBLE ──
+  // 1. Sellbrite (bin_location) — SIEMPRE funciona, fuente de verdad desde el día uno
+  // 2. ShipStation (warehouseLocation) — es lo que sale en el PICK TICKET; funciona
+  //    solo si el producto ya existe ahí (ShipStation no permite crear por API)
+  let sbOk = false, ssOk = false, ssErr = '';
+
+  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 1/2 Guardando en Sellbrite (bin location)...</span>';
+  try{
+    const sbRes = await fetch(RAILWAY_SB + '/sb/update-inventory', {
+      method: 'POST',
+      headers: {'Content-Type': 'application/json'},
+      body: JSON.stringify({
+        sku: p.sku,
+        warehouse_uuid: p.warehouse_uuid || '',
+        bin_location: location
+      })
+    });
+    const sbResult = await sbRes.json();
+    console.log('📥 Sellbrite bin_location:', sbRes.status, JSON.stringify(sbResult).substring(0,200));
+    sbOk = sbRes.ok && sbResult.status !== 'error';
+  }catch(e){ console.error('Sellbrite bin_location error:', e); }
+
+  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 2/2 Guardando en ShipStation (pick ticket)...</span>';
   try{
     const res = await fetch(RAILWAY_SB + '/ss/create-product', {
       method: 'POST',
@@ -2882,22 +2904,31 @@ async function psSaveShipStationLocation(idx){
         upc: p.upc || ''
       })
     });
-    console.log('📥 Respuesta /ss/create-product, status:', res.status);
     const result = await res.json();
-    console.log('📥 Body:', JSON.stringify(result));
-    if(!res.ok || result.status === 'error'){ throw new Error(result.error || ('HTTP ' + res.status)); }
+    console.log('📥 ShipStation:', res.status, JSON.stringify(result).substring(0,200));
+    ssOk = res.ok && result.status !== 'error';
+    if(!ssOk) ssErr = result.error || ('HTTP ' + res.status);
+  }catch(e){ ssErr = e.message || String(e); console.error('ShipStation error:', e); }
 
-    toast('✅ ' + (result.message || ('Ubicación ' + location + ' guardada')), 3000);
-    // Refresca para mostrar la ubicación recién guardada como "actual" (esto ya
-    // reemplaza todo el bloque, incluyendo este mensaje de confirmación, con el
-    // estado fresco — así que la propia "Ubicación actual" en verde ES la confirmación)
+  // ── Resultado combinado, claro y permanente ──
+  if(sbOk && ssOk){
+    toast('✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
+    await psCheckShipStationLocation(p.sku, idx); // refresca — la "Ubicación actual" verde es la confirmación
+    const c2 = $('ps-ssloc-confirm-' + idx);
+    if(c2) c2.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
+  } else if(sbOk && !ssOk){
+    toast('✅ Guardada en Sellbrite (ShipStation pendiente)', 3500);
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ Guardada en Sellbrite (bin location).<br>⚠️ ShipStation: ' + esc(ssErr) + '<br><span style="font-weight:400;font-size:11px;color:var(--mu)">Cuando llegue la primera orden de este SKU, ShipStation creará el producto y podrás guardar la ubicación ahí (o se puede automatizar después).</span></span>';
+  } else if(!sbOk && ssOk){
+    toast('✅ Guardada en ShipStation (Sellbrite falló)', 3500);
     await psCheckShipStationLocation(p.sku, idx);
-  }catch(err){
-    console.error('❌ psSaveShipStationLocation error:', err.message, err);
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ No se guardó: ' + esc(err.message||String(err)) + '</span>';
-    toast('❌ Error: ' + (err.message||err));
-    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '📍 Guardar'; }
+    const c3 = $('ps-ssloc-confirm-' + idx);
+    if(c3) c3.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ ShipStation OK · ⚠️ Sellbrite no se pudo actualizar</span>';
+  } else {
+    toast('❌ No se pudo guardar la ubicación');
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ Falló en ambos sistemas. ShipStation: ' + esc(ssErr||'—') + '</span>';
   }
+  if(btnEl){ btnEl.disabled = false; btnEl.textContent = '📍 Guardar'; }
 }
 
 function psAdjustSbQty(inputId, delta){
