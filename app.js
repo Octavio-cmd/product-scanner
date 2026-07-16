@@ -1188,6 +1188,36 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
 
 // ── PASO 1: capturar foto (front/back), quitar fondo con Railway rembg,
 // subir el PNG resultante a ImgBB. El armado de paquetes es un paso aparte. ──
+// ── Pipeline compartido: comprimir → quitar fondo (Railway rembg) → subir a ImgBB ──
+// Usado por FRONT, BACK, y las fotos extra opcionales — mismo proceso para todas.
+async function psRemoveBackgroundPipeline(file, onStatus){
+  if(onStatus) onStatus('Comprimiendo...');
+  var dataUrl = await clCompressImage(file, 1600, 0.92);
+
+  if(onStatus) onStatus('🚂 Quitando fondo...');
+  const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
+  const b64 = dataUrl.split(',')[1];
+  const rbgRes = await fetch(RAILWAY_RBG, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ image: b64 })
+  });
+  if(!rbgRes.ok) throw new Error('Railway rembg error ' + rbgRes.status);
+  const rbgData = await rbgRes.json();
+  if(!rbgData.success || !rbgData.image) throw new Error('rembg no devolvió imagen');
+
+  const pngUrl = 'data:image/png;base64,' + rbgData.image;
+
+  if(onStatus) onStatus('📤 Subiendo...');
+  const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+  let finalUrl = pngUrl;
+  if (imgbbKey) {
+    const uploaded = await clUploadPhotoToImgBB(pngUrl, imgbbKey, 'photo');
+    if (uploaded) finalUrl = uploaded;
+  }
+  return { finalUrl, localUrl: pngUrl };
+}
+
 async function psCapturePhoto(slotId){
   var input = document.createElement('input');
   input.type = 'file';
@@ -1198,38 +1228,17 @@ async function psCapturePhoto(slotId){
     if(!file) return;
 
     var slot = document.getElementById('ps-slot-' + slotId);
-    if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">Comprimiendo...</div></div>';
+    var setStatus = function(msg){
+      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">'+msg+'</div></div>';
+    };
+    setStatus('Comprimiendo...');
 
     try{
-      var dataUrl = await clCompressImage(file, 1600, 0.92);
-
-      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">🚂 Quitando fondo...</div></div>';
-
-      const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
-      const b64 = dataUrl.split(',')[1];
-      const rbgRes = await fetch(RAILWAY_RBG, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ image: b64 })
-      });
-      if(!rbgRes.ok) throw new Error('Railway rembg error ' + rbgRes.status);
-      const rbgData = await rbgRes.json();
-      if(!rbgData.success || !rbgData.image) throw new Error('rembg no devolvió imagen');
-
-      const pngUrl = 'data:image/png;base64,' + rbgData.image;
-
-      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">📤 Subiendo...</div></div>';
-
-      const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
-      let finalUrl = pngUrl;
-      if (imgbbKey) {
-        const uploaded = await clUploadPhotoToImgBB(pngUrl, imgbbKey, slotId);
-        if (uploaded) finalUrl = uploaded;
-      }
+      const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, setStatus);
 
       if (cur) {
-        if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = pngUrl; }
-        else { cur._backImg = finalUrl; cur._backImgLocal = pngUrl; }
+        if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = localUrl; }
+        else { cur._backImg = finalUrl; cur._backImgLocal = localUrl; }
       }
 
       if (slot) {
@@ -1244,6 +1253,77 @@ async function psCapturePhoto(slotId){
     }
   };
   input.click();
+}
+
+// ── FOTOS EXTRA (opcionales, hasta 3) — mismo proceso que BACK ──
+// Se agregan con el botón "+ Agregar Foto"; cada una se usa luego como foto
+// secundaria (centrada, sin duplicar, sin distintivo) en el generador de packs.
+const MAX_EXTRA_PHOTOS = 3;
+
+function psAddExtraPhoto(){
+  if(!cur){ toast('⚠️ Escanea un producto primero'); return; }
+  if(!cur._extraImgs) cur._extraImgs = [];
+  if(cur._extraImgs.length >= MAX_EXTRA_PHOTOS){
+    toast('⚠️ Máximo ' + MAX_EXTRA_PHOTOS + ' fotos extra');
+    return;
+  }
+
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = 'image/*';
+  input.onchange = async function(e){
+    var file = e.target.files[0];
+    if(!file) return;
+
+    const idx = cur._extraImgs.length; // posición donde va a quedar esta foto
+    cur._extraImgs.push({ img: null, local: null, loading: true });
+    renderExtraPhotosUI();
+
+    try{
+      const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, function(msg){
+        var el = document.getElementById('ps-extra-slot-' + idx);
+        if(el) el.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div><div style="font-size:9px;color:var(--mu)">'+msg+'</div></div>';
+      });
+      cur._extraImgs[idx] = { img: finalUrl, local: localUrl, loading: false };
+      renderExtraPhotosUI();
+      toast('✅ Foto extra ' + (idx+1) + ' lista');
+    }catch(err){
+      console.error('psAddExtraPhoto error:', err);
+      toast('❌ Error: ' + err.message);
+      cur._extraImgs.splice(idx, 1); // quitar el slot fallido
+      renderExtraPhotosUI();
+    }
+  };
+  input.click();
+}
+
+function psRemoveExtraPhoto(idx){
+  if(!cur || !cur._extraImgs) return;
+  cur._extraImgs.splice(idx, 1);
+  renderExtraPhotosUI();
+}
+
+function renderExtraPhotosUI(){
+  const wrap = $('ps-extra-photos-wrap');
+  if(!wrap) return;
+  const extras = (cur && cur._extraImgs) || [];
+  let h = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">';
+  extras.forEach(function(e, i){
+    if(e.loading){
+      h += '<div id="ps-extra-slot-'+i+'" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center"></div>';
+    } else {
+      h += '<div id="ps-extra-slot-'+i+'" style="position:relative;width:72px;height:72px;background:var(--sf2);border:2px solid var(--bd);border-radius:10px;overflow:hidden">'
+        + '<img src="'+esc(e.img)+'" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">'
+        + '<button onclick="psRemoveExtraPhoto('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.7);color:#fff;border:none;border-radius:50%;font-size:12px;cursor:pointer;line-height:1">✕</button>'
+        + '</div>';
+    }
+  });
+  if(extras.length < MAX_EXTRA_PHOTOS){
+    h += '<div onclick="psAddExtraPhoto()" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:28px;color:var(--mu)">+</div>';
+  }
+  h += '</div>';
+  h += '<div style="font-size:10px;color:var(--mu);margin-top:4px">'+extras.length+'/'+MAX_EXTRA_PHOTOS+' fotos extra (opcional) — mismo proceso que BACK</div>';
+  wrap.innerHTML = h;
 }
 
 // ══════════════════════════════════════════════════════════════
@@ -1377,6 +1457,15 @@ async function psGenerateAllPacks(){
     const backImg  = await psLoadImage(backSrc);
     console.log('✅ Fotos cargadas en memoria:', frontImg.width+'x'+frontImg.height, backImg.width+'x'+backImg.height);
 
+    // Cargar también las fotos extra (opcionales) — mismo tratamiento que BACK
+    const extras = (cur._extraImgs || []).filter(function(e){ return e && e.img && !e.loading; });
+    const extraImgs = [];
+    for (const ex of extras) {
+      const src = ex.local || ex.img;
+      extraImgs.push(await psLoadImage(src));
+    }
+    console.log('✅ ' + extraImgs.length + ' foto(s) extra cargadas');
+
     if(!cur._packImages) cur._packImages = {};
     const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
     console.log('ImgBB key disponible:', !!imgbbKey);
@@ -1384,9 +1473,10 @@ async function psGenerateAllPacks(){
     // 1) Generar TODAS las imágenes primero — esto es solo Canvas, no usa internet, es instantáneo
     if(statusEl) statusEl.textContent = '🖼️ Dibujando imágenes...';
     const backDataUrl = psGenerateSingleImage(backImg);
+    const extraDataUrls = extraImgs.map(function(img){ return psGenerateSingleImage(img); });
     const frontDataUrls = {};
     PACK_SIZES.forEach(function(p){ frontDataUrls[p] = psGeneratePackImage(frontImg, p); });
-    console.log('✅ 5 imágenes dibujadas en canvas (back + 4 packs)');
+    console.log('✅ ' + (2 + extraDataUrls.length) + ' imágenes dibujadas en canvas (back + extras + 4 packs)');
 
     // 2) Subir todas EN PARALELO con timeout de 20s cada una — si una falla o tarda
     // demasiado, se usa la imagen local en su lugar en vez de trabar todo el proceso.
@@ -1404,11 +1494,14 @@ async function psGenerateAllPacks(){
 
     const results = await Promise.all([
       uploadWithTimeout(backDataUrl, 'pack-back'),
+      ...extraDataUrls.map(function(du, i){ return uploadWithTimeout(du, 'pack-extra-'+i); }),
       ...PACK_SIZES.map(function(p){ return uploadWithTimeout(frontDataUrls[p], 'pack-'+p); })
     ]);
     const backUrl = results[0];
+    const extraUrls = results.slice(1, 1 + extraDataUrls.length);
+    const frontResults = results.slice(1 + extraDataUrls.length);
     PACK_SIZES.forEach(function(p, i){
-      cur._packImages[p] = { front: results[i+1], back: backUrl };
+      cur._packImages[p] = { front: frontResults[i], back: backUrl, extras: extraUrls };
     });
     console.log('✅ Todo listo:', cur._packImages);
 
@@ -1457,11 +1550,21 @@ function renderPackImagesPreview(){
     </div>`;
   });
   h += '</div>';
-  if (cur._packImages[PACK_SIZES[0]] && cur._packImages[PACK_SIZES[0]].back) {
+  const shared = cur._packImages[PACK_SIZES[0]];
+  if (shared && shared.back) {
     h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
       <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:4px">Back (compartida en los 4 packs)</div>
-      <img src="${esc(cur._packImages[PACK_SIZES[0]].back)}" style="width:50%;border-radius:6px">
+      <img src="${esc(shared.back)}" style="width:50%;border-radius:6px">
     </div>`;
+  }
+  if (shared && shared.extras && shared.extras.length){
+    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px">
+      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:6px;text-align:center">Fotos extra (compartidas en los 4 packs)</div>
+      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">`;
+    shared.extras.forEach(function(u){
+      h += `<img src="${esc(u)}" style="width:70px;height:70px;object-fit:contain;border-radius:6px;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">`;
+    });
+    h += '</div></div>';
   }
   el.innerHTML = h;
 }
@@ -2769,7 +2872,7 @@ function renderResult(r){
   const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
   h+=`<div class="bundle-photo-card">
     <div class="lbl">📸 Front &amp; Back Photos (background removed)</div>
-    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos del producto. Se les quita el fondo automáticamente.</div>
+    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos <strong>obligatorias</strong> del producto. Se les quita el fondo automáticamente.</div>
     <div style="display:flex;gap:10px">
       <div style="flex:1">
         <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">FRONT${r._frontImg?' ✅':''}</div>
@@ -2779,6 +2882,10 @@ function renderResult(r){
         <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">BACK${r._backImg?' ✅':''}</div>
         <div id="ps-slot-back" onclick="psCapturePhoto('back')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
       </div>
+    </div>
+    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
+      <div style="font-size:11px;color:var(--mu);margin-bottom:2px">Fotos extra (opcional) — mismo proceso, se usan como fotos secundarias:</div>
+      <div id="ps-extra-photos-wrap"></div>
     </div>
   </div>`;
 
@@ -2848,6 +2955,7 @@ function renderResult(r){
     if(si&&cur&&cur._shade) si.value=cur._shade;
     updateSplitCalc();
     if(cur && cur._packImages) renderPackImagesPreview();
+    renderExtraPhotosUI();
   },80);
 }
 
