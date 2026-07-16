@@ -2752,6 +2752,65 @@ function cycleSplitTier(){
 }
 
 
+// ── SELLBRITE + SHIPSTATION — ¿ya existe este producto? ¿dónde está? ──
+// Portado del módulo Inventory Manager (mismo Railway backend, endpoints
+// /sb/search y /ss/location).
+async function psCheckSellbrite(upc){
+  const statusEl = $('ps-sellbrite-status');
+  if(!statusEl) return;
+  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+  try{
+    const upcClean = String(upc).replace(/\D/g,'');
+    const res = await fetch(RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean));
+    const data = await res.json();
+
+    if(res.status === 404 || data.status === 'not_found' || !data.products || !data.products.length){
+      statusEl.innerHTML = '🆕 <strong style="color:#ff9800">No existe en Sellbrite todavía</strong>';
+      return;
+    }
+
+    const products = data.products;
+    let html = '📦 <strong style="color:#00e676">En Sellbrite: ' + products.length + ' listado' + (products.length>1?'s':'') + '</strong>';
+    products.forEach(function(p, idx){
+      const inv = p.inventory || {};
+      const qty = inv.total_quantity || 0;
+      html += '<div style="margin-top:4px;padding-left:8px;border-left:2px solid var(--bd)">'
+        + '<span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
+        + ' — ' + qty + ' disponibles'
+        + '<span id="ps-ssloc-' + idx + '" style="display:block;font-size:11px;color:var(--mu);margin-top:2px">📍 Consultando ShipStation...</span>'
+        + '</div>';
+    });
+    statusEl.innerHTML = html;
+
+    // Consultar la ubicación en ShipStation para cada SKU encontrado (en paralelo)
+    products.forEach(function(p, idx){ psCheckShipStationLocation(p.sku, idx); });
+  }catch(err){
+    console.error('psCheckSellbrite error:', err);
+    statusEl.innerHTML = '<span style="color:var(--mu)">⚠️ No se pudo consultar Sellbrite</span>';
+  }
+}
+
+async function psCheckShipStationLocation(sku, idx){
+  const el = $('ps-ssloc-' + idx);
+  if(!el) return;
+  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+  try{
+    const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
+    const data = await res.json();
+    if(data.exists){
+      const loc = data.warehouse_location || '';
+      el.innerHTML = loc
+        ? '📍 Ubicación: <strong style="color:#00e676">' + esc(loc) + '</strong>'
+        : '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>';
+    } else {
+      el.innerHTML = '📍 <span style="color:#ff9800">No está en ShipStation</span>';
+    }
+  }catch(err){
+    console.error('psCheckShipStationLocation error:', err);
+    el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
+  }
+}
+
 function renderResult(r){
   if(!r)return;
   const sv=r.verdict==='SAVVY';
@@ -2775,8 +2834,10 @@ function renderResult(r){
         <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
       ` : '<div style="color:var(--mu)">💰 Sin precio disponible — toca "eBay Lowest" abajo para ingresarlo manual</div>'}
       <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${esc(r.categoryName||'Other')}</div>
-      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>`;
+      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>
+      <div id="ps-sellbrite-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;color:var(--mu)">🔍 Buscando en Sellbrite...</div>`;
     bcResult.style.display = 'block';
+    if (r.upc) psCheckSellbrite(r.upc);
   }
 
   // ── VER PRECIO REAL EN eBay + MARKET DATA — juntos, debajo del scanner ──
