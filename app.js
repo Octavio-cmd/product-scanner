@@ -2551,6 +2551,16 @@ async function addBulk() {
   }
 
   if (!cur) return;
+
+  // ── Si el reparto de inventario tiene unidades → agregar TODOS los
+  //    packs activos (los no excluidos con ✕), cada uno con su foto ──
+  var _splitInp = document.getElementById('split-total-input');
+  var _splitTotal = _splitInp ? (parseInt(String(_splitInp.value).replace(/\D/g,''), 10) || 0) : 0;
+  if (_splitTotal > 0) {
+    var _splitOk = await addSplitPacksToCSV();
+    if (_splitOk) return; // packs agregados — listo
+  }
+
   const packs = cur._selectedPack || cur.packSize || 1;
   var skuEl   = document.getElementById('pack-sku-display');
   var titleEl = document.getElementById('pack-title-display');
@@ -2783,12 +2793,12 @@ function updateSplitCalc(){
   let footer = `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${assigned} unidades`;
   if (split.leftover > 0) footer += ` — <span style="color:#e74c3c">⚠️ ${split.leftover} sin asignar (incluye el 1pk para usarlas)</span>`;
   footer += `</div>`;
-  // Botón para agregar los packs seleccionados al CSV
-  const activeCnt = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; }).length;
-  const addPacksBtn = activeCnt > 0
-    ? `<button onclick="addSplitPacksToCSV()" ontouchend="event.preventDefault();addSplitPacksToCSV()" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#00e676,#00a854);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer">➕ Agregar ${activeCnt} pack(s) al CSV</button>`
+  // Nota: los packs activos se agregan con el botón "ADD TO CSV" de abajo
+  var activeCnt = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; }).length;
+  var note = activeCnt > 0
+    ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCnt + ' pack(s) activos con sus fotos</div>'
     : '';
-  out.innerHTML = rows + footer + addPacksBtn;
+  out.innerHTML = rows + footer + note;
 }
 
 // ── Excluir / incluir un pack del reparto ──────────────────────────────
@@ -2800,52 +2810,62 @@ function toggleSplitPack(p){
 
 // ── Agregar todos los packs seleccionados al CSV (uno por pack) ────────
 async function addSplitPacksToCSV(){
-  if (!cur) { toast('⚠️ No product loaded'); return; }
-  const inp = $('split-total-input');
-  const card = $('split-calc-card');
-  if (!inp || !card) return;
-  const total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
-  if (total <= 0) { toast('⚠️ Ingresa las unidades totales primero'); return; }
+  if (!cur) { toast('⚠️ No product loaded'); return false; }
+  var inp = $('split-total-input');
+  var card = $('split-calc-card');
+  if (!inp || !card) return false;
+  var total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
+  if (total <= 0) { return false; }
 
-  // Fecha de expiración requerida en ciertas categorías
-  var EXP_REQ = ['67169','180959','75037','51227','57041','2984','67167','105070'];
-  if (EXP_REQ.includes(String(cur.category||'')) && !(cur._expDate||'')) {
-    toast('⚠️ Este producto requiere fecha de expiración — toca 📅 para agregarla');
-    return;
-  }
+  var tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
+  var active = window._splitActive || {1:true,3:true,6:true,12:true};
+  var split = computeSplit(total, tierKey, active);
+  var shade = (cur._shade || '').trim();
+  var expDate = cur._expDate || '';
+  var location = cur.location || '';
+  var baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
 
-  const tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
-  const active = window._splitActive || {1:true,3:true,6:true,12:true};
-  const split = computeSplit(total, tierKey, active);
-  const shade = (cur._shade || '').trim();
-  const expDate = cur._expDate || '';
-  const location = cur.location || '';
-  const baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
+  var added = 0, skippedDup = 0;
+  var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
 
-  let added = 0, skippedDup = 0;
-  const packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
+  for (var i = 0; i < packsToAdd.length; i++) {
+    var p = packsToAdd[i];
+    var sku = makeSKU(cur.brand, cur.upc, p, cur.title);
+    var dup = false;
+    for (var j = 0; j < bulk.length; j++) { if (bulk[j].sku === sku) { dup = true; break; } }
+    if (dup) { skippedDup++; continue; }
 
-  for (const p of packsToAdd) {
-    const sku = makeSKU(cur.brand, cur.upc, p, cur.title);
-    if (bulk.find(function(b){ return b.sku === sku; })) { skippedDup++; continue; }
+    var title = rebuildTitle(baseTitle, p, shade, expDate);
+    var price = calcBundlePrice(cur.ebay || {}, p);
 
-    const title = rebuildTitle(baseTitle, p, shade, expDate);
-    const price = calcBundlePrice(cur.ebay || {}, p);
-
-    // Foto: usar la imagen de pack generada si existe (front|back|extras)
-    let photoUrl = '';
+    // Foto: imagen de pack generada (front|back|extras), con fallback
+    var photoUrl = '';
     if (cur._packImages && cur._packImages[p]) {
-      const pi = cur._packImages[p];
-      photoUrl = [pi.front, pi.back].concat(pi.extras || []).filter(function(u){ return u && String(u).startsWith('http'); }).join('|');
+      var pi = cur._packImages[p];
+      var parts = [pi.front, pi.back].concat(pi.extras || []);
+      var httpParts = [];
+      for (var k = 0; k < parts.length; k++) {
+        var u = parts[k];
+        if (u && String(u).indexOf('http') === 0) httpParts.push(u);
+      }
+      photoUrl = httpParts.join('|');
+      // Si el front quedó en base64 (no se subió), subirlo ahora
+      if (!photoUrl && pi.front && String(pi.front).indexOf('data:') === 0) {
+        var imgbbKey1 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+        if (imgbbKey1) {
+          toast('📤 Subiendo foto del ' + p + 'pk...');
+          var up1 = await clUploadPhotoToImgBB(pi.front, imgbbKey1, 'pack-' + p);
+          if (up1) photoUrl = up1;
+        }
+      }
     }
-    if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || '';
-    // Si es base64, subir a ImgBB
-    if (photoUrl && photoUrl.startsWith('data:')) {
-      const imgbbKey = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
-      if (imgbbKey) {
+    if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
+    if (photoUrl && String(photoUrl).indexOf('data:') === 0) {
+      var imgbbKey2 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+      if (imgbbKey2) {
         toast('📤 Subiendo foto del ' + p + 'pk...');
-        const up = await clUploadPhotoToImgBB(photoUrl, imgbbKey, 'pack-'+p);
-        photoUrl = up || '';
+        var up2 = await clUploadPhotoToImgBB(photoUrl, imgbbKey2, 'pack-' + p);
+        photoUrl = up2 || '';
       } else { photoUrl = ''; }
     }
 
@@ -2873,9 +2893,12 @@ async function addSplitPacksToCSV(){
   updateFAB();
   if (added > 0) {
     toast('✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : ''));
+    return true;
   } else if (skippedDup > 0) {
     toast('⚠️ Esos packs ya están en el CSV');
+    return true;
   }
+  return false;
 }
 
 function cycleSplitTier(){
