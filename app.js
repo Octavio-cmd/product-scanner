@@ -3432,9 +3432,44 @@ function renderBulk(){
 }
 
 // CSV Export
+// ── ENVIAR A HOJA DE REGISTRO (pestaña "Product Scanner") ──────────────
+// Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
+var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbze10nxA1khXx1KckMSs19qW_9O6SIkq8RRJW-laW768ZAjecwLOTCKxVsP15w7GHsO5Q/exec';
+
+function psSendToRegistroSheet(items) {
+  if (!items || !items.length) return;
+  var rows = items.map(function(it) {
+    return {
+      tipo: 'product',
+      sku: it.sku || '',
+      upc: it.upc || '',
+      fecha: new Date().toISOString().slice(0,19).replace('T',' '),
+      marca: it.brand || '',
+      categoria: it.category || '',
+      pack: it.packs || '',
+      expDate: it.expDate || '',
+      precio: it.price || '',
+      titulo: it.title || '',
+      ubicacion: it.location || '',
+      fotos: it.bundleImg || it.photo || '',
+      descripcion: (it.description || '').replace(/<[^>]*>/g, '').trim(),
+      escaneadoPor: it.scannedBy || 'unknown'
+    };
+  });
+  fetch(PS_SHEET_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    body: JSON.stringify({ tipo: 'product', items: rows }),
+    headers: {'Content-Type': 'text/plain'}
+  }).catch(function(e) { console.warn('Error enviando a Sheet de registro:', e); });
+}
+
 function exportCSV(){
   try {
   if(!bulk.length){toast('⚠️ No products');return;}
+
+  // Enviar también a la hoja de registro (pestaña "Product Scanner"), no bloquea
+  psSendToRegistroSheet(bulk);
 
   function q(v) {
     v = String(v==null?'':v);
