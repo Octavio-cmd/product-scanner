@@ -3981,30 +3981,7 @@ function savvyShowExportOptions(csv, fname, count) {
 document.addEventListener('DOMContentLoaded',()=>{
   if(!localStorage.getItem('savvy_ebay_id'))localStorage.setItem('savvy_ebay_id',DEF_EBAY);
 
-  const cfgBtn=$('cfgBtn');
-  cfgBtn.addEventListener('touchend',e=>{e.preventDefault();openCfgWithPin();});
-  cfgBtn.addEventListener('click',openCfgWithPin);
-  $('cfgX').addEventListener('click',closeCfg);
-
-  const camBtn=$('camBtn');
-  if(camBtn){
-    camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
-    camBtn.addEventListener('click',startCam);
-  }else{
-    console.warn('⚠️ camBtn not found in DOM');
-  }
-  const stopBtn=$('camStop');
-  if(stopBtn){
-    stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
-    stopBtn.addEventListener('click',stopCam);
-  }
-
-  // NOTE: upcIn/srchBtn from the old idle screen were removed — scr-res
-  // (upcInRes + its 🔍 button) is now the single home screen and is wired
-  // via inline onclick/onkeydown attributes directly in the HTML.
-
-  // eBay URL paste box lives in scr-res (ps-ebay-url) and is wired inline in the HTML.
-
+  // ── FAB + panel de export (PRIMERO — a prueba de errores posteriores) ──
   function ensureBulkOverlay(){
     if (document.getElementById('bulkOv')) return;
     var ov = document.createElement('div');
@@ -4048,6 +4025,34 @@ document.addEventListener('DOMContentLoaded',()=>{
     _fabEl.addEventListener('touchend', function(e){ e.preventDefault(); openBulk(); });
     _fabEl.addEventListener('click', openBulk);
   }
+
+
+  const cfgBtn=$('cfgBtn');
+  if(cfgBtn){
+    cfgBtn.addEventListener('touchend',e=>{e.preventDefault();openCfgWithPin();});
+    cfgBtn.addEventListener('click',openCfgWithPin);
+  }
+  if($('cfgX')) $('cfgX').addEventListener('click',closeCfg);
+
+  const camBtn=$('camBtn');
+  if(camBtn){
+    camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
+    camBtn.addEventListener('click',startCam);
+  }else{
+    console.warn('⚠️ camBtn not found in DOM');
+  }
+  const stopBtn=$('camStop');
+  if(stopBtn){
+    stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
+    stopBtn.addEventListener('click',stopCam);
+  }
+
+  // NOTE: upcIn/srchBtn from the old idle screen were removed — scr-res
+  // (upcInRes + its 🔍 button) is now the single home screen and is wired
+  // via inline onclick/onkeydown attributes directly in the HTML.
+
+  // eBay URL paste box lives in scr-res (ps-ebay-url) and is wired inline in the HTML.
+
 
   renderSt();
   checkSavedSession();
