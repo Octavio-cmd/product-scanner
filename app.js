@@ -2885,7 +2885,7 @@ async function addSplitPacksToCSV(){
       upc:         cur.upc || '',
       brand:       cur.brand || 'Generic',
       category:    cur.category || '26395',
-      description: cur._description || cur.description || '',
+      description: descToEbayHTML(cur._description) || cur.description || '',
       location:    location,
       packs:       p,
       quantity:    split[p].listings,
@@ -3615,6 +3615,27 @@ function renderBulk(){
 // Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
 var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbze10nxA1khXx1KckMSs19qW_9O6SIkq8RRJW-laW768ZAjecwLOTCKxVsP15w7GHsO5Q/exec';
 
+// ── Convertir descripción (objeto de Claude o string) a HTML/texto ──────
+function descToEbayHTML(d){
+  if(!d) return '';
+  if(typeof d === 'string') return d;
+  try{
+    var h = '';
+    if(d.intro) h += '<p>' + d.intro + '</p>';
+    if(d.benefits && d.benefits.length){
+      h += '<ul>';
+      for(var i=0;i<d.benefits.length;i++){ h += '<li>' + d.benefits[i] + '</li>'; }
+      h += '</ul>';
+    }
+    if(d.package_contents) h += '<p><b>Package Contents:</b> ' + d.package_contents + '</p>';
+    if(d.disclaimer) h += '<p><i>' + d.disclaimer + '</i></p>';
+    return h;
+  }catch(e){ return ''; }
+}
+function descToText(d){
+  return descToEbayHTML(d).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+}
+
 function psSendToRegistroSheet(items) {
   if (!items || !items.length) return;
 
@@ -3671,7 +3692,7 @@ function psSendToRegistroSheet(items) {
       expDate: first.expDate || '',
       ubicacion: first.location || '',
       fotos: fotoSet.join('|'),
-      descripcion: (first.description || '').replace(/<[^>]*>/g, '').trim(),
+      descripcion: descToText(first.description),
       escaneadoPor: first.scannedBy || 'unknown'
     };
   });
@@ -3879,7 +3900,7 @@ function exportCSV(){
       it.category||'31786',
       cleanTitle,
       '1000',
-      it.description || ('<p>' + cleanTitle + '</p>'),
+      descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
       pics,
       'FixedPrice','GTC',
       it.price||'9.99',
