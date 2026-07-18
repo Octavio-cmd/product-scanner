@@ -2676,19 +2676,38 @@ function getDemandTier(soldCount){
 // Reparte totalUnits en múltiplos exactos de cada tamaño de paquete.
 // Procesa de paquete grande a chico; el sobrante siempre cae en pack de 1
 // (que nunca deja remanente, porque son unidades sueltas).
-function computeSplit(totalUnits, tierKey){
-  const weights = (DEMAND_TIERS[tierKey] || DEMAND_TIERS.media).weights;
-  const order = [12,6,3];
+function computeSplit(totalUnits, tierKey, activePacks){
+  const baseWeights = (DEMAND_TIERS[tierKey] || DEMAND_TIERS.media).weights;
+  // Packs activos (los que NO fueron excluidos con ✕)
+  const active = activePacks || {1:true,3:true,6:true,12:true};
+  const activeList = [1,3,6,12].filter(function(p){ return active[p]; });
+  const result = {1:{listings:0,units:0},3:{listings:0,units:0},6:{listings:0,units:0},12:{listings:0,units:0}};
+  result.leftover = 0;
+  if (!activeList.length || totalUnits <= 0) { result.leftover = totalUnits; return result; }
+
+  // Re-normalizar pesos solo entre los packs activos
+  var wSum = 0;
+  activeList.forEach(function(p){ wSum += baseWeights[p]; });
+  const weights = {};
+  activeList.forEach(function(p){ weights[p] = baseWeights[p] / wSum; });
+
+  // Repartir de mayor a menor; el pack activo más chico absorbe el resto
+  const desc = activeList.slice().sort(function(a,b){ return b-a; });
+  const smallest = desc[desc.length - 1];
   let remaining = totalUnits;
-  const result = {};
-  for (const p of order) {
+  desc.forEach(function(p){
+    if (p === smallest) return; // el más chico se calcula al final
     const targetUnits = Math.round(totalUnits * weights[p]);
     const listings = Math.floor(Math.min(targetUnits, remaining) / p);
     const used = listings * p;
-    result[p] = { listings, units: used };
+    result[p] = { listings: listings, units: used };
     remaining -= used;
-  }
-  result[1] = { listings: remaining, units: remaining };
+  });
+  // El pack activo más chico absorbe todo lo que queda
+  const smListings = Math.floor(remaining / smallest);
+  result[smallest] = { listings: smListings, units: smListings * smallest };
+  remaining -= smListings * smallest;
+  result.leftover = remaining; // solo >0 si el pack de 1 está excluido
   return result;
 }
 
@@ -2729,17 +2748,125 @@ function updateSplitCalc(){
     return;
   }
 
-  const split = computeSplit(total, tierKey);
+  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+  const active = window._splitActive;
+  const split = computeSplit(total, tierKey, active);
   let rows = '';
   [1,3,6,12].forEach(function(p){
     const d = split[p];
-    rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
-      <div style="font-weight:800">${p}pk</div>
-      <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
-      <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
-    </div>`;
+    const isOn = !!active[p];
+    if (isOn) {
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
+        <div style="font-weight:800">${p}pk</div>
+        <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
+        <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
+        <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
+      </div>`;
+    } else {
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);opacity:.45">
+        <div style="font-weight:800;text-decoration:line-through">${p}pk</div>
+        <div style="color:var(--mu);font-size:12px">excluido</div>
+        <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:8px;padding:5px 10px;color:var(--sv);font-size:12px;font-weight:800;cursor:pointer;margin-left:8px">↩ incluir</button>
+      </div>`;
+    }
   });
-  out.innerHTML = rows + `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${total} unidades exactas</div>`;
+  const assigned = total - (split.leftover || 0);
+  let footer = `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${assigned} unidades`;
+  if (split.leftover > 0) footer += ` — <span style="color:#e74c3c">⚠️ ${split.leftover} sin asignar (incluye el 1pk para usarlas)</span>`;
+  footer += `</div>`;
+  // Botón para agregar los packs seleccionados al CSV
+  const activeCnt = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; }).length;
+  const addPacksBtn = activeCnt > 0
+    ? `<button onclick="addSplitPacksToCSV()" ontouchend="event.preventDefault();addSplitPacksToCSV()" style="width:100%;margin-top:12px;background:linear-gradient(135deg,#00e676,#00a854);border:none;border-radius:10px;padding:13px;color:#000;font-size:14px;font-weight:800;cursor:pointer">➕ Agregar ${activeCnt} pack(s) al CSV</button>`
+    : '';
+  out.innerHTML = rows + footer + addPacksBtn;
+}
+
+// ── Excluir / incluir un pack del reparto ──────────────────────────────
+function toggleSplitPack(p){
+  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+  window._splitActive[p] = !window._splitActive[p];
+  updateSplitCalc();
+}
+
+// ── Agregar todos los packs seleccionados al CSV (uno por pack) ────────
+async function addSplitPacksToCSV(){
+  if (!cur) { toast('⚠️ No product loaded'); return; }
+  const inp = $('split-total-input');
+  const card = $('split-calc-card');
+  if (!inp || !card) return;
+  const total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
+  if (total <= 0) { toast('⚠️ Ingresa las unidades totales primero'); return; }
+
+  // Fecha de expiración requerida en ciertas categorías
+  var EXP_REQ = ['67169','180959','75037','51227','57041','2984','67167','105070'];
+  if (EXP_REQ.includes(String(cur.category||'')) && !(cur._expDate||'')) {
+    toast('⚠️ Este producto requiere fecha de expiración — toca 📅 para agregarla');
+    return;
+  }
+
+  const tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
+  const active = window._splitActive || {1:true,3:true,6:true,12:true};
+  const split = computeSplit(total, tierKey, active);
+  const shade = (cur._shade || '').trim();
+  const expDate = cur._expDate || '';
+  const location = cur.location || '';
+  const baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
+
+  let added = 0, skippedDup = 0;
+  const packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
+
+  for (const p of packsToAdd) {
+    const sku = makeSKU(cur.brand, cur.upc, p, cur.title);
+    if (bulk.find(function(b){ return b.sku === sku; })) { skippedDup++; continue; }
+
+    const title = rebuildTitle(baseTitle, p, shade, expDate);
+    const price = calcBundlePrice(cur.ebay || {}, p);
+
+    // Foto: usar la imagen de pack generada si existe (front|back|extras)
+    let photoUrl = '';
+    if (cur._packImages && cur._packImages[p]) {
+      const pi = cur._packImages[p];
+      photoUrl = [pi.front, pi.back].concat(pi.extras || []).filter(function(u){ return u && String(u).startsWith('http'); }).join('|');
+    }
+    if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || '';
+    // Si es base64, subir a ImgBB
+    if (photoUrl && photoUrl.startsWith('data:')) {
+      const imgbbKey = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+      if (imgbbKey) {
+        toast('📤 Subiendo foto del ' + p + 'pk...');
+        const up = await clUploadPhotoToImgBB(photoUrl, imgbbKey, 'pack-'+p);
+        photoUrl = up || '';
+      } else { photoUrl = ''; }
+    }
+
+    bulk.push({
+      sku:         sku,
+      title:       title,
+      price:       price,
+      shade:       shade,
+      expDate:     expDate,
+      upc:         cur.upc || '',
+      brand:       cur.brand || 'Generic',
+      category:    cur.category || '26395',
+      description: cur._description || cur.description || '',
+      location:    location,
+      packs:       p,
+      quantity:    split[p].listings,
+      photo:       photoUrl,
+      bundleImg:   photoUrl,
+      scannedBy:   SAVVY_CURRENT_USER || 'unknown'
+    });
+    added++;
+  }
+
+  saveBulkToStorage();
+  updateFAB();
+  if (added > 0) {
+    toast('✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : ''));
+  } else if (skippedDup > 0) {
+    toast('⚠️ Esos packs ya están en el CSV');
+  }
 }
 
 function cycleSplitTier(){
@@ -3361,6 +3488,7 @@ function renderResult(r){
        display:document.getElementById('pack-sel-display')});
     var si=document.getElementById('shade-input');
     if(si&&cur&&cur._shade) si.value=cur._shade;
+    window._splitActive = {1:true,3:true,6:true,12:true};
     updateSplitCalc();
     if(cur && cur._packImages) renderPackImagesPreview();
     renderExtraPhotosUI();
@@ -3438,24 +3566,65 @@ var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbze10nxA1khXx1KckMSs
 
 function psSendToRegistroSheet(items) {
   if (!items || !items.length) return;
-  var rows = items.map(function(it) {
+
+  // Agrupar por UPC → UNA fila por producto, unidades por pack en columnas
+  var byUpc = {};
+  items.forEach(function(it) {
+    var key = it.upc || it.sku || 'unknown';
+    if (!byUpc[key]) byUpc[key] = [];
+    byUpc[key].push(it);
+  });
+
+  var rows = Object.keys(byUpc).map(function(upc) {
+    var group = byUpc[upc];
+    var first = group[0];
+
+    // Unidades por pack (pack × cantidad de listados). 0 si no se agregó ese pack.
+    var unitsByPack = {1:0, 3:0, 6:0, 12:0};
+    var listingsByPack = {1:0, 3:0, 6:0, 12:0};
+    var precios = [];
+    var fotoSet = [];
+    group.forEach(function(it) {
+      var p = Number(it.packs) || 1;
+      var q = Number(it.quantity) || 1;
+      if (unitsByPack[p] !== undefined) {
+        unitsByPack[p] += p * q;
+        listingsByPack[p] += q;
+      }
+      if (it.price) precios.push(p + 'pk: $' + it.price);
+      var ph = it.bundleImg || it.photo || '';
+      ph.split('|').forEach(function(u) {
+        u = (u || '').trim();
+        if (u && fotoSet.indexOf(u) === -1) fotoSet.push(u);
+      });
+    });
+    var totalUnits = unitsByPack[1] + unitsByPack[3] + unitsByPack[6] + unitsByPack[12];
+
+    // Título base sin "Pack of N"
+    var baseTitle = (first.title || '').replace(/\s*Pack of \d+\s*/gi, ' ').replace(/\s+/g, ' ').trim();
+
     return {
       tipo: 'product',
-      sku: it.sku || '',
-      upc: it.upc || '',
+      upc: upc,
       fecha: new Date().toISOString().slice(0,19).replace('T',' '),
-      marca: it.brand || '',
-      categoria: it.category || '',
-      pack: it.packs || '',
-      expDate: it.expDate || '',
-      precio: it.price || '',
-      titulo: it.title || '',
-      ubicacion: it.location || '',
-      fotos: it.bundleImg || it.photo || '',
-      descripcion: (it.description || '').replace(/<[^>]*>/g, '').trim(),
-      escaneadoPor: it.scannedBy || 'unknown'
+      marca: first.brand || '',
+      categoria: first.category || '',
+      titulo: baseTitle,
+      pk1: unitsByPack[1],
+      pk3: unitsByPack[3],
+      pk6: unitsByPack[6],
+      pk12: unitsByPack[12],
+      totalUnidades: totalUnits,
+      listados: listingsByPack[1] + listingsByPack[3] + listingsByPack[6] + listingsByPack[12],
+      precios: precios.join(' / '),
+      expDate: first.expDate || '',
+      ubicacion: first.location || '',
+      fotos: fotoSet.join('|'),
+      descripcion: (first.description || '').replace(/<[^>]*>/g, '').trim(),
+      escaneadoPor: first.scannedBy || 'unknown'
     };
   });
+
   fetch(PS_SHEET_URL, {
     method: 'POST',
     mode: 'no-cors',
@@ -3663,7 +3832,7 @@ function exportCSV(){
       pics,
       'FixedPrice','GTC',
       it.price||'9.99',
-      '1','1',
+      String(it.quantity||1),'1',
       'Lumberton, NC','1',
       SHIP, RET, PAY,
       brandFix,
