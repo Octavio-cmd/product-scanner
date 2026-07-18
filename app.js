@@ -2557,8 +2557,15 @@ async function addBulk() {
   var _splitInp = document.getElementById('split-total-input');
   var _splitTotal = _splitInp ? (parseInt(String(_splitInp.value).replace(/\D/g,''), 10) || 0) : 0;
   if (_splitTotal > 0) {
-    var _splitOk = await addSplitPacksToCSV();
-    if (_splitOk) return; // packs agregados — listo
+    try {
+      var _splitOk = await addSplitPacksToCSV();
+      if (_splitOk) return; // packs agregados — listo
+    } catch(_se) {
+      console.error('addSplitPacksToCSV error:', _se);
+      if (window._psDebug) window._psDebug('\u274c Split error: ' + (_se.message || _se));
+      toast('\u274c Error agregando packs: ' + (_se.message || _se));
+      return;
+    }
   }
 
   const packs = cur._selectedPack || cur.packSize || 1;
@@ -3584,11 +3591,23 @@ function scanAnother() {
 }
 
 function renderBulk(){
-  const el=$('bulkList');
+  var el=$('bulkList');
   if(!el)return;
-  if(!bulk.length){el.innerHTML='<p style="text-align:center;color:var(--mu);padding:20px">No items yet.</p>';return;}
-  el.innerHTML=bulk.map((it,i)=>`<div class="bi"><div class="bin"><div class="bit">${esc(it.title.substring(0,50))}</div><div class="bis">${esc(it.sku)}</div></div><div class="bip">${fmt(it.price)}</div><button class="bdel" data-i="${i}">✕</button></div>`).join('');
-  el.querySelectorAll('.bdel').forEach(b=>b.addEventListener('click',()=>{bulk.splice(+b.dataset.i,1);updateFAB();renderBulk();}));
+  if(!bulk.length){el.innerHTML='<p style="text-align:center;color:#888;padding:20px">No items yet.</p>';return;}
+  el.innerHTML=bulk.map(function(it,i){
+    var qty = it.quantity ? ' \u00b7 qty '+it.quantity : '';
+    return '<div style="display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:12px;margin-bottom:8px">'
+      + '<div style="flex:1;min-width:0">'
+      +   '<div style="color:#fff;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((it.title||'').substring(0,60))+'</div>'
+      +   '<div style="color:#888;font-size:11px">'+esc(it.sku||'')+qty+'</div>'
+      + '</div>'
+      + '<div style="color:#00e676;font-weight:800;font-size:14px">'+fmt(it.price)+'</div>'
+      + '<button class="bdel" data-i="'+i+'" style="background:none;border:1px solid #555;border-radius:8px;padding:6px 10px;color:#aaa;cursor:pointer">\u2715</button>'
+      + '</div>';
+  }).join('');
+  el.querySelectorAll('.bdel').forEach(function(b){
+    b.addEventListener('click',function(){bulk.splice(+b.dataset.i,1);updateFAB();renderBulk();saveBulkToStorage();});
+  });
 }
 
 // CSV Export
@@ -3986,32 +4005,49 @@ document.addEventListener('DOMContentLoaded',()=>{
 
   // eBay URL paste box lives in scr-res (ps-ebay-url) and is wired inline in the HTML.
 
-  function openBulk(){renderBulk();$('bulkOv').classList.add('on');}
-  $('fab').addEventListener('touchend',e=>{e.preventDefault();openBulk();});
-  $('fab').addEventListener('click',openBulk);
-  $('bulkX').addEventListener('click',()=>$('bulkOv').classList.remove('on'));
-  $('expBtn').addEventListener('touchend',e=>{e.preventDefault();exportCSV();});
-  $('expBtn').addEventListener('click',exportCSV);
-  $('clrBtn').addEventListener('touchend',e=>{
-    e.preventDefault();
-    if(bulk.length===0){toast('⚠️ No hay productos en el CSV');return;}
-    // No usar confirm() en iOS — usar overlay propio
-    var ov=document.createElement('div');
-    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
-    ov.innerHTML='<div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:320px;text-align:center">'
-      +'<div style="font-size:18px;font-weight:800;margin-bottom:8px">🗑 Clear Session</div>'
-      +'<div style="font-size:14px;color:var(--mu);margin-bottom:20px">Vas a borrar '+bulk.length+' producto(s). ¿Confirmas?</div>'
-      +'<button onclick="bulk=[];updateFAB();renderBulk();saveBulkToStorage();this.closest(\'div[style*=fixed]\').remove();toast(\'✅ Sesión limpiada\')" style="width:100%;padding:12px;background:#e74c3c;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">Sí, borrar todo</button>'
-      +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="width:100%;padding:10px;background:none;border:1px solid var(--bd);border-radius:10px;color:var(--mu);cursor:pointer">Cancelar</button>'
-      +'</div>';
+  function ensureBulkOverlay(){
+    if (document.getElementById('bulkOv')) return;
+    var ov = document.createElement('div');
+    ov.id = 'bulkOv';
+    ov.style.cssText = 'position:fixed;inset:0;background:rgba(13,13,13,.97);z-index:5000;display:none;flex-direction:column;padding:16px;padding-top:calc(16px + env(safe-area-inset-top))';
+    ov.innerHTML = ''
+      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
+      +   '<div style="font-size:18px;font-weight:800;color:#fff">\ud83d\udccb CSV Session</div>'
+      +   '<button id="bulkX" style="background:none;border:1px solid #555;border-radius:10px;padding:8px 14px;color:#aaa;font-size:14px;cursor:pointer">\u2715 Close</button>'
+      + '</div>'
+      + '<div id="bulkList" style="flex:1;overflow-y:auto;margin-bottom:12px"></div>'
+      + '<button id="expBtn" style="width:100%;background:linear-gradient(135deg,#00e676,#00a854);border:none;border-radius:12px;padding:15px;color:#000;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">\ud83d\udce4 EXPORT CSV \u2192 Drive + Sheet</button>'
+      + '<button id="clrBtn" style="width:100%;background:none;border:1px solid #e74c3c;border-radius:12px;padding:12px;color:#e74c3c;font-size:14px;font-weight:800;cursor:pointer">\ud83d\uddd1 Clear Session</button>';
     document.body.appendChild(ov);
-  });
-  $('clrBtn').addEventListener('click',function(){
-    if(bulk.length===0){toast('⚠️ No hay productos en el CSV');return;}
-    if(confirm('¿Borrar '+bulk.length+' producto(s) de la sesión?')){
-      bulk=[];updateFAB();renderBulk();saveBulkToStorage();toast('✅ Sesión limpiada');
+    document.getElementById('bulkX').addEventListener('click', closeBulk);
+    var eb = document.getElementById('expBtn');
+    eb.addEventListener('touchend', function(e){ e.preventDefault(); exportCSV(); });
+    eb.addEventListener('click', exportCSV);
+    var cb = document.getElementById('clrBtn');
+    function clrHandler(e){
+      if (e && e.type === 'touchend') e.preventDefault();
+      if(bulk.length===0){toast('\u26a0\ufe0f No hay productos en el CSV');return;}
+      var ov2=document.createElement('div');
+      ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
+      ov2.innerHTML='<div style="background:#1a1a1a;border-radius:16px;padding:24px;width:100%;max-width:320px;text-align:center">'
+        +'<div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#fff">\ud83d\uddd1 Clear Session</div>'
+        +'<div style="font-size:14px;color:#888;margin-bottom:20px">Vas a borrar '+bulk.length+' producto(s). \u00bfConfirmas?</div>'
+        +'<button onclick="bulk=[];updateFAB();renderBulk();saveBulkToStorage();this.closest(\'div[style*=fixed]\').remove();toast(\'\u2705 Sesi\u00f3n limpiada\')" style="width:100%;padding:12px;background:#e74c3c;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">S\u00ed, borrar todo</button>'
+        +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="width:100%;padding:10px;background:none;border:1px solid #555;border-radius:10px;color:#888;cursor:pointer">Cancelar</button>'
+        +'</div>';
+      document.body.appendChild(ov2);
     }
-  });
+    cb.addEventListener('touchend', clrHandler);
+    cb.addEventListener('click', function(){ clrHandler(); });
+  }
+  function openBulk(){ ensureBulkOverlay(); renderBulk(); document.getElementById('bulkOv').style.display='flex'; }
+  function closeBulk(){ var o=document.getElementById('bulkOv'); if(o) o.style.display='none'; }
+  window.openBulk = openBulk; window.closeBulk = closeBulk;
+  var _fabEl = document.getElementById('fab');
+  if (_fabEl) {
+    _fabEl.addEventListener('touchend', function(e){ e.preventDefault(); openBulk(); });
+    _fabEl.addEventListener('click', openBulk);
+  }
 
   renderSt();
   checkSavedSession();
