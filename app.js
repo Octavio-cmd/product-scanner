@@ -2568,7 +2568,15 @@ async function addBulk() {
   // ── FOTO REQUERIDA — eBay rechaza listings sin foto ──────────
   // Verificar en múltiples lugares donde puede estar guardada la foto
   var bundlePreviewImg = document.querySelector('#bundle-preview img');
+  // Imágenes de pack generadas (front|back|extras) para el pack seleccionado
+  var _packImgs = (cur._packImages && cur._packImages[packs]) || null;
+  var _packPhotoUrl = _packImgs
+    ? [_packImgs.front, _packImgs.back].concat(_packImgs.extras || [])
+        .filter(function(u){ return u && String(u).indexOf('http') === 0; }).join('|')
+    : '';
   var hasPhoto = !!(
+    _packPhotoUrl ||
+    (cur._frontImg && cur._frontImg.length > 100) ||
     _lastBundleUrl ||
     (cur._bundleImg && cur._bundleImg.length > 100) ||
     cur._imgUrl ||
@@ -2600,7 +2608,8 @@ async function addBulk() {
   }
 
   // Incluir base64 también — _doAddBulk intentará subir a ImgBB
-  var photoUrl = _lastBundleUrl || cur._bundleImg || cur._imgUrl || '';
+  // Prioridad: imágenes de pack generadas (front|back|extras) > bundle > front base64
+  var photoUrl = _packPhotoUrl || _lastBundleUrl || cur._bundleImg || cur._imgUrl || cur._frontImg || '';
   await _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, location, packs, photoUrl);
 }
 
