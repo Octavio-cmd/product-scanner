@@ -2883,6 +2883,33 @@ async function addSplitPacksToCSV(){
   var added = 0, skippedDup = 0;
   var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
 
+  // ── VALIDACIÓN: los packs >1 DEBEN tener su imagen de pack generada ──
+  // Nunca se agrega un 3/6/12pk con la foto genérica del producto.
+  var missingImgs = [];
+  for (var mi = 0; mi < packsToAdd.length; mi++) {
+    var mp = packsToAdd[mi];
+    if (mp > 1 && !(cur._packImages && cur._packImages[mp] && cur._packImages[mp].front)) {
+      missingImgs.push(mp + 'pk');
+    }
+  }
+  if (missingImgs.length) {
+    toast('⚠️ Falta la imagen de pack para: ' + missingImgs.join(', ') + ' — toca 🎁 Generar Imágenes de Pack primero');
+    return false;
+  }
+
+  // Sube una imagen a ImgBB si quedó en base64; devuelve URL http o ''
+  var ensurePackUrl = async function(u, tag){
+    if (!u) return '';
+    if (String(u).indexOf('http') === 0) return u;
+    if (String(u).indexOf('data:') === 0) {
+      var kk = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+      if (!kk) return '';
+      var up = await clUploadPhotoToImgBB(u, kk, tag);
+      return up || '';
+    }
+    return '';
+  };
+
   for (var i = 0; i < packsToAdd.length; i++) {
     var p = packsToAdd[i];
     var sku = makeSKU(cur.brand, cur.upc, p, cur.title);
@@ -2893,25 +2920,32 @@ async function addSplitPacksToCSV(){
     var title = rebuildTitle(baseTitle, p, shade, expDate);
     var price = calcBundlePrice(cur.ebay || {}, p);
 
-    // Foto: imagen de pack generada (front|back|extras), con fallback
+    // Foto: imagen de pack generada (front|back|extras) — se suben TODAS si faltan
     var photoUrl = '';
     if (cur._packImages && cur._packImages[p]) {
       var pi = cur._packImages[p];
-      var parts = [pi.front, pi.back].concat(pi.extras || []);
-      var httpParts = [];
-      for (var k = 0; k < parts.length; k++) {
-        var u = parts[k];
-        if (u && String(u).indexOf('http') === 0) httpParts.push(u);
+      toast('📤 Verificando fotos del ' + p + 'pk...');
+      var fUrl = await ensurePackUrl(pi.front, 'pack-' + p);
+      var bUrl = await ensurePackUrl(pi.back, 'pack-back');
+      var exUrls = [];
+      var exArr = pi.extras || [];
+      for (var k = 0; k < exArr.length; k++) {
+        var eu = await ensurePackUrl(exArr[k], 'pack-extra-' + k);
+        if (eu) exUrls.push(eu);
       }
+      // Guardar las URLs para no volver a subirlas en el siguiente pack
+      if (fUrl) pi.front = fUrl;
+      if (bUrl) pi.back = bUrl;
+      if (exUrls.length) pi.extras = exUrls;
+      var parts = [fUrl, bUrl].concat(exUrls);
+      var httpParts = [];
+      for (var k2 = 0; k2 < parts.length; k2++) { if (parts[k2]) httpParts.push(parts[k2]); }
       photoUrl = httpParts.join('|');
-      // Si el front quedó en base64 (no se subió), subirlo ahora
-      if (!photoUrl && pi.front && String(pi.front).indexOf('data:') === 0) {
-        var imgbbKey1 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
-        if (imgbbKey1) {
-          toast('📤 Subiendo foto del ' + p + 'pk...');
-          var up1 = await clUploadPhotoToImgBB(pi.front, imgbbKey1, 'pack-' + p);
-          if (up1) photoUrl = up1;
-        }
+      // Si el front del pack no se pudo subir, NO agregar este pack con foto equivocada
+      if (p > 1 && !fUrl) {
+        toast('❌ ' + p + 'pk: no se pudo subir la imagen del pack — no se agregó');
+        skipped = (typeof skipped !== 'undefined') ? skipped : 0;
+        continue;
       }
     }
     if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
@@ -3786,6 +3820,20 @@ function exportCSV(){
   if (window._exportLock) { toast('⏳ Export en proceso...'); return; }
   window._exportLock = true;
   setTimeout(function(){ window._exportLock = false; }, 5000);
+
+  // ── Feedback visual inmediato: el botón responde al instante ──
+  var expBtnEl = document.getElementById('expBtn');
+  if (expBtnEl) {
+    var expBtnOldHTML = expBtnEl.innerHTML;
+    expBtnEl.innerHTML = '⏳ Exportando...';
+    expBtnEl.style.opacity = '0.55';
+    expBtnEl.style.pointerEvents = 'none';
+    setTimeout(function(){
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }, 5000);
+  }
 
   // Enviar también a la hoja de registro (pestaña "Product Scanner"), no bloquea
   psSendToRegistroSheet(bulk);
