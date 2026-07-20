@@ -2069,7 +2069,7 @@ function renderResult(r){
   // ── 9. LOCATION ──────────────────────────────────────────────
   const locVal=r.location||'';
   h+=`<div class="card"><div class="lbl">📍 Warehouse Location</div>
-    <div style="margin-top:8px">${locVal?psLocBadgeHTML(locVal):psLocEmptyHTML()}</div>
+    <div style="margin-top:8px;"></div>
   </div>`;
 
   h+=sv
@@ -2129,100 +2129,6 @@ function renderBulk(){
 
 // CSV Export
 // ═══════════════════════════════════════════════════════════════════════════
-// PRODUCT SCANNER - INDEPENDENT LOCATION MODULE
-// Totally independent from Clothing & Shoes — separate functions & variables
-// ═══════════════════════════════════════════════════════════════════════════
-
-let _psLocCallback = null;
-let _psLocTarget = null; // Always 'product' for Product Scanner
-
-async function psLocOpen(target) {
-  _psLocTarget = target;
-  
-  // Ensure loc-overlay exists
-  let overlay = document.getElementById('loc-overlay');
-  if (!overlay) {
-    overlay = document.createElement('div');
-    overlay.id = 'loc-overlay';
-    overlay.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:10000;flex-direction:column;align-items:center;justify-content:center;gap:15px;padding:20px;';
-    
-    let videoEl = document.createElement('video');
-    videoEl.id = 'loc-qr-video';
-    videoEl.style.cssText = 'width:100%;max-width:500px;height:500px;object-fit:cover;border-radius:12px;border:3px solid #00e676;';
-    
-    let closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕ Cancelar';
-    closeBtn.style.cssText = 'padding:12px 24px;background:#c0392b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;';
-    closeBtn.onclick = psLocClose;
-    
-    overlay.appendChild(videoEl);
-    overlay.appendChild(closeBtn);
-    document.body.appendChild(overlay);
-  }
-  
-  overlay.style.display = 'flex';
-  
-  try {
-    savvyStopScan('loc-qr-video');
-    await savvyStartScan('loc-qr-video', async (code) => {
-      psLocCapture(code.trim());
-    });
-  } catch (e) {
-    console.error('Error opening location scanner:', e);
-    toast('⚠️ Error al abrir cámara de ubicación');
-  }
-}
-
-async function psLocClose() {
-  try {
-    savvyStopScan('loc-qr-video');
-  } catch (e) {}
-  
-  let overlay = document.getElementById('loc-overlay');
-  if (overlay) overlay.style.display = 'none';
-}
-
-function psLocCapture(code) {
-  psLocClose();
-  
-  // Save to current product
-  if (window.psCurrentProduct) {
-    window.psCurrentProduct.location = code;
-    toast('📍 Ubicación: ' + code);
-    
-    // Update badge if visible
-    let badge = document.getElementById('ps-loc-badge');
-    if (badge) {
-      badge.outerHTML = psLocBadgeHTML(code);
-    }
-  }
-}
-
-function psLocClear() {
-  if (window.psCurrentProduct) {
-    window.psCurrentProduct.location = '';
-    toast('📍 Ubicación borrada');
-    
-    let badge = document.getElementById('ps-loc-badge');
-    if (badge) {
-      badge.outerHTML = psLocEmptyHTML();
-    }
-  }
-}
-
-function psLocBadgeHTML(code) {
-  return `<span style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:#00e676;color:#000;border-radius:6px;font-weight:bold;font-size:13px;" id="ps-loc-badge">
-    <span>📍</span>
-    <span>${code}</span>
-    <button onclick="psLocClear()" style="background:none;border:none;color:#000;cursor:pointer;font-weight:bold;padding:0;">✕</button>
-  </span>`;
-}
-
-function psLocEmptyHTML() {
-  return `<button onclick="psLocOpen('product')" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:#555;color:#aaa;border:1px solid #777;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;" id="ps-loc-badge">
-    <span>📦</span><span>Scan location (optional)</span>
-  </button>`;
-}
 
 
 function exportCSV(){
