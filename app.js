@@ -1,107 +1,3 @@
-// ── ON-SCREEN DEBUG CONSOLE — para ver errores directo en el iPhone,
-// sin necesitar Mac ni Safari Web Inspector. Toca el logo 5 veces para abrir/cerrar. ──
-(function setupDebugConsole(){
-  var logs = [];
-  var maxLogs = 80;
-  var panel = null;
-
-  function ensurePanel(){
-    if(panel) return panel;
-    panel = document.createElement('div');
-    panel.id = 'debug-console-panel';
-    panel.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.96);z-index:999999;overflow-y:auto;padding:12px;font-family:monospace;font-size:11px;color:#0f0;white-space:pre-wrap;word-break:break-all';
-    var closeBtn = document.createElement('button');
-    closeBtn.textContent = '✕ Cerrar Debug Console';
-    closeBtn.style.cssText = 'position:sticky;top:0;width:100%;padding:12px;background:#c0392b;color:#fff;border:none;border-radius:8px;font-weight:800;margin-bottom:10px;z-index:2';
-    closeBtn.onclick = function(){ panel.style.display = 'none'; };
-    panel.appendChild(closeBtn);
-    var logsDiv = document.createElement('div');
-    logsDiv.id = 'debug-console-logs';
-    panel.appendChild(logsDiv);
-    document.body.appendChild(panel);
-    return panel;
-  }
-
-  function render(){
-    ensurePanel();
-    var logsDiv = document.getElementById('debug-console-logs');
-    if(logsDiv) logsDiv.textContent = logs.join('\n\n');
-  }
-
-  function push(type, args){
-    try{
-      var msg = Array.prototype.map.call(args, function(a){
-        if(typeof a === 'object'){ try{ return JSON.stringify(a); }catch(e){ return String(a); } }
-        return String(a);
-      }).join(' ');
-      var time = new Date().toLocaleTimeString();
-      var line = '[' + time + '] ' + type + ': ' + msg;
-      logs.push(line);
-      if(logs.length > maxLogs) logs.shift();
-      if(panel && panel.style.display !== 'none') render();
-
-      // También lo escribe en el cuadro de debug SIEMPRE VISIBLE junto al botón de packs,
-      // si existe en pantalla en este momento — sin necesitar ningún gesto especial.
-      var miniLog = document.getElementById('ps-debug-log');
-      if(miniLog){
-        miniLog.textContent = (miniLog.textContent === 'Esperando acción...' ? '' : miniLog.textContent + '\n') + line;
-        miniLog.scrollTop = miniLog.scrollHeight;
-      }
-    }catch(e){}
-  }
-
-  var origLog = console.log, origErr = console.error, origWarn = console.warn;
-  console.log   = function(){ push('LOG',  arguments); origLog.apply(console, arguments); };
-  console.error = function(){ push('ERROR', arguments); origErr.apply(console, arguments); };
-  console.warn  = function(){ push('WARN', arguments); origWarn.apply(console, arguments); };
-
-  // Capturar también errores no atrapados (uncaught) y promesas rechazadas
-  window.addEventListener('error', function(e){
-    push('UNCAUGHT ERROR', [e.message + ' @ ' + (e.filename||'') + ':' + (e.lineno||'')]);
-  });
-  window.addEventListener('unhandledrejection', function(e){
-    push('UNHANDLED PROMISE', [e.reason && e.reason.message ? e.reason.message : String(e.reason)]);
-  });
-
-  window.toggleDebugConsole = function(){
-    ensurePanel();
-    panel.style.display = (panel.style.display === 'none') ? 'block' : 'none';
-    if(panel.style.display === 'block') render();
-  };
-
-  // Toca el logo del header 5 veces seguidas para abrir la consola de debug
-  document.addEventListener('DOMContentLoaded', function(){
-    var logo = document.querySelector('.hdr') || document.querySelector('.lg') || document.body;
-    var tapCount = 0, tapTimer = null;
-    logo.addEventListener('click', function(){
-      tapCount++;
-      clearTimeout(tapTimer);
-      tapTimer = setTimeout(function(){ tapCount = 0; }, 1500);
-      if(tapCount >= 5){ tapCount = 0; window.toggleDebugConsole(); }
-    });
-  });
-})();
-
-// Función directa y a prueba de fallos — escribe inmediatamente en el cuadro
-// visible junto al botón de packs, sin depender de nada más.
-window._psDebug = function(msg){
-  try{
-    var box = document.getElementById('ps-debug-log');
-    if(box){
-      var time = new Date().toLocaleTimeString();
-      var line = '[' + time + '] ' + msg;
-      box.textContent = (box.textContent === 'Esperando acción...' ? '' : box.textContent + '\n') + line;
-      box.scrollTop = box.scrollHeight;
-    }
-  }catch(e){}
-  try{ console.log('_psDebug:', msg); }catch(e){}
-};
-
-
-// ── HELPER FUNCTIONS ──────────────────────────────────────────
-const $=id=>document.getElementById(id);
-const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');
-const fmt=n=>(!n||isNaN(n))?'—':'$'+Number(n).toFixed(2);
 
 const WORKER='https://savvy-ebay.octavio-9e2.workers.dev';
 const SAVVY_CONFIG='https://savvy-config-production.up.railway.app';
@@ -196,30 +92,25 @@ if (!localStorage.getItem('savvy_printer_ip')) {
 }
 
 let bulk=[],cur=null;
-let _psSellbriteProducts = {};
+// SYNC: Asegurar que psCurrentProduct siempre apunte a cur
+Object.defineProperty(window, 'psCurrentProduct', {
+  get: function() { return window.cur; },
+  configurable: true
+});
 let _lastBundleUrl = ''; // URL pública de ImgBB del último bundle generado
+
+const $=id=>document.getElementById(id);
+const esc=s=>String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+const fmt=n=>(!n||isNaN(n))?'—':'$'+Number(n).toFixed(2);
 
 function screen(n){document.querySelectorAll('.scr').forEach(s=>s.classList.remove('on'));$('scr-'+n).classList.add('on');}
 let _tt;
 function toast(msg,ms=2600){const t=$('toast');t.textContent=msg;t.classList.add('on');clearTimeout(_tt);_tt=setTimeout(()=>t.classList.remove('on'),ms);}
 function stat(m){const e=$('ls');if(e)e.textContent=m;}
 
-// Show the loading spinner INSIDE resBody (scr-res stays the visible screen the whole time —
-// no more jumping to a separate loading screen). Also brings us back from scr-cam if we were scanning.
-function showLoadingInline(initialMsg){
-  screen('res');
-  const rb=$('resBody');
-  if(!rb) return;
-  rb.innerHTML = '<div class="lw" style="padding:20px 0 8px">'
-    + '<div class="sp"></div>'
-    + '<div id="lp" style="font-size:16px;font-weight:700;margin:10px 0 6px;text-align:center">' + (initialMsg||'Scanning...') + '</div>'
-    + '<div id="ls" style="color:var(--mu);font-size:13px;text-align:center">Querying eBay...</div>'
-    + '</div>';
-}
-
 // SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
 function makeSKU(brand,upc,packs,title){
-  packs=packs||1; title=title||'';
+  packs=packs||2; title=title||'';
   let src=(brand||'').trim();
   if(!src||src.toLowerCase()==='generic') src='';
   if(!src&&title){
@@ -655,18 +546,7 @@ const SAVVY_SCAN_CONFIG = {
 };
 
 async function savvyStartScan(videoElementId, onResult) {
-  console.log('📷 savvyStartScan starting for element:', videoElementId);
   await savvyStopScan(videoElementId);
-  
-  const videoEl = document.getElementById(videoElementId);
-  if(!videoEl){
-    console.error('❌ Video element not found:', videoElementId);
-    toast('❌ Camera container not found');
-    return;
-  }
-  
-  console.log('✅ Video element found:', videoEl);
-  
   var scanner = new Html5Qrcode(videoElementId, {
     formatsToSupport: SAVVY_SCAN_CONFIG.formatsToSupport,
     experimentalFeatures: SAVVY_SCAN_CONFIG.experimentalFeatures,
@@ -674,7 +554,6 @@ async function savvyStartScan(videoElementId, onResult) {
   });
   _savvyScanners[videoElementId] = scanner;
   try {
-    console.log('📱 Requesting camera access...');
     await scanner.start(
       { facingMode: 'environment' },
       {
@@ -684,15 +563,12 @@ async function savvyStartScan(videoElementId, onResult) {
         disableFlip: SAVVY_SCAN_CONFIG.disableFlip,
       },
       (decoded) => {
-        console.log('✅ QR Code found:', decoded);
         savvyStopScan(videoElementId);
         onResult(decoded);
       },
       () => {}
     );
-    console.log('✅ Camera started successfully');
   } catch(e) {
-    console.error('❌ Camera error:', e.message);
     toast('❌ No camera access: ' + e.message);
     delete _savvyScanners[videoElementId];
   }
@@ -713,20 +589,9 @@ async function startCam(){
     analyze(txt.replace(/\D/g,''));
   });
 }
-
-// Sync wrapper for HTML onclick handler
-function startCamSync(){
-  console.log('📷 startCamSync called');
-  try {
-    startCam().catch(e => console.error('startCam error:', e));
-  } catch(e) {
-    console.error('Error calling startCam:', e);
-    toast('⚠️ Error starting camera');
-  }
-}
 async function stopCam(){
   savvyStopScan('qr-video');
-  screen('res');
+  screen('idle');
 }
 
 
@@ -1078,7 +943,7 @@ async function generateBundleImage(productDataUrl, packSize) {
 function downloadBundleImg(src) {
   var a = document.createElement('a');
   a.href = src;
-  a.download = 'bundle-' + ((cur && cur.upc) || 'product') + '.jpg';
+  a.download = 'bundle-' + ((window.cur && cur.upc) || 'product') + '.jpg';
   a.click();
 }
 
@@ -1110,7 +975,7 @@ async function openBundlePhoto() {
     if (driveUrl) {
       try {
         if(genDiv) genDiv.textContent='☁️ Subiendo foto a Google Drive...';
-        var sku = (cur && cur.upc) ? cur.upc : 'foto';
+        var sku = (window.cur && cur.upc) ? cur.upc : 'foto';
         var fname = sku + '-' + Date.now() + '.jpg';
         // Enviar imagen base64 directamente al Apps Script
         var b64 = dataUrl.split(',')[1];
@@ -1127,7 +992,7 @@ async function openBundlePhoto() {
       }
     }
 
-    if(cur) { cur._rawPhoto = photoUrl; cur._imgUrl = photoUrl; }
+    if(window.cur) { cur._rawPhoto = photoUrl; cur._imgUrl = photoUrl; }
 
     if(genDiv) genDiv.style.display='none';
     if(preDiv) {
@@ -1140,437 +1005,6 @@ async function openBundlePhoto() {
 }
 
 // Subir foto ya lista (bundle hecho manualmente)
-// ── Compress an image file to a data URL (same approach as Clothing & Shoes) ──
-function clCompressImage(file, maxW=900, quality=0.75) {
-  return new Promise(resolve => {
-    const reader = new FileReader();
-    reader.onload = e => {
-      const img = new Image();
-      img.onload = () => {
-        const ratio = Math.min(maxW/img.width, maxW/img.height, 1);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * ratio);
-        canvas.height = Math.round(img.height * ratio);
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
-        resolve(canvas.toDataURL('image/jpeg', quality));
-      };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
-  });
-}
-
-// ── Upload a data URL to ImgBB, return the public URL ──
-async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
-  try {
-    const b64 = dataUrl ? dataUrl.split(',')[1] : null;
-    if (!b64) { console.warn('ImgBB: no image data'); return null; }
-    const fd = new FormData();
-    fd.append('key', key);
-    fd.append('image', b64);
-    fd.append('name', (slotName || 'photo') + '-' + Date.now() + '.png');
-    const res = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body: fd });
-    const d = await res.json();
-    if (d.success) {
-      let imgUrl = d.data.image?.url || d.data.display_url || d.data.url;
-      return imgUrl;
-    } else {
-      const errMsg = d.error?.message || JSON.stringify(d.error) || 'unknown error';
-      console.error('ImgBB upload failed:', errMsg);
-      toast('⚠️ ImgBB error: ' + errMsg);
-      return null;
-    }
-  } catch(e) {
-    console.error('ImgBB network error:', e.message);
-    toast('⚠️ ImgBB network error: ' + e.message);
-    return null;
-  }
-}
-
-// ── PASO 1: capturar foto (front/back), quitar fondo con Railway rembg,
-// subir el PNG resultante a ImgBB. El armado de paquetes es un paso aparte. ──
-// ── Pipeline compartido: comprimir → quitar fondo (Railway rembg) → subir a ImgBB ──
-// Usado por FRONT, BACK, y las fotos extra opcionales — mismo proceso para todas.
-async function psRemoveBackgroundPipeline(file, onStatus){
-  if(onStatus) onStatus('Comprimiendo...');
-  var dataUrl = await clCompressImage(file, 1600, 0.92);
-
-  if(onStatus) onStatus('🚂 Quitando fondo...');
-  const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
-  const b64 = dataUrl.split(',')[1];
-  const rbgRes = await fetch(RAILWAY_RBG, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: b64 })
-  });
-  if(!rbgRes.ok) throw new Error('Railway rembg error ' + rbgRes.status);
-  const rbgData = await rbgRes.json();
-  if(!rbgData.success || !rbgData.image) throw new Error('rembg no devolvió imagen');
-
-  const pngUrl = 'data:image/png;base64,' + rbgData.image;
-
-  if(onStatus) onStatus('📤 Subiendo...');
-  const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
-  let finalUrl = pngUrl;
-  if (imgbbKey) {
-    const uploaded = await clUploadPhotoToImgBB(pngUrl, imgbbKey, 'photo');
-    if (uploaded) finalUrl = uploaded;
-  }
-  return { finalUrl, localUrl: pngUrl };
-}
-
-async function psCapturePhoto(slotId){
-  var input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto
-  input.onchange = async function(e){
-    var file = e.target.files[0];
-    if(!file) return;
-
-    var slot = document.getElementById('ps-slot-' + slotId);
-    var setStatus = function(msg){
-      if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">'+msg+'</div></div>';
-    };
-    setStatus('Comprimiendo...');
-
-    try{
-      const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, setStatus);
-
-      if (cur) {
-        if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = localUrl; }
-        else { cur._backImg = finalUrl; cur._backImgLocal = localUrl; }
-      }
-
-      if (slot) {
-        slot.innerHTML = '<img src="' + finalUrl + '" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">';
-      }
-      updatePackGenButtonState();
-      toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
-    }catch(err){
-      console.error('psCapturePhoto error:', err);
-      toast('❌ Error: ' + err.message);
-      if(slot) slot.innerHTML = '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
-    }
-  };
-  input.click();
-}
-
-// ── FOTOS EXTRA (opcionales, hasta 3) — mismo proceso que BACK ──
-// Se agregan con el botón "+ Agregar Foto"; cada una se usa luego como foto
-// secundaria (centrada, sin duplicar, sin distintivo) en el generador de packs.
-const MAX_EXTRA_PHOTOS = 3;
-
-function psAddExtraPhoto(){
-  if(!cur){ toast('⚠️ Escanea un producto primero'); return; }
-  if(!cur._extraImgs) cur._extraImgs = [];
-  if(cur._extraImgs.length >= MAX_EXTRA_PHOTOS){
-    toast('⚠️ Máximo ' + MAX_EXTRA_PHOTOS + ' fotos extra');
-    return;
-  }
-
-  var input = document.createElement('input');
-  input.type = 'file';
-  input.accept = 'image/*';
-  input.onchange = async function(e){
-    var file = e.target.files[0];
-    if(!file) return;
-
-    const idx = cur._extraImgs.length; // posición donde va a quedar esta foto
-    cur._extraImgs.push({ img: null, local: null, loading: true });
-    renderExtraPhotosUI();
-
-    try{
-      const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, function(msg){
-        var el = document.getElementById('ps-extra-slot-' + idx);
-        if(el) el.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div><div style="font-size:9px;color:var(--mu)">'+msg+'</div></div>';
-      });
-      cur._extraImgs[idx] = { img: finalUrl, local: localUrl, loading: false };
-      renderExtraPhotosUI();
-      toast('✅ Foto extra ' + (idx+1) + ' lista');
-    }catch(err){
-      console.error('psAddExtraPhoto error:', err);
-      toast('❌ Error: ' + err.message);
-      cur._extraImgs.splice(idx, 1); // quitar el slot fallido
-      renderExtraPhotosUI();
-    }
-  };
-  input.click();
-}
-
-function psRemoveExtraPhoto(idx){
-  if(!cur || !cur._extraImgs) return;
-  cur._extraImgs.splice(idx, 1);
-  renderExtraPhotosUI();
-}
-
-function renderExtraPhotosUI(){
-  const wrap = $('ps-extra-photos-wrap');
-  if(!wrap) return;
-  const extras = (cur && cur._extraImgs) || [];
-  let h = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">';
-  extras.forEach(function(e, i){
-    if(e.loading){
-      h += '<div id="ps-extra-slot-'+i+'" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center"></div>';
-    } else {
-      h += '<div id="ps-extra-slot-'+i+'" style="position:relative;width:72px;height:72px;background:var(--sf2);border:2px solid var(--bd);border-radius:10px;overflow:hidden">'
-        + '<img src="'+esc(e.img)+'" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">'
-        + '<button onclick="psRemoveExtraPhoto('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.7);color:#fff;border:none;border-radius:50%;font-size:12px;cursor:pointer;line-height:1">✕</button>'
-        + '</div>';
-    }
-  });
-  if(extras.length < MAX_EXTRA_PHOTOS){
-    h += '<div onclick="psAddExtraPhoto()" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:28px;color:var(--mu)">+</div>';
-  }
-  h += '</div>';
-  h += '<div style="font-size:10px;color:var(--mu);margin-top:4px">'+extras.length+'/'+MAX_EXTRA_PHOTOS+' fotos extra (opcional) — mismo proceso que BACK</div>';
-  wrap.innerHTML = h;
-}
-
-// ══════════════════════════════════════════════════════════════
-// PASO 2: GENERADOR DE IMÁGENES DE PAQUETE (1/3/6/12)
-// Portado de la herramienta eBay-Pack-Generator de Manuel — misma
-// matemática de acomodo (gL), mismo distintivo circular (dB).
-// FRONT (ya sin fondo) se multiplica × pack + distintivo.
-// BACK (ya sin fondo) se usa como foto secundaria única, sin distintivo.
-// ══════════════════════════════════════════════════════════════
-
-const PACK_BADGE_COLOR = '#0F97DB';
-
-function psLoadImage(src){
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    // crossOrigin solo hace falta para URLs externas (ImgBB) — en data: URIs no afecta
-    if (typeof src === 'string' && !src.startsWith('data:')) img.crossOrigin = 'anonymous';
-    const timer = setTimeout(() => reject(new Error('Timeout cargando imagen (10s)')), 10000);
-    img.onload = () => { clearTimeout(timer); resolve(img); };
-    img.onerror = (e) => { clearTimeout(timer); console.error('psLoadImage onerror:', e); reject(new Error('No se pudo cargar la imagen')); };
-    img.src = src;
-  });
-}
-
-// Calcula el mejor acomodo (columnas/filas) para `count` copias de una foto
-// dentro de un canvas cuadrado de tamaño `sz`, dado el aspect ratio de la foto.
-function psComputeLayout(count, sz, imgAspect){
-  if (count === 1) {
-    const h = sz*.95, w = h*imgAspect;
-    let s = 1; if (w > sz*.95) s = (sz*.95)/w;
-    return [{x:sz/2, y:sz/2, w:w*s, h:h*s}];
-  }
-  const maxFill = 0.97, gapPct = 0.01;
-  let minCols, maxCols;
-  if (count === 2) { minCols=2; maxCols=2; }
-  else if (count === 3) { minCols=3; maxCols=3; }
-  else if (count === 4) { minCols=2; maxCols=4; }
-  else if (count <= 6) { minCols=2; maxCols=Math.min(count,6); }
-  else if (count <= 10) { minCols=3; maxCols=Math.min(count,5); }
-  else { minCols=3; maxCols=Math.min(count,6); }
-
-  let bestCols=minCols, bestArea=0, bestProdW=0, bestProdH=0;
-  for (let cols=minCols; cols<=maxCols; cols++) {
-    const rows = Math.ceil(count/cols);
-    const availW = sz*maxFill - sz*gapPct*(cols-1);
-    const availH = sz*maxFill - sz*gapPct*(rows-1);
-    const cellW = availW/cols, cellH = availH/rows;
-    let pw, ph2;
-    const cellAspect = cellW/cellH;
-    if (imgAspect >= cellAspect) { pw=cellW; ph2=cellW/imgAspect; }
-    else { ph2=cellH; pw=cellH*imgAspect; }
-    const area = pw*ph2;
-    if (area > bestArea) { bestArea=area; bestCols=cols; bestProdW=pw; bestProdH=ph2; }
-  }
-  const co=bestCols, ar=Math.ceil(count/co), gap=sz*gapPct;
-  const positions = [];
-  for (let i=0; i<count; i++) {
-    const rw=Math.floor(i/co), cl=i%co;
-    const ir = rw===ar-1 ? count-rw*co : co;
-    const rowW = ir*bestProdW + (ir-1)*gap;
-    const ox = (sz-rowW)/2;
-    const totalH = ar*bestProdH + (ar-1)*gap;
-    const oy = (sz-totalH)/2;
-    positions.push({
-      x: ox+cl*(bestProdW+gap)+bestProdW/2,
-      y: oy+rw*(bestProdH+gap)+bestProdH/2,
-      w: bestProdW, h: bestProdH
-    });
-  }
-  return positions;
-}
-
-// Dibuja el distintivo circular "N Pack" — igual al de la herramienta de Manuel
-function psDrawBadge(ctx, count, sz){
-  const r = Math.round(sz*.09), x = sz-r-Math.round(sz*.018), y = r+Math.round(sz*.018);
-  ctx.save();
-  ctx.shadowColor='rgba(0,0,0,.3)'; ctx.shadowBlur=25; ctx.shadowOffsetX=4; ctx.shadowOffsetY=4;
-  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.fillStyle=PACK_BADGE_COLOR; ctx.fill();
-  ctx.restore();
-  ctx.beginPath(); ctx.arc(x,y,r,0,Math.PI*2); ctx.strokeStyle='#fff'; ctx.lineWidth=Math.round(r*.07); ctx.stroke();
-  ctx.fillStyle='#fff'; ctx.textAlign='center'; ctx.textBaseline='middle';
-  const numSz = count>=10 ? Math.round(r*.75) : Math.round(r*.95);
-  ctx.font = `900 ${numSz}px "Arial Black","Impact",Arial,sans-serif`;
-  ctx.fillText(count, x, y-r*.14);
-  ctx.font = `700 ${Math.round(r*.35)}px "Arial Black","Impact",Arial,sans-serif`;
-  ctx.fillText('Pack', x, y+r*.4);
-}
-
-// Genera la imagen del paquete: `count` copias de `img` + distintivo (si count>1)
-function psGeneratePackImage(img, count){
-  const sz=2048, cv=document.createElement('canvas'); cv.width=sz; cv.height=sz;
-  const cx=cv.getContext('2d'); cx.fillStyle='#FFF'; cx.fillRect(0,0,sz,sz);
-  const positions = psComputeLayout(count, sz, img.width/img.height);
-  positions.forEach(p => cx.drawImage(img, p.x-p.w/2, p.y-p.h/2, p.w, p.h));
-  if (count > 1) psDrawBadge(cx, count, sz);
-  return cv.toDataURL('image/jpeg', .92);
-}
-
-// Genera la foto secundaria (BACK) centrada sola, sin distintivo, sin duplicar
-function psGenerateSingleImage(img){
-  const sz=2048, cv=document.createElement('canvas'); cv.width=sz; cv.height=sz;
-  const cx=cv.getContext('2d'); cx.fillStyle='#FFF'; cx.fillRect(0,0,sz,sz);
-  const a=img.width/img.height, pd=sz*.02, mw=sz-pd*2, mh=sz-pd*2;
-  let w,h; if(a>1){w=mw;h=mw/a;} else {h=mh;w=mh*a;}
-  if(w>mw){w=mw;h=w/a;} if(h>mh){h=mh;w=h*a;}
-  cx.drawImage(img, (sz-w)/2, (sz-h)/2, w, h);
-  return cv.toDataURL('image/jpeg', .92);
-}
-
-// Genera las 4 imágenes de pack (1/3/6/12) usando FRONT + una imagen BACK compartida
-async function psGenerateAllPacks(){
-  console.log('🎁 psGenerateAllPacks: click detectado');
-  if(!cur || !cur._frontImg || !cur._backImg){
-    toast('⚠️ Necesitas la foto FRONT y BACK primero');
-    return;
-  }
-  const btn = $('ps-gen-packs-btn');
-  const statusEl = $('ps-pack-gen-status');
-  const resetBtn = () => { if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; } };
-
-  try{
-    if(btn){ btn.disabled=true; btn.textContent='⏳ Generando...'; }
-    if(statusEl) statusEl.textContent = '📥 Cargando fotos...';
-
-    const frontSrc = cur._frontImgLocal || cur._frontImg;
-    const backSrc  = cur._backImgLocal  || cur._backImg;
-    console.log('Front source:', frontSrc.substring(0,40));
-    console.log('Back source:', backSrc.substring(0,40));
-
-    const frontImg = await psLoadImage(frontSrc);
-    const backImg  = await psLoadImage(backSrc);
-    console.log('✅ Fotos cargadas en memoria:', frontImg.width+'x'+frontImg.height, backImg.width+'x'+backImg.height);
-
-    // Cargar también las fotos extra (opcionales) — mismo tratamiento que BACK
-    const extras = (cur._extraImgs || []).filter(function(e){ return e && e.img && !e.loading; });
-    const extraImgs = [];
-    for (const ex of extras) {
-      const src = ex.local || ex.img;
-      extraImgs.push(await psLoadImage(src));
-    }
-    console.log('✅ ' + extraImgs.length + ' foto(s) extra cargadas');
-
-    if(!cur._packImages) cur._packImages = {};
-    const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
-    console.log('ImgBB key disponible:', !!imgbbKey);
-
-    // 1) Generar TODAS las imágenes primero — esto es solo Canvas, no usa internet, es instantáneo
-    if(statusEl) statusEl.textContent = '🖼️ Dibujando imágenes...';
-    const backDataUrl = psGenerateSingleImage(backImg);
-    const extraDataUrls = extraImgs.map(function(img){ return psGenerateSingleImage(img); });
-    const frontDataUrls = {};
-    PACK_SIZES.forEach(function(p){ frontDataUrls[p] = psGeneratePackImage(frontImg, p); });
-    console.log('✅ ' + (2 + extraDataUrls.length) + ' imágenes dibujadas en canvas (back + extras + 4 packs)');
-
-    // 2) Subir todas EN PARALELO con timeout de 20s cada una — si una falla o tarda
-    // demasiado, se usa la imagen local en su lugar en vez de trabar todo el proceso.
-    if(statusEl) statusEl.textContent = '📤 Subiendo imágenes (puede tardar unos segundos)...';
-    function uploadWithTimeout(dataUrl, name){
-      if(!imgbbKey) return Promise.resolve(dataUrl);
-      const timeoutPromise = new Promise(function(resolve){
-        setTimeout(function(){ console.warn('⏱️ Timeout subiendo '+name+', usando imagen local'); resolve(dataUrl); }, 20000);
-      });
-      const uploadPromise = clUploadPhotoToImgBB(dataUrl, imgbbKey, name)
-        .then(function(url){ return url || dataUrl; })
-        .catch(function(e){ console.warn('⚠️ Error subiendo '+name+':', e.message); return dataUrl; });
-      return Promise.race([uploadPromise, timeoutPromise]);
-    }
-
-    const results = await Promise.all([
-      uploadWithTimeout(backDataUrl, 'pack-back'),
-      ...extraDataUrls.map(function(du, i){ return uploadWithTimeout(du, 'pack-extra-'+i); }),
-      ...PACK_SIZES.map(function(p){ return uploadWithTimeout(frontDataUrls[p], 'pack-'+p); })
-    ]);
-    const backUrl = results[0];
-    const extraUrls = results.slice(1, 1 + extraDataUrls.length);
-    const frontResults = results.slice(1 + extraDataUrls.length);
-    PACK_SIZES.forEach(function(p, i){
-      cur._packImages[p] = { front: frontResults[i], back: backUrl, extras: extraUrls };
-    });
-    console.log('✅ Todo listo:', cur._packImages);
-
-    if(statusEl) statusEl.textContent = '';
-    toast('✅ 4 paquetes generados (1, 3, 6, 12)');
-    renderPackImagesPreview();
-  }catch(err){
-    console.error('❌ psGenerateAllPacks error:', err);
-    const isTainted = /tainted|SecurityError|insecure/i.test(err.message||'') || err.name==='SecurityError';
-    toast(isTainted
-      ? '❌ Error de seguridad con la foto — vuelve a tomar FRONT/BACK y prueba de nuevo'
-      : '❌ Error: ' + (err.message||'desconocido'));
-    if(statusEl) statusEl.textContent = isTainted
-      ? '❌ Foto bloqueada por seguridad (CORS) — retoma FRONT y BACK'
-      : '❌ ' + (err.message||'Error desconocido');
-  }finally{
-    resetBtn();
-  }
-}
-
-// Actualiza el texto de ayuda en cuanto existen FRONT y BACK.
-// El botón SIEMPRE es clickeable — psGenerateAllPacks() valida internamente
-// y avisa con un toast si faltan fotos, en vez de depender de disabled/enabled.
-function updatePackGenButtonState(){
-  if(!cur) return;
-  const hasPhotos = !!(cur._frontImg && cur._backImg);
-  const hint = $('ps-pack-gen-hint');
-  if(hint){
-    hint.textContent = hasPhotos
-      ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
-      : '⚠️ Primero toma las fotos FRONT y BACK de arriba.';
-  }
-}
-
-function renderPackImagesPreview(){
-  const el = $('ps-pack-images-preview');
-  if(!el || !cur || !cur._packImages) return;
-  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">';
-  PACK_SIZES.forEach(function(p){
-    const imgs = cur._packImages[p];
-    if(!imgs) return;
-    h += `<div style="background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
-      <div style="font-size:11px;font-weight:800;color:var(--ac);margin-bottom:4px">${p} Pack</div>
-      <img src="${esc(imgs.front)}" style="width:100%;border-radius:6px;margin-bottom:4px">
-      <a href="${esc(imgs.front)}" download="pack-${p}-front.jpg" style="font-size:10px;color:var(--mu);text-decoration:underline">⬇️ front</a>
-    </div>`;
-  });
-  h += '</div>';
-  const shared = cur._packImages[PACK_SIZES[0]];
-  if (shared && shared.back) {
-    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
-      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:4px">Back (compartida en los 4 packs)</div>
-      <img src="${esc(shared.back)}" style="width:50%;border-radius:6px">
-    </div>`;
-  }
-  if (shared && shared.extras && shared.extras.length){
-    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px">
-      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:6px;text-align:center">Fotos extra (compartidas en los 4 packs)</div>
-      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">`;
-    shared.extras.forEach(function(u){
-      h += `<img src="${esc(u)}" style="width:70px;height:70px;object-fit:contain;border-radius:6px;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">`;
-    });
-    h += '</div></div>';
-  }
-  el.innerHTML = h;
-}
-
-
 async function openReadyPhoto() {
   var input = document.createElement('input');
   input.type = 'file'; input.accept = 'image/*';
@@ -1595,7 +1029,7 @@ async function openReadyPhoto() {
       }
     }
 
-    if(cur) {
+    if(window.cur) {
       cur._bundleImg = finalUrl;
       cur._imgUrl = finalUrl;
       cur._singleProductImg = dataUrl;
@@ -1672,7 +1106,7 @@ async function lookupUPCitemdb(upc) {
 
 // Price calculation
 function calcBundlePrice(ebay,packs){
-  packs=packs||1;
+  packs=packs||2;
   // Priority: sold avg (real) > sold low > active low > active avg
   const soldAvg = ebay?.pricing?.sold?.avg || 0;
   const soldLow = ebay?.pricing?.sold?.low || 0;
@@ -1721,7 +1155,7 @@ function clearExpDate() {
   }
   _dateSelected = false;
   if (window._packState) window._packState.expDate = '';
-  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; }
+  if (window.cur) { cur._expDate = ''; cur._selectedTitle = ''; }
   var el = document.getElementById('date-result-display');
   if (el) el.innerHTML = '';
   // Regenerar título sin fecha
@@ -1783,7 +1217,7 @@ function updateDateDisplay() {
   var exp = getExpDate();
   if (el) el.innerHTML = '📅 <strong style="color:var(--ac)">' + exp + '</strong>';
   // Guardar en _packState y reconstruir título (incluye shade + expDate juntos)
-  if (cur) cur._expDate = exp; // siempre guardar en cur
+  if (window.cur) cur._expDate = exp; // siempre guardar en cur
   if (window._packState) {
     window._packState.expDate = exp;
     rebuildAndApplyTitle(window._packState.curPack);
@@ -1801,12 +1235,12 @@ function rebuildAndApplyTitle(n) {
   var title   = rebuildTitle(state.baseTitle, n || state.curPack, shade, expDate);
   var titleEl = document.getElementById('pack-title-display');
   if (titleEl) { titleEl.textContent = title; titleEl.dataset.val = title; }
-  if (cur) cur._selectedTitle = title;
+  if (window.cur) cur._selectedTitle = title;
   // Actualizar botón y regenerar si ya hay imagen
   var genBtn = document.getElementById('bundle-gen-btn');
   if (genBtn) genBtn.textContent = '📷 Take Product Photo → Generate Pack of ' + (n || state.curPack);
   // Si ya hay imagen guardada, regenerar con nuevo pack
-  if (cur && cur._singleProductImg) {
+  if (window.cur && cur._singleProductImg) {
     var newPack = n || state.curPack;
     var genDiv  = document.getElementById('bundle-generating');
     var preDiv  = document.getElementById('bundle-preview');
@@ -1855,7 +1289,7 @@ function rebuildAndApplyTitle(n) {
 }
 
 // ── PACK SIZE WHEEL ──────────────────────────────────────────
-const PACK_SIZES = [1, 3, 6, 12];
+const PACK_SIZES = [1, 2, 3, 4, 5, 6, 8, 10, 12];
 
 // Rebuild title with correct format: Brand Product Count Pack of N New
 // Convierte "May 2027" → "Exp 05/27" (compacto para el título)
@@ -1946,7 +1380,7 @@ function pickPack(n) {
   rebuildAndApplyTitle(n);
 
   // Save on cur
-  if (cur) {
+  if (window.cur) {
     cur._selectedPack  = n;
     cur._selectedPrice = price ? parseFloat(price.replace('$', '')) : null;
     cur._selectedSKU   = sku;
@@ -1963,12 +1397,12 @@ function pickPack(n) {
       badge.className = 'badge sv';
       badge.innerHTML = '✅ SAVVY';
       if (addBtn) { addBtn.className = 'add-btn'; addBtn.textContent = '➕ ADD TO CSV'; }
-      if (cur) cur.verdict = 'SAVVY';
+      if (window.cur) cur.verdict = 'SAVVY';
     } else {
       badge.className = 'badge dw';
       badge.innerHTML = '✗ DWI';
       if (addBtn) { addBtn.className = 'ov-add-btn'; addBtn.textContent = '➕ Add anyway (DWI override)'; }
-      if (cur) cur.verdict = 'DWI';
+      if (window.cur) cur.verdict = 'DWI';
     }
   }
 }
@@ -1977,13 +1411,13 @@ function updateShadeColor(shade) {
   var state = window._packState;
   if (!state) return;
   state.shade = shade;                   // guardar en _packState
-  if (cur) cur._shade = shade;
+  if (window.cur) cur._shade = shade;
   rebuildAndApplyTitle(state.curPack);   // reconstruye con shade + expDate juntos
 }
 
 
 function calcPacks(ebayLow,costPerUnit){
-  const sizes=PACK_SIZES;
+  const sizes=[2,3,4,6,8,10,12];
   const FEE=0.1325,FEE_F=0.30;
   function ship(n){return n<=2?5.50:n<=4?7.50:n<=6?9.50:n<=8?11.50:13.50;}
   return sizes.map(n=>{
@@ -2051,14 +1485,13 @@ async function callClaude(upc,prod,ebay){
 
   // ── Bundle optimizer: find smallest pack that makes it profitable
   // Min bundle revenue = $15 (after $6.50 shipping + 13% eBay fees)
-  // Only pack sizes 1, 3, 6, 12 are used (matches PACK_SIZES)
   const MIN_BUNDLE = 15;
+  const MAX_PACK   = 12;
   let optimalPack = 1;
   if (marketLow > 0) {
-    for (const p of PACK_SIZES) {
+    for (let p = 1; p <= MAX_PACK; p++) {
       if (marketLow * p * 0.95 >= MIN_BUNDLE) { optimalPack = p; break; }
     }
-    if (marketLow * optimalPack * 0.95 < MIN_BUNDLE) { optimalPack = PACK_SIZES[PACK_SIZES.length-1]; }
   }
   const bundlePrice = marketLow > 0 ? (marketLow * optimalPack * 0.95).toFixed(2) : 0;
   const bundleViable = bundlePrice >= MIN_BUNDLE;
@@ -2165,7 +1598,7 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
 function fallback(upc,prod,ebay){
   const avg=ebay&&ebay.prices&&ebay.prices.avg||0;
   const found=prod&&prod.found;
-  const packs=1;
+  const packs=2;
   const cid=catId((prod&&prod.name)||'');
   // Smart title — never expose UPC
   let title='';
@@ -2187,248 +1620,87 @@ function fallback(upc,prod,ebay){
 async function analyze(upc){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
-  showLoadingInline('UPC: '+upc);
+  screen('load');$('lp').textContent='UPC: '+upc;
 
-  let step='init';
+  let step='init', prod={name:'',brand:'',found:false}, ebay={found:false}, res=null;
   try{
-    // ── Same reliable data source as Clothing & Shoes module ──
-    // Railway /search-upc cascades: eBay official API → Algopix → UPCitemdb → OpenFoodFacts
-    step='railway_search';
-    stat('Querying eBay via Railway...');
-    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
-    const rwRes = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
-    let rwData = null;
-    if (rwRes.ok) {
-      const rwJson = await rwRes.json();
-      console.log('🔍 Railway /search-upc response:', JSON.stringify(rwJson).substring(0,500));
-      rwData = rwJson.data || null;
-    }
+    // ── Single call to eBay: Catalog + Browse + Finding ──────
+    step='ebay_catalog';
+    stat('Querying eBay Catalog...');
+    const ebayFull = await lookupProduct(upc);
 
-    // Build prod{} + ebayFull{} in the shape finishAnalyze() expects
-    let prod = {name:'',brand:'',found:false};
-    let ebayFull = { found:false, product:null, prices:null, pricing:{}, topTitles:[], activeListings:0, soldCount:0, category:null, priceSource:'railway' };
-
-    if (rwData && (rwData.name || rwData.brand)) {
+    // Extract product info from Catalog response
+    if (ebayFull.product && ebayFull.product.name) {
       prod = {
-        name:  rwData.name || '',
-        brand: rwData.brand || '',
-        found: true,
-        source: rwData.data_source || 'railway'
+        name:        ebayFull.product.name,
+        brand:       ebayFull.product.brand || '',
+        description: ebayFull.product.description || '',
+        aspects:     ebayFull.product.aspects || {},
+        found:       true,
+        source:      'ebay_catalog'
       };
       $('lp').textContent = prod.name.substring(0, 50);
-
-      // Prefer real eBay total, fall back to Amazon/Walmart/suggested price
-      const total = rwData.ebay_total || rwData.amazon_price || rwData.walmart_price || rwData.suggested_price || 0;
-      if (total > 0) {
-        ebayFull.found = true;
-        ebayFull.prices = { low: total, avg: total };
-        ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: total } };
-        ebayFull.topTitles = [prod.name];
-        ebayFull.activeListings = rwData.sellers_count || 0;
-      }
-      if (rwData.category) {
-        ebayFull.category = rwData.category;
-      }
-      ebayFull.priceSource = rwData.data_source || 'railway';
     } else {
-      // Nothing found at all — same message the clothing module shows
-      prod = { name:'', brand:'', found:false };
-    }
+      // Fallback to UPCitemdb if Catalog found nothing
+      step='upcitemdb_fallback';
+      stat('Searching UPCitemdb...');
+      prod = await lookupUPCitemdb(upc);
+      if(prod.found) $('lp').textContent = prod.name.substring(0, 50);
 
-    await finishAnalyze(upc, prod, ebayFull, step);
-  }catch(e){
-    console.error('Error en paso ['+step+']:',e);
-    renderAnalyzeError(step, e, upc, {name:'',brand:'',found:false}, {found:false});
-  }
-}
-
-// ── Paste eBay Listing URL — same approach as Clothing & Shoes module ──
-async function analyzeEbayUrl(urlStr){
-  if (!urlStr || !urlStr.trim()) { toast('⚠️ Paste an eBay URL first'); return; }
-  urlStr = urlStr.trim();
-  showLoadingInline('Resolving eBay link...');
-
-  const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
-  let itemId = null;
-  let step = 'resolve_url';
-
-  try {
-    // Short links (ebay.io) or any URL without /itm/ — resolve via Railway
-    if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//)) {
-      try {
-        stat('Resolving short link...');
-        const resolveRes = await fetch(RAILWAY_URL + '/resolve-url?url=' + encodeURIComponent(urlStr));
-        if (resolveRes.ok) {
-          const resolveData = await resolveRes.json();
-          if (resolveData.status === 'success' && resolveData.item_id) {
-            itemId = resolveData.item_id;
+      // ── KEYWORD FALLBACK: if still no product name, search eBay by UPC as keyword
+      // This catches retired LEGO sets, discontinued items, etc.
+      // Trigger: no product name found yet (regardless of whether eBay found prices)
+      if (!prod.found) {
+        try {
+          stat('Searching eBay by keyword...');
+          const kwCtrl = new AbortController();
+          const kwTimer = setTimeout(()=>kwCtrl.abort(), 10000);
+          const kwR = await fetch(WORKER + '/?keywords=' + upc, { signal: kwCtrl.signal });
+          clearTimeout(kwTimer);
+          if (kwR.ok) {
+            const kwD = await kwR.json();
+            // Merge prices if keyword search found better data
+            if (kwD.prices?.low || kwD.topTitles?.length) {
+              if (!ebayFull.prices && kwD.prices) ebayFull.prices = kwD.prices;
+              if (!ebayFull.pricing?.sold && kwD.pricing) ebayFull.pricing = kwD.pricing;
+              if (!ebayFull.topTitles?.length && kwD.topTitles?.length) ebayFull.topTitles = kwD.topTitles;
+              if (!ebayFull.activeListings && kwD.activeListings) ebayFull.activeListings = kwD.activeListings;
+              if (!ebayFull.soldCount && kwD.soldCount) ebayFull.soldCount = kwD.soldCount;
+              ebayFull.priceSource = 'keyword_upc';
+              if (!ebayFull.found) ebayFull.found = kwD.found || false;
+            }
+            // Extract product name from top eBay title
+            if (kwD.topTitles && kwD.topTitles[0]) {
+              const topT = typeof kwD.topTitles[0] === 'object' ? kwD.topTitles[0].title : kwD.topTitles[0];
+              if (topT) {
+                prod.name = topT.substring(0, 120);
+                prod.found = true;
+                prod.source = 'ebay_keyword';
+                // Extract brand from title (first word usually)
+                const firstWord = topT.trim().split(/\s+/)[0];
+                if (firstWord && firstWord.length > 1) prod.brand = firstWord;
+                $('lp').textContent = prod.name.substring(0, 50);
+              }
+            }
           }
-        }
-      } catch(e) { console.warn('resolve-url error:', e.message); }
-    }
-
-    // Fallback: extract the item ID directly from the URL
-    if (!itemId) {
-      try {
-        const u = new URL(urlStr);
-        const pathMatch = u.pathname.match(/\/itm\/(?:[^\/]+\/)?(\d{10,13})/);
-        if (pathMatch) itemId = pathMatch[1];
-        if (!itemId) itemId = u.searchParams.get('item') || u.searchParams.get('itemId');
-        if (!itemId) {
-          const numMatch = u.pathname.match(/(\d{10,13})/);
-          if (numMatch) itemId = numMatch[1];
-        }
-      } catch(e) {
-        const numMatch2 = urlStr.match(/(\d{10,13})/);
-        if (numMatch2) itemId = numMatch2[1];
+        } catch(e) { /* keyword search failed silently */ }
       }
     }
 
-    if (!itemId) {
-      toast('❌ Could not find eBay Item ID — try copying the link again');
-      screen('res');
-      return;
-    }
+    // Map ebayFull to legacy ebay format expected by callClaude
+    ebay = {
+      found:          ebayFull.found,
+      activeListings: ebayFull.activeListings || 0,
+      soldCount:      ebayFull.soldCount || 0,
+      cheapestPrice:  ebayFull.cheapestPrice || 0,
+      cheapestTitle:  ebayFull.cheapestTitle || '',
+      prices:         ebayFull.prices || null,
+      topTitles:      ebayFull.topTitles || [],
+      pricing:        ebayFull.pricing || {},
+      category:       ebayFull.category || null,
+      priceSource:    ebayFull.priceSource || 'keyword', // 'gtin_exact' = most accurate
+    };
 
-    step = 'ebay_item';
-    stat('Loading eBay item ' + itemId + '...');
-    $('lp').textContent = 'Item: ' + itemId;
-    const itemRes = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
-    if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('res'); return; }
-    const json = await itemRes.json();
-    if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('res'); return; }
-
-    const d = json.data;
-    const title = d.title || '';
-    const price = d.price || 0;
-    const shippingCost = d.shipping_cost || 0;
-    const totalPrice = d.total_price || (price + shippingCost);
-    const brand = d.brand || '';
-
-    const prod = { name: title, brand: brand, found: !!title, source: 'ebay_url' };
-    if (prod.found) $('lp').textContent = prod.name.substring(0, 50);
-
-    let ebayFull = { found:false, product:null, prices:null, pricing:{}, topTitles: title?[title]:[], activeListings:0, soldCount:0, category:null, priceSource:'ebay_url' };
-    if (totalPrice > 0) {
-      ebayFull.found = true;
-      ebayFull.prices = { low: totalPrice, avg: totalPrice };
-      ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: totalPrice } };
-    }
-
-    await finishAnalyze(itemId, prod, ebayFull, step);
-  } catch(e) {
-    console.error('analyzeEbayUrl error:', e);
-    renderAnalyzeError(step, e, itemId||urlStr, {name:'',brand:'',found:false}, {found:false});
-  }
-}
-
-// ── Recalculates verdict/price/packSize/reason from res.ebay ──
-// Called after the initial scan AND after the user manually corrects the eBay price.
-function applyVerdict(res){
-  const ebay = res.ebay || {};
-  const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
-  const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
-  const _avg      = ebay?.prices?.avg || 0;
-  const _mBase    = _low || _soldAvg || _avg || 0;
-  const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
-  const _MIN      = 15;
-  let   _optPack  = 1;
-  if (_mBase > 0) {
-    for (const p of PACK_SIZES) {
-      if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
-    }
-    // Si ni con el paquete más grande (12) se llega al mínimo, usar el más grande disponible
-    if (_mBase * _optPack * 0.95 < _MIN) { _optPack = PACK_SIZES[PACK_SIZES.length-1]; }
-  }
-  const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
-  const _viable   = parseFloat(_bPrice) >= _MIN;
-
-  if (ebay.found && _mBase > 0) {
-    if (_viable) {
-      res.verdict  = 'SAVVY';
-      res.price    = _bPrice;
-      res.packSize = _optPack;
-      res.reason   = _soldCnt > 0
-        ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
-        : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
-    } else {
-      res.verdict = 'DWI';
-      res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
-    }
-  } else if (!ebay.found || _mBase === 0) {
-    res.verdict = 'DWI';
-    res.reason  = 'No se encontró precio activo en eBay. Sin datos de mercado.';
-  }
-}
-
-// ── Called when the user taps the "eBay Lowest" price box to correct it manually ──
-// e.g. after tapping "Ver precio real en eBay →" and seeing the actual listing price.
-// Uses a real numeric-only keyboard (inputmode="decimal") instead of prompt()'s
-// alphanumeric keyboard.
-function editLowPrice(){
-  if(!cur){ toast('⚠️ Scan a product first'); return; }
-  if(!cur.ebay) cur.ebay = { found:true, prices:{}, pricing:{} };
-  if(!cur.ebay.prices) cur.ebay.prices = {};
-  const currentLow = cur.ebay.prices.low || 0;
-
-  document.querySelectorAll('.price-edit-ov').forEach(e=>e.remove());
-
-  var ov = document.createElement('div');
-  ov.className = 'price-edit-ov';
-  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
-  ov.innerHTML = '<div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:320px">'
-    + '<div style="font-size:16px;font-weight:800;margin-bottom:4px;text-align:center">✏️ Precio real en eBay</div>'
-    + '<div style="font-size:12px;color:var(--mu);margin-bottom:16px;text-align:center">Item + envío, visto en el link de eBay</div>'
-    + '<div style="display:flex;align-items:center;gap:6px;background:var(--sf2);border:2px solid var(--ac);border-radius:12px;padding:10px 14px;margin-bottom:18px">'
-    + '<span style="font-size:22px;font-weight:800;color:var(--ac)">$</span>'
-    + '<input id="price-edit-input" type="text" inputmode="decimal" pattern="[0-9]*\\.?[0-9]*" '
-    + 'style="flex:1;background:none;border:none;outline:none;color:var(--tx);font-size:24px;font-weight:800;text-align:left" '
-    + 'value="' + (currentLow>0 ? currentLow.toFixed(2) : '') + '" placeholder="0.00" '
-    + 'onkeydown="if(event.key===\'Enter\')_confirmEditLowPrice();">'
-    + '</div>'
-    + '<button onclick="_confirmEditLowPrice()" style="width:100%;padding:13px;background:linear-gradient(135deg,#FF6B35,#E71D36);color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px;display:block">✅ Actualizar precio</button>'
-    + '<button onclick="document.querySelectorAll(\'.price-edit-ov\').forEach(e=>e.remove())" style="width:100%;padding:10px;background:none;border:1px solid #555;border-radius:10px;color:#888;cursor:pointer;display:block">Cancelar</button>'
-    + '</div>';
-  document.body.appendChild(ov);
-  setTimeout(function(){
-    var inp = document.getElementById('price-edit-input');
-    if(inp){ inp.focus(); inp.select(); }
-  }, 100);
-}
-
-function _confirmEditLowPrice(){
-  const inp = document.getElementById('price-edit-input');
-  if(!inp) return;
-  const val = parseFloat(String(inp.value).replace(/[^0-9.]/g,''));
-  if(isNaN(val) || val<=0){ toast('❌ Precio inválido'); return; }
-
-  cur.ebay.prices.low = val;
-  cur.ebay.found = true;
-  cur.ebay.priceSource = 'manual_override';
-  applyVerdict(cur);
-  renderResult(cur);
-  document.querySelectorAll('.price-edit-ov').forEach(e=>e.remove());
-  toast('✅ Precio actualizado — bundle recalculado');
-}
-
-
-// ── Shared processing: Claude title/category + verdict + render ──
-// Used by both analyze(upc) [barcode/manual UPC] and analyzeEbayUrl(urlStr) [paste eBay link]
-async function finishAnalyze(upc, prod, ebayFull, stepIn){
-  let step = stepIn || 'claude', res = null;
-  let ebay = {
-    found:          ebayFull.found,
-    activeListings: ebayFull.activeListings || 0,
-    soldCount:      ebayFull.soldCount || 0,
-    cheapestPrice:  ebayFull.cheapestPrice || 0,
-    cheapestTitle:  ebayFull.cheapestTitle || '',
-    prices:         ebayFull.prices || null,
-    topTitles:      ebayFull.topTitles || [],
-    pricing:        ebayFull.pricing || {},
-    category:       ebayFull.category || null,
-    priceSource:    ebayFull.priceSource || 'keyword',
-  };
-  try{
     step='claude';
     stat('Analyzing with Claude...');
     res=await callClaude(upc,prod,ebay);
@@ -2438,7 +1710,7 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
       res.brand = prod.brand||'';
     }
     if(!res.title||res.title.includes(upc)||res.title.toLowerCase().includes(' upc ')){
-      res.title = buildSmartTitle(prod, res.packSize||1) || res.title;
+      res.title = buildSmartTitle(prod, res.packSize||2) || res.title;
     }
     // Validar categoría — si Claude pone categoría padre o default, recalcular desde título
     const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725'];
@@ -2453,8 +1725,38 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     }
 
     // ── OVERRIDE VERDICT MATEMÁTICAMENTE ─────────────────────
-    res.ebay = ebay;
-    applyVerdict(res);
+    // Recalcular aquí en scope local de analyze()
+    const _low      = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
+    const _soldAvg  = ebay?.pricing?.sold?.avg || ebay?.pricing?.sold?.median || 0;
+    const _avg      = ebay?.prices?.avg || 0;
+    const _mBase    = _low || _soldAvg || _avg || 0;
+    const _soldCnt  = ebay?.pricing?.sold?.count || ebay?.soldCount || 0;
+    const _MIN      = 15;
+    let   _optPack  = 1;
+    if (_mBase > 0) {
+      for (let p = 1; p <= 12; p++) {
+        if (_mBase * p * 0.95 >= _MIN) { _optPack = p; break; }
+      }
+    }
+    const _bPrice   = (_mBase * _optPack * 0.95).toFixed(2);
+    const _viable   = parseFloat(_bPrice) >= _MIN;
+
+    if (ebay.found && _mBase > 0) {
+      if (_viable) {
+        res.verdict  = 'SAVVY';
+        res.price    = _bPrice;
+        res.packSize = _optPack;
+        res.reason   = _soldCnt > 0
+          ? `$${_low||_avg} más barato en eBay. ${_soldCnt} ventas en 90 días. Bundle de ${_optPack} a $${_bPrice}.`
+          : `Precio activo $${_low||_avg}. Bundle de ${_optPack} a $${_bPrice}. Sin ventas registradas — monitorear.`;
+      } else {
+        res.verdict = 'DWI';
+        res.reason  = `Precio en eBay $${_low||_avg}. Ni con 12 unidades ($${(_mBase*12*0.95).toFixed(2)}) llega a $${_MIN} mínimo.`;
+      }
+    } else if (!ebay.found || _mBase === 0) {
+      res.verdict = 'DWI';
+      res.reason  = 'No se encontró precio activo en eBay. Sin datos de mercado.';
+    }
 
     cur=res;
     cur._singleProductImg=null; // limpiar foto anterior al escanear nuevo producto
@@ -2477,41 +1779,38 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     }
   }catch(e){
     console.error('Error en paso ['+step+']:',e);
-    renderAnalyzeError(step, e, upc, prod, ebay);
+    // Mostrar error en pantalla (no solo toast)
+    screen('res');
+    $('resBody').innerHTML=`
+      <div class="badge dw">❌ ERROR</div>
+      <div class="card">
+        <div class="lbl">Failed step</div>
+        <div class="val" style="font-family:monospace;color:var(--dw)">${step}</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Error message</div>
+        <div class="val" style="font-size:12px;word-break:break-all">${e.message||'Error desconocido'}</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Scanned UPC</div>
+        <div class="val" style="font-family:monospace">${upc}</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Product found</div>
+        <div class="val">${prod.found?prod.name:'Not found in UPCitemdb'}</div>
+      </div>
+      <div class="card">
+        <div class="lbl">eBay Worker</div>
+        <div class="val">${ebay.found?'✅ '+ebay.activeListings+' listings':'❌ No data'}</div>
+      </div>
+      <div class="card">
+        <div class="lbl">Claude API Key</div>
+        <div class="val">${(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY)?'✅ Configurada':'❌ Not configured'}</div>
+      </div>
+      <button class="ag-btn" id="agBtn" style="margin-top:10px">🔄 TRY AGAIN</button>`;
+    $('agBtn').addEventListener('touchend',e=>{e.preventDefault();scanAnother();});
+    $('agBtn').addEventListener('click',scanAnother);
   }
-}
-
-function renderAnalyzeError(step, e, upc, prod, ebay){
-  screen('res');
-  $('resBody').innerHTML=`
-    <div class="badge dw">❌ ERROR</div>
-    <div class="card">
-      <div class="lbl">Failed step</div>
-      <div class="val" style="font-family:monospace;color:var(--dw)">${step}</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Error message</div>
-      <div class="val" style="font-size:12px;word-break:break-all">${e.message||'Error desconocido'}</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Scanned UPC / Item</div>
-      <div class="val" style="font-family:monospace">${upc}</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Product found</div>
-      <div class="val">${prod.found?prod.name:'Not found'}</div>
-    </div>
-    <div class="card">
-      <div class="lbl">eBay Data</div>
-      <div class="val">${ebay.found?'✅ '+ebay.activeListings+' listings':'❌ No data'}</div>
-    </div>
-    <div class="card">
-      <div class="lbl">Claude API Key</div>
-      <div class="val">${(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY)?'✅ Configurada':'❌ Not configured'}</div>
-    </div>
-    <button class="ag-btn" id="agBtn" style="margin-top:10px">🔄 TRY AGAIN</button>`;
-  $('agBtn').addEventListener('touchend',e=>{e.preventDefault();scanAnother();});
-  $('agBtn').addEventListener('click',scanAnother);
 }
 
 
@@ -2551,24 +1850,7 @@ async function addBulk() {
   }
 
   if (!cur) return;
-
-  // ── Si el reparto de inventario tiene unidades → agregar TODOS los
-  //    packs activos (los no excluidos con ✕), cada uno con su foto ──
-  var _splitInp = document.getElementById('split-total-input');
-  var _splitTotal = _splitInp ? (parseInt(String(_splitInp.value).replace(/\D/g,''), 10) || 0) : 0;
-  if (_splitTotal > 0) {
-    try {
-      var _splitOk = await addSplitPacksToCSV();
-      if (_splitOk) return; // packs agregados — listo
-    } catch(_se) {
-      console.error('addSplitPacksToCSV error:', _se);
-      if (window._psDebug) window._psDebug('\u274c Split error: ' + (_se.message || _se));
-      toast('\u274c Error agregando packs: ' + (_se.message || _se));
-      return;
-    }
-  }
-
-  const packs = cur._selectedPack || cur.packSize || 1;
+  const packs = cur._selectedPack || cur.packSize || 2;
   var skuEl   = document.getElementById('pack-sku-display');
   var titleEl = document.getElementById('pack-title-display');
   var usedTitle = cur._selectedTitle || (titleEl && titleEl.dataset.val) || rebuildTitle(cur.title||'', packs);
@@ -2576,7 +1858,7 @@ async function addBulk() {
   var usedPrice = cur._selectedPrice || parseFloat(cur.price) || 9.99;
   var shade     = (cur._shade   || '').trim();
   var expDate   = cur._expDate  || '';
-  var location  = cur.location  || '';
+  var location  = window.psCurrentProduct.location  || '';
 
   if (bulk.find(function(b){ return b.upc === cur.upc; })) {
     toast('⚠️ Already in CSV'); return;
@@ -2585,15 +1867,7 @@ async function addBulk() {
   // ── FOTO REQUERIDA — eBay rechaza listings sin foto ──────────
   // Verificar en múltiples lugares donde puede estar guardada la foto
   var bundlePreviewImg = document.querySelector('#bundle-preview img');
-  // Imágenes de pack generadas (front|back|extras) para el pack seleccionado
-  var _packImgs = (cur._packImages && cur._packImages[packs]) || null;
-  var _packPhotoUrl = _packImgs
-    ? [_packImgs.front, _packImgs.back].concat(_packImgs.extras || [])
-        .filter(function(u){ return u && String(u).indexOf('http') === 0; }).join('|')
-    : '';
   var hasPhoto = !!(
-    _packPhotoUrl ||
-    (cur._frontImg && cur._frontImg.length > 100) ||
     _lastBundleUrl ||
     (cur._bundleImg && cur._bundleImg.length > 100) ||
     cur._imgUrl ||
@@ -2625,8 +1899,7 @@ async function addBulk() {
   }
 
   // Incluir base64 también — _doAddBulk intentará subir a ImgBB
-  // Prioridad: imágenes de pack generadas (front|back|extras) > bundle > front base64
-  var photoUrl = _packPhotoUrl || _lastBundleUrl || cur._bundleImg || cur._imgUrl || cur._frontImg || '';
+  var photoUrl = _lastBundleUrl || cur._bundleImg || cur._imgUrl || '';
   await _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, location, packs, photoUrl);
 }
 
@@ -2684,697 +1957,15 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
 }
 
 // Render result
-// ── BULK SPLIT CALCULATOR — reparte el inventario de un embarque entre los
-// tamaños de paquete 1/3/6/12 según la demanda real de eBay (soldCount 90 días) ──
-const DEMAND_TIERS = {
-  alta:  { label:'🔥 Alta demanda',              min:20, weights:{1:0.60,3:0.20,6:0.12,12:0.08} },
-  media: { label:'📊 Demanda media',              min:5,  weights:{1:0.35,3:0.30,6:0.20,12:0.15} },
-  baja:  { label:'🐢 Demanda baja / mov. lento',  min:0,  weights:{1:0.15,3:0.20,6:0.30,12:0.35} }
-};
-const DEMAND_TIER_ORDER = ['alta','media','baja'];
-
-function getDemandTier(soldCount){
-  if (soldCount >= DEMAND_TIERS.alta.min)  return 'alta';
-  if (soldCount >= DEMAND_TIERS.media.min) return 'media';
-  return 'baja';
-}
-
-// Reparte totalUnits en múltiplos exactos de cada tamaño de paquete.
-// Procesa de paquete grande a chico; el sobrante siempre cae en pack de 1
-// (que nunca deja remanente, porque son unidades sueltas).
-function computeSplit(totalUnits, tierKey, activePacks){
-  const baseWeights = (DEMAND_TIERS[tierKey] || DEMAND_TIERS.media).weights;
-  // Packs activos (los que NO fueron excluidos con ✕)
-  const active = activePacks || {1:true,3:true,6:true,12:true};
-  const activeList = [1,3,6,12].filter(function(p){ return active[p]; });
-  const result = {1:{listings:0,units:0},3:{listings:0,units:0},6:{listings:0,units:0},12:{listings:0,units:0}};
-  result.leftover = 0;
-  if (!activeList.length || totalUnits <= 0) { result.leftover = totalUnits; return result; }
-
-  // Re-normalizar pesos solo entre los packs activos
-  var wSum = 0;
-  activeList.forEach(function(p){ wSum += baseWeights[p]; });
-  const weights = {};
-  activeList.forEach(function(p){ weights[p] = baseWeights[p] / wSum; });
-
-  // Repartir de mayor a menor; el pack activo más chico absorbe el resto
-  const desc = activeList.slice().sort(function(a,b){ return b-a; });
-  const smallest = desc[desc.length - 1];
-  let remaining = totalUnits;
-  desc.forEach(function(p){
-    if (p === smallest) return; // el más chico se calcula al final
-    const targetUnits = Math.round(totalUnits * weights[p]);
-    const listings = Math.floor(Math.min(targetUnits, remaining) / p);
-    const used = listings * p;
-    result[p] = { listings: listings, units: used };
-    remaining -= used;
-  });
-  // El pack activo más chico absorbe todo lo que queda
-  const smListings = Math.floor(remaining / smallest);
-  result[smallest] = { listings: smListings, units: smListings * smallest };
-  remaining -= smListings * smallest;
-  result.leftover = remaining; // solo >0 si el pack de 1 está excluido
-  return result;
-}
-
-function renderSplitCalculatorHTML(ebay){
-  const soldCount = (ebay && (ebay.soldCount || (ebay.pricing && ebay.pricing.sold && ebay.pricing.sold.count))) || 0;
-  const autoTier = getDemandTier(soldCount);
-  return `<div class="card" id="split-calc-card" data-auto-tier="${autoTier}" data-sold-count="${soldCount}">
-    <div class="lbl">🚛 Reparto de Inventario (Bulk Split)</div>
-    <div style="font-size:12px;color:var(--mu);margin-bottom:10px">¿Cuántas unidades llegaron de este producto? Sugerimos cómo repartirlas entre 1pk / 3pk / 6pk / 12pk según la demanda real en eBay.</div>
-    <div class="extra-field">
-      <div class="extra-label">Unidades totales en este envío</div>
-      <input class="extra-input" id="split-total-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="ej. 1000" oninput="updateSplitCalc()">
-    </div>
-    <div style="margin-top:8px;font-size:12px;color:var(--mu)">
-      Demanda detectada: <strong id="split-tier-label" style="color:var(--ac)"></strong>
-      (${soldCount} vendidos en 90 días)
-      — <span style="text-decoration:underline;cursor:pointer;color:var(--ac)" onclick="cycleSplitTier()">cambiar</span>
-    </div>
-    <div id="split-results" style="margin-top:12px"></div>
-  </div>`;
-}
-
-function updateSplitCalc(){
-  const inp = $('split-total-input');
-  const card = $('split-calc-card');
-  if(!inp || !card) return;
-  const total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
-  const tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
-  card.dataset.tier = tierKey;
-  const tierInfo = DEMAND_TIERS[tierKey];
-  const lbl = $('split-tier-label');
-  if (lbl) lbl.textContent = tierInfo.label;
-
-  const out = $('split-results');
-  if (!out) return;
-  if (total <= 0) {
-    out.innerHTML = '<div style="color:var(--mu);font-size:12px">Ingresa el total de unidades para ver el reparto sugerido.</div>';
-    return;
-  }
-
-  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
-  const active = window._splitActive;
-  const split = computeSplit(total, tierKey, active);
-  let rows = '';
-  [1,3,6,12].forEach(function(p){
-    const d = split[p];
-    const isOn = !!active[p];
-    if (isOn) {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
-        <div style="font-weight:800">${p}pk</div>
-        <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
-        <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
-        <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
-      </div>`;
-    } else {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);opacity:.45">
-        <div style="font-weight:800;text-decoration:line-through">${p}pk</div>
-        <div style="color:var(--mu);font-size:12px">excluido</div>
-        <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:8px;padding:5px 10px;color:var(--sv);font-size:12px;font-weight:800;cursor:pointer;margin-left:8px">↩ incluir</button>
-      </div>`;
-    }
-  });
-  const assigned = total - (split.leftover || 0);
-  let footer = `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${assigned} unidades`;
-  if (split.leftover > 0) footer += ` — <span style="color:#e74c3c">⚠️ ${split.leftover} sin asignar (incluye el 1pk para usarlas)</span>`;
-  footer += `</div>`;
-  // Nota: los packs activos se agregan con el botón "ADD TO CSV" de abajo
-  var activeCnt = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; }).length;
-  var note = activeCnt > 0
-    ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCnt + ' pack(s) activos con sus fotos</div>'
-    : '';
-  out.innerHTML = rows + footer + note;
-}
-
-// ── Excluir / incluir un pack del reparto ──────────────────────────────
-function toggleSplitPack(p){
-  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
-  window._splitActive[p] = !window._splitActive[p];
-  updateSplitCalc();
-}
-
-// ── Agregar todos los packs seleccionados al CSV (uno por pack) ────────
-async function addSplitPacksToCSV(){
-  if (!cur) { toast('⚠️ No product loaded'); return false; }
-  var inp = $('split-total-input');
-  var card = $('split-calc-card');
-  if (!inp || !card) return false;
-  var total = parseInt(String(inp.value).replace(/\D/g,''), 10) || 0;
-  if (total <= 0) { return false; }
-
-  var tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
-  var active = window._splitActive || {1:true,3:true,6:true,12:true};
-  var split = computeSplit(total, tierKey, active);
-  var shade = (cur._shade || '').trim();
-  var expDate = cur._expDate || '';
-  var location = cur.location || '';
-  var baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
-
-  var added = 0, skippedDup = 0;
-  var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
-
-  for (var i = 0; i < packsToAdd.length; i++) {
-    var p = packsToAdd[i];
-    var sku = makeSKU(cur.brand, cur.upc, p, cur.title);
-    var dup = false;
-    for (var j = 0; j < bulk.length; j++) { if (bulk[j].sku === sku) { dup = true; break; } }
-    if (dup) { skippedDup++; continue; }
-
-    var title = rebuildTitle(baseTitle, p, shade, expDate);
-    var price = calcBundlePrice(cur.ebay || {}, p);
-
-    // Foto: imagen de pack generada (front|back|extras), con fallback
-    var photoUrl = '';
-    if (cur._packImages && cur._packImages[p]) {
-      var pi = cur._packImages[p];
-      var parts = [pi.front, pi.back].concat(pi.extras || []);
-      var httpParts = [];
-      for (var k = 0; k < parts.length; k++) {
-        var u = parts[k];
-        if (u && String(u).indexOf('http') === 0) httpParts.push(u);
-      }
-      photoUrl = httpParts.join('|');
-      // Si el front quedó en base64 (no se subió), subirlo ahora
-      if (!photoUrl && pi.front && String(pi.front).indexOf('data:') === 0) {
-        var imgbbKey1 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
-        if (imgbbKey1) {
-          toast('📤 Subiendo foto del ' + p + 'pk...');
-          var up1 = await clUploadPhotoToImgBB(pi.front, imgbbKey1, 'pack-' + p);
-          if (up1) photoUrl = up1;
-        }
-      }
-    }
-    if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
-    if (photoUrl && String(photoUrl).indexOf('data:') === 0) {
-      var imgbbKey2 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
-      if (imgbbKey2) {
-        toast('📤 Subiendo foto del ' + p + 'pk...');
-        var up2 = await clUploadPhotoToImgBB(photoUrl, imgbbKey2, 'pack-' + p);
-        photoUrl = up2 || '';
-      } else { photoUrl = ''; }
-    }
-
-    bulk.push({
-      sku:         sku,
-      title:       title,
-      price:       price,
-      shade:       shade,
-      expDate:     expDate,
-      upc:         cur.upc || '',
-      brand:       cur.brand || 'Generic',
-      category:    cur.category || '26395',
-      description: descToEbayHTML(cur._description) || cur.description || '',
-      location:    location,
-      packs:       p,
-      quantity:    split[p].listings,
-      photo:       photoUrl,
-      bundleImg:   photoUrl,
-      scannedBy:   SAVVY_CURRENT_USER || 'unknown'
-    });
-    added++;
-  }
-
-  saveBulkToStorage();
-  updateFAB();
-  if (added > 0) {
-    toast('✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : ''));
-    return true;
-  } else if (skippedDup > 0) {
-    toast('⚠️ Esos packs ya están en el CSV');
-    return true;
-  }
-  return false;
-}
-
-function cycleSplitTier(){
-  const card = $('split-calc-card');
-  if(!card) return;
-  const current = card.dataset.tier || card.dataset.autoTier || 'media';
-  const idx = DEMAND_TIER_ORDER.indexOf(current);
-  const next = DEMAND_TIER_ORDER[(idx+1) % DEMAND_TIER_ORDER.length];
-  card.dataset.tier = next;
-  updateSplitCalc();
-}
-
-
-// ── SELLBRITE + SHIPSTATION — ¿ya existe este producto? ¿dónde está? ──
-// Portado del módulo Inventory Manager (mismo Railway backend, endpoints
-// /sb/search y /ss/location).
-async function psCheckSellbrite(upc){
-  const statusEl = $('ps-sellbrite-status');
-  if(!statusEl) return;
-  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
-  try{
-    const upcClean = String(upc).replace(/\D/g,'');
-    const res = await fetch(RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean));
-    const data = await res.json();
-
-    if(res.status === 404 || data.status === 'not_found' || !data.products || !data.products.length){
-      statusEl.innerHTML = '🆕 <strong style="color:#ff9800">No existe en Sellbrite todavía</strong>';
-      return;
-    }
-
-    const products = data.products;
-    _psSellbriteProducts = {}; // guardar info para el update por SKU
-    let html = '📦 <strong style="color:#00e676">En Sellbrite: ' + products.length + ' listado' + (products.length>1?'s':'') + '</strong>';
-    products.forEach(function(p, idx){
-      const inv = p.inventory || {};
-      const totalQty = inv.total_quantity || 0;
-      const totalOnHand = inv.total_on_hand || 0;
-      const wh = (inv.channels||[])[0]?.warehouse_uuid || '';
-      const inputId = 'ps-sbqty-' + idx;
-      _psSellbriteProducts[idx] = { sku: p.sku, name: p.name || p.sku, upc: upcClean, warehouse_uuid: wh, inputId: inputId };
-
-      html += '<div style="margin-top:8px;padding:8px;background:var(--sf);border-radius:8px;border-left:2px solid var(--bd)">'
-        + '<div><span style="font-family:monospace;color:var(--ac)">' + esc(p.sku||'—') + '</span>'
-        + ' — <span id="ps-sbqty-avail-' + idx + '">' + totalQty + '</span> disponibles</div>'
-        + '<span id="ps-ssloc-' + idx + '" style="display:block;font-size:11px;color:var(--mu);margin:4px 0">📍 Consultando ShipStation...</span>'
-        + '<div style="display:flex;align-items:center;gap:6px;margin-top:6px">'
-        + '<button onclick="psAdjustSbQty(\'' + inputId + '\',-1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">−</button>'
-        + '<input id="' + inputId + '" type="number" inputmode="numeric" value="' + totalOnHand + '" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:15px;text-align:center">'
-        + '<button onclick="psAdjustSbQty(\'' + inputId + '\',1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">+</button>'
-        + '</div>'
-        + '<button id="ps-sbqty-btn-' + idx + '" onclick="psUpdateSellbriteInventory(' + idx + ')" style="width:100%;margin-top:6px;padding:10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✅ Actualizar inventario</button>'
-        + '<div id="ps-sbqty-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>'
-        + '</div>';
-    });
-    statusEl.innerHTML = html;
-
-    // Consultar la ubicación en ShipStation para cada SKU encontrado (en paralelo)
-    products.forEach(function(p, idx){ psCheckShipStationLocation(p.sku, idx); });
-  }catch(err){
-    console.error('psCheckSellbrite error:', err);
-    statusEl.innerHTML = '<span style="color:var(--mu)">⚠️ No se pudo consultar Sellbrite</span>';
-  }
-}
-
-async function psCheckShipStationLocation(sku, idx){
-  const el = $('ps-ssloc-' + idx);
-  if(!el) return;
-  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
-  try{
-    const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
-    const data = await res.json();
-    const loc = data.exists ? (data.warehouse_location || '') : '';
-    if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"/borrar
-
-    // Cada ubicación (separada por coma) se muestra como fichita con ✕ para borrarla individualmente
-    let statusLine;
-    if (loc) {
-      const parts = loc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
-      let chips = parts.map(function(part, pi){
-        return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:14px;padding:3px 6px 3px 10px;margin:2px 3px 2px 0">'
-          + '<strong style="color:#00e676;font-size:12px">' + esc(part) + '</strong>'
-          + '<button onclick="psRemoveLocation(' + idx + ',' + pi + ')" style="width:18px;height:18px;background:rgba(255,82,82,.25);color:#ff8a80;border:none;border-radius:50%;font-size:11px;line-height:1;cursor:pointer;padding:0">✕</button>'
-          + '</span>';
-      }).join('');
-      statusLine = '📍 Ubicaciones: <span style="display:inline">' + chips + '</span>';
-    } else {
-      statusLine = data.exists
-        ? '📍 <span style="color:#ffab00">En ShipStation, sin ubicación asignada</span>'
-        : '📍 <span style="color:#ff9800">No está en ShipStation todavía</span>';
-    }
-
-    const locInputId = 'ps-ssloc-input-' + idx;
-    // Botones según haya o no ubicación existente:
-    // - Sin ubicación: solo "📍 Guardar"
-    // - Con ubicación: "➕ Añadir" (agrega sin borrar) y "🔄 Reemplazar"
-    const buttonsHtml = loc
-      ? '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'append\')" style="padding:8px 10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">➕ Añadir</button>'
-        + '<button id="ps-ssloc-btn-rep-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'replace\')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">🔄 Reemplazar</button>'
-      : '<button id="ps-ssloc-btn-' + idx + '" onclick="psSaveShipStationLocation(' + idx + ',\'replace\')" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap">📍 Guardar</button>';
-
-    el.innerHTML = '<span id="ps-ssloc-line-' + idx + '">' + statusLine + '</span>'
-      + '<div style="display:flex;gap:6px;margin-top:6px">'
-      + '<input id="' + locInputId + '" type="text" placeholder="' + (loc ? 'Nueva ubicación adicional...' : 'Ej: A-12') + '" autocapitalize="characters" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:13px">'
-      + '<button onclick="psScanLocation(' + idx + ')" style="padding:8px 10px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:16px;cursor:pointer">📷</button>'
-      + buttonsHtml
-      + '</div>'
-      + '<div id="ps-ssloc-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>';
-  }catch(err){
-    console.error('psCheckShipStationLocation error:', err);
-    el.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ubicación</span>';
-  }
-}
-
-// ── Escanear la ubicación con la cámara (código de barras del anaquel/caja) ──
-// Reutiliza el mismo escáner (savvyStartScan) que ya usa el resto de la app.
-function psScanLocation(idx){
-  document.querySelectorAll('.scr').forEach(function(s){ s.classList.remove('on'); });
-  var camScreen = document.getElementById('scr-cam');
-  if(camScreen) camScreen.classList.add('on');
-  setTimeout(function(){
-    if(typeof savvyStartScan !== 'function'){
-      console.error('❌ savvyStartScan not defined!');
-      toast('❌ Error: escáner no disponible');
-      return;
-    }
-    savvyStartScan('qr-video', function(txt){
-      if(typeof savvyStopScan === 'function') savvyStopScan('qr-video');
-      document.querySelectorAll('.scr').forEach(function(s){ s.classList.remove('on'); });
-      var resScreen = document.getElementById('scr-res');
-      if(resScreen) resScreen.classList.add('on');
-      var input = document.getElementById('ps-ssloc-input-' + idx);
-      var value = String(txt||'').trim();
-      if(input) input.value = value;
-      toast('📷 Ubicación escaneada: ' + value);
-    });
-  }, 100);
-}
-
-async function psSaveShipStationLocation(idx, mode){
-  mode = mode || 'replace';
-  console.log('📍 psSaveShipStationLocation llamado, idx=' + idx + ', mode=' + mode);
-  const p = (_psSellbriteProducts || {})[idx];
-  const confirmEl = $('ps-ssloc-confirm-' + idx);
-  const btnEl = $('ps-ssloc-btn-' + idx);
-  if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
-  const input = $('ps-ssloc-input-' + idx);
-  const newLoc = (input && input.value || '').trim();
-  if(!newLoc){ toast('⚠️ Escribe o escanea una ubicación primero'); return; }
-
-  // ── Modo AÑADIR: combinar con la ubicación existente sin borrarla ──
-  let location = newLoc;
-  if(mode === 'append' && p.currentLoc){
-    // Evitar duplicados exactos (ignorando mayúsculas/espacios)
-    const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); });
-    const already = parts.some(function(s){ return s.toLowerCase() === newLoc.toLowerCase(); });
-    if(already){ toast('⚠️ Esa ubicación ya está en la lista'); return; }
-    location = p.currentLoc + ', ' + newLoc;
-  }
-  // ShipStation limita warehouseLocation a ~100 caracteres
-  if(location.length > 100){
-    toast('⚠️ Demasiadas ubicaciones (límite ~100 caracteres). Considera reemplazar.');
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ El texto combinado excede el límite de ShipStation (' + location.length + '/100 caracteres)</span>';
-    return;
-  }
-
-  await psPersistLocation(idx, location);
-}
-
-// ── Borrar UNA ubicación individual (la ✕ de cada fichita) ──
-async function psRemoveLocation(idx, partIndex){
-  const p = (_psSellbriteProducts || {})[idx];
-  if(!p || !p.currentLoc){ toast('⚠️ No hay ubicaciones cargadas'); return; }
-  const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
-  if(partIndex < 0 || partIndex >= parts.length) return;
-  const removed = parts.splice(partIndex, 1)[0];
-  const newLocation = parts.join(', '); // puede quedar vacío = borrar todas
-  console.log('🗑️ Borrando ubicación "' + removed + '" → nueva lista: "' + newLocation + '"');
-  toast('🗑️ Quitando ' + removed + '...');
-  await psPersistLocation(idx, newLocation);
-}
-
-// ── Guardado compartido: escribe el texto de ubicación (o vacío para borrar)
-// en AMBOS sistemas: Sellbrite (bin_location) + ShipStation (pick ticket) ──
-async function psPersistLocation(idx, location){
-  const p = (_psSellbriteProducts || {})[idx];
-  if(!p) return;
-  const confirmEl = $('ps-ssloc-confirm-' + idx);
-  const btnEl = $('ps-ssloc-btn-' + idx);
-  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
-
-  const btnRep = $('ps-ssloc-btn-rep-' + idx);
-  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳...'; }
-  if(btnRep){ btnRep.disabled = true; }
-
-  // ── ESTRATEGIA DOBLE ──
-  // 1. Sellbrite (bin_location) — SIEMPRE funciona, fuente de verdad desde el día uno
-  // 2. ShipStation (warehouseLocation) — es lo que sale en el PICK TICKET; funciona
-  //    solo si el producto ya existe ahí (ShipStation no permite crear por API)
-  let sbOk = false, ssOk = false, ssErr = '', sbBinCleared = null;
-
-  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 1/2 Guardando en Sellbrite (bin location)...</span>';
-  try{
-    const sbRes = await fetch(RAILWAY_SB + '/sb/update-inventory', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        sku: p.sku,
-        warehouse_uuid: p.warehouse_uuid || '',
-        bin_location: location
-      })
-    });
-    const sbResult = await sbRes.json();
-    console.log('📥 Sellbrite bin_location:', sbRes.status, JSON.stringify(sbResult).substring(0,200));
-    sbOk = sbRes.ok && sbResult.status !== 'error';
-    if('bin_cleared' in sbResult) sbBinCleared = sbResult.bin_cleared; // true/false/null
-  }catch(e){ console.error('Sellbrite bin_location error:', e); }
-
-  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 2/2 Guardando en ShipStation (pick ticket)...</span>';
-  try{
-    const res = await fetch(RAILWAY_SB + '/ss/create-product', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        sku: p.sku,
-        name: p.name || p.sku,
-        warehouse_location: location,
-        upc: p.upc || ''
-      })
-    });
-    const result = await res.json();
-    console.log('📥 ShipStation:', res.status, JSON.stringify(result).substring(0,200));
-    ssOk = res.ok && result.status !== 'error';
-    if(!ssOk) ssErr = result.error || ('HTTP ' + res.status);
-  }catch(e){ ssErr = e.message || String(e); console.error('ShipStation error:', e); }
-
-  // ── Resultado combinado, claro y permanente ──
-  const isClear = !location;
-  if(sbOk && ssOk){
-    toast(isClear ? '🗑️ Ubicación borrada' : '✅ Ubicación guardada en Sellbrite y ShipStation', 3000);
-    await psCheckShipStationLocation(p.sku, idx); // refresca — las fichitas verdes son la confirmación
-    const c2 = $('ps-ssloc-confirm-' + idx);
-    if(c2){
-      if(isClear && sbBinCleared === false){
-        c2.innerHTML = '<span style="color:#ffab00;font-weight:700">🗑️ Borrada en ShipStation ✅ (pick ticket limpio)<br>⚠️ Sellbrite rechazó el borrado por API — quítala manualmente en app.sellbrite.com si te importa que quede limpio ahí</span>';
-      } else if(isClear){
-        c2.innerHTML = '<span style="color:#00e676;font-weight:700">🗑️ Ubicación(es) borrada(s) en Sellbrite + ShipStation</span>';
-      } else {
-        c2.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Guardada en Sellbrite + ShipStation (saldrá en el pick ticket)</span>';
-      }
-    }
-  } else if(sbOk && !ssOk){
-    toast('✅ Guardada en Sellbrite (ShipStation pendiente)', 3500);
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ Guardada en Sellbrite (bin location).<br>⚠️ ShipStation: ' + esc(ssErr) + '<br><span style="font-weight:400;font-size:11px;color:var(--mu)">Cuando llegue la primera orden de este SKU, ShipStation creará el producto y podrás guardar la ubicación ahí (o se puede automatizar después).</span></span>';
-  } else if(!sbOk && ssOk){
-    toast('✅ Guardada en ShipStation (Sellbrite falló)', 3500);
-    await psCheckShipStationLocation(p.sku, idx);
-    const c3 = $('ps-ssloc-confirm-' + idx);
-    if(c3) c3.innerHTML = '<span style="color:#ffab00;font-weight:700">✅ ShipStation OK · ⚠️ Sellbrite no se pudo actualizar</span>';
-  } else {
-    toast('❌ No se pudo guardar la ubicación');
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ Falló en ambos sistemas. ShipStation: ' + esc(ssErr||'—') + '</span>';
-  }
-  const btnEl2 = $('ps-ssloc-btn-' + idx);
-  if(btnEl2){ btnEl2.disabled = false; btnEl2.textContent = (p.currentLoc ? '➕ Añadir' : '📍 Guardar'); }
-  const btnRep2 = $('ps-ssloc-btn-rep-' + idx);
-  if(btnRep2){ btnRep2.disabled = false; }
-}
-
-function psAdjustSbQty(inputId, delta){
-  const input = $(inputId);
-  if(!input) return;
-  const val = parseInt(input.value||'0', 10) + delta;
-  input.value = Math.max(0, val);
-}
-
-async function psUpdateSellbriteInventory(idx){
-  console.log('✅ psUpdateSellbriteInventory llamado, idx=' + idx);
-  const p = (_psSellbriteProducts || {})[idx];
-  const confirmEl = $('ps-sbqty-confirm-' + idx);
-  const btnEl = $('ps-sbqty-btn-' + idx);
-  if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
-  const input = $(p.inputId);
-  const newQty = parseInt((input && input.value) || '0', 10);
-  const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
-  console.log('📤 Enviando a /sb/update-inventory:', JSON.stringify({sku:p.sku, warehouse_uuid:p.warehouse_uuid, quantity:newQty}));
-
-  if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳ Actualizando...'; }
-  if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 Enviando a Sellbrite...</span>';
-  try{
-    const res = await fetch(RAILWAY_SB + '/sb/update-inventory', {
-      method: 'POST',
-      headers: {'Content-Type': 'application/json'},
-      body: JSON.stringify({
-        sku: p.sku,
-        warehouse_uuid: p.warehouse_uuid || '',
-        quantity: newQty
-      })
-    });
-    console.log('📥 Respuesta /sb/update-inventory, status:', res.status);
-    const result = await res.json();
-    console.log('📥 Body:', JSON.stringify(result));
-    if(!res.ok || result.status === 'error'){
-      throw new Error(result.error || ('HTTP ' + res.status));
-    }
-    // Confirmación VISIBLE y PERMANENTE dentro de la tarjeta (no solo un toast que desaparece)
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Confirmado por Sellbrite — ahora en ' + newQty + ' unidades</span>';
-    const availSpan = $('ps-sbqty-avail-' + idx);
-    if(availSpan) availSpan.textContent = newQty; // reflejar el nuevo número al instante
-    toast('✅ ' + p.sku + ' actualizado a ' + newQty + ' unidades', 3000);
-  }catch(err){
-    console.error('❌ psUpdateSellbriteInventory error:', err.message, err);
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ No se pudo actualizar: ' + esc(err.message||String(err)) + '</span>';
-    toast('❌ Error al actualizar: ' + (err.message||err));
-  }finally{
-    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
-  }
-}
-
-// ── DESCRIPCIÓN eBay generada automáticamente con Claude ──────────────
-// Se llama automáticamente al renderizar el resultado.
-// Formato fijo pedido por Manuel:
-//   1. Introducción del producto
-//   2. Lista de beneficios con bullets
-//   3. Contenido detallado del paquete
-//   4. Disclaimer final (siempre igual, incluido en la descripción)
-const PS_DESC_DISCLAIMER = 'This multi-pack bundle was packaged by our store for your convenience. Each item is brand new, factory-sealed, and 100% authentic, made by the original manufacturer. Retail packaging may vary.';
-
-async function psAutoGenerateDescription(){
-  if(!cur){ return; }
-  const out = $('ps-desc-result');
-  if(!out){ return; }
-  const key = (localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY);
-  if(!key){ console.warn('Claude API key no configurada'); return; }
-
-  const packs = cur.packSize || 1;
-  const title = cur.title || cur.prod && cur.prod.title || '';
-  const brand = cur.brand || '';
-  const prodTitle = (cur.prod && cur.prod.title) || title;
-  const category = cur.categoryName || 'Health & Beauty';
-
-  const prompt = `Write an eBay product description in ENGLISH for this listing:
-
-Product: ${prodTitle}
-Brand: ${brand}
-Pack size: ${packs} unit${packs>1?'s':''} (bundle of ${packs})
-Category: ${category}
-eBay title: ${title}
-
-STRICT FORMAT — respond ONLY with valid JSON (no markdown, no backticks):
-{
- "intro": "2-3 sentence engaging product introduction paragraph",
- "benefits": ["benefit 1", "benefit 2", "benefit 3", "benefit 4", "benefit 5"],
- "package_contents": "Detailed description of what the package includes: exactly ${packs} unit(s) of the product, with size/count per unit if known"
-}
-
-Rules:
-- ENGLISH only
-- Do NOT invent medical claims; use safe marketing language ("supports", "helps promote")
-- Do NOT mention UPC or barcodes
-- NEVER use the words "assembled", "assembly", or anything implying WE manufacture the product — we only bundle factory-sealed retail products together
-- In package_contents, reinforce trust: items are brand new, factory-sealed, from the original manufacturer
-- benefits: 4 to 6 bullets, each under 12 words
-- package_contents must clearly state the quantity: ${packs} unit(s)`;
-
-  try{
-    const ctrl = new AbortController();
-    const timer = setTimeout(function(){ ctrl.abort(); }, 20000);
-    const r = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
-      signal: ctrl.signal,
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
-      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:800,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
-    });
-    clearTimeout(timer);
-    if(!r.ok) throw new Error('Claude HTTP ' + r.status);
-    const d = await r.json();
-    const txt = (d.content&&d.content[0]&&d.content[0].text||'').replace(/```json|```/g,'').trim();
-    const parsed = JSON.parse(txt);
-
-    cur._description = {
-      intro: parsed.intro || '',
-      benefits: Array.isArray(parsed.benefits) ? parsed.benefits : [],
-      package_contents: parsed.package_contents || '',
-      disclaimer: PS_DESC_DISCLAIMER
-    };
-    if(out) out.innerHTML = renderDescriptionHTML(cur._description);
-  }catch(err){
-    console.error('psAutoGenerateDescription error:', err);
-    if(out) out.innerHTML = '<div style="color:#ff9800;font-size:12px;padding:12px;background:var(--sf2);border-radius:8px">' + (err.name==='AbortError'?'Claude tardó demasiado':'⚠️ No se pudo generar descripción') + '</div>';
-  }
-}
-
-// Convierte la descripción estructurada en HTML para mostrar + copiar
-function renderDescriptionHTML(desc){
-  if(!desc) return '';
-  let h = '<div style="background:var(--sf2);border-radius:10px;padding:12px;font-size:13px;line-height:1.6">';
-  h += '<div style="margin-bottom:10px">' + esc(desc.intro) + '</div>';
-  h += '<div style="font-weight:800;font-size:11px;color:var(--mu);margin-bottom:4px">BENEFITS:</div><ul style="margin:0 0 10px 18px;padding:0">';
-  desc.benefits.forEach(function(b){ h += '<li style="margin-bottom:3px">' + esc(b) + '</li>'; });
-  h += '</ul>';
-  h += '<div style="font-weight:800;font-size:11px;color:var(--mu);margin-bottom:4px">PACKAGE CONTENTS:</div>';
-  h += '<div style="margin-bottom:10px">' + esc(desc.package_contents) + '</div>';
-  h += '<div style="font-size:11px;color:var(--mu);font-style:italic;border-top:1px solid var(--bd);padding-top:8px">' + esc(desc.disclaimer) + '</div>';
-  h += '</div>';
-  return h;
-}
-
 function renderResult(r){
   if(!r)return;
   const sv=r.verdict==='SAVVY';
   const ebay=r.ebay||{};
   const low =ebay.prices&&ebay.prices.low||0;
   const avg =ebay.prices&&ebay.prices.avg||0;
-  const packs=r.packSize||1;
+  const packs=r.packSize||2;
   const sku=makeSKU(r.brand,r.upc,packs,r.title);
   const bundlePrice=calcBundlePrice(ebay,packs);
-
-  // ── COMPACT SUMMARY CARD (same structure as Clothing & Shoes "✅ Found!") ──
-  const bcResult = $('ps-barcode-result');
-  if (bcResult) {
-    const sourceLabel = ebay.priceSource === 'manual_override' ? 'Manual' : (ebay.priceSource || '');
-    bcResult.innerHTML = `
-      <div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found! ${esc(sourceLabel)}</div>
-      <div>🏷️ <strong>Brand:</strong> ${esc(r.brand||'—')}</div>
-      <div style="margin:4px 0">📦 ${esc((r.title||'').substring(0,80))}${(r.title||'').length>80?'...':''}</div>
-      ${low>0 ? `
-        <div>💰 <strong>Precio:</strong> <strong style="color:#00e676">$${low.toFixed(2)} total</strong> (item + envío)</div>
-        <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
-      ` : '<div style="color:var(--mu)">💰 Sin precio disponible — toca "eBay Lowest" abajo para ingresarlo manual</div>'}
-      <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${esc(r.categoryName||'Other')}</div>
-      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>
-      <div id="ps-sellbrite-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;color:var(--mu)">🔍 Buscando en Sellbrite...</div>`;
-    bcResult.style.display = 'block';
-    if (r.upc) psCheckSellbrite(r.upc);
-  }
-
-  // ── VER PRECIO REAL EN eBay + MARKET DATA — juntos, debajo del scanner ──
-  const marketSlot = $('ps-market-data-slot');
-  if (marketSlot) {
-    let mh = '';
-    if (r.upc) {
-      const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(r.upc)
-        + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
-      mh += `<a href="${ebaySearchUrl}" target="_blank" rel="noopener"
-        style="display:block;margin-bottom:8px;background:#0064d2;border-radius:10px;padding:12px 14px;
-               color:#fff;font-weight:700;font-size:14px;text-decoration:none;text-align:center">
-        🔍 Ver precio real en eBay →
-      </a>`;
-    }
-    if (ebay.activeListings > 0) {
-      const soldTop = ebay.pricing && ebay.pricing.sold;
-      mh += `<div style="background:var(--sf2);border-radius:10px;padding:10px;font-size:12px;line-height:1.8">
-        🏷 <strong>Active BIN:</strong> ${ebay.activeListings}
-        &nbsp;|&nbsp; Min: <strong>${fmt(low)}</strong> · Avg: <strong>${fmt(avg)}</strong> · Max: ${fmt(ebay.prices&&ebay.prices.high)}
-        ${soldTop?`<br>✅ <strong>Sold (90d):</strong> ${soldTop.count} · Avg: ${fmt(soldTop.avg)}`:''}
-      </div>`;
-    }
-    mh += `<div class="price-row" style="margin-top:8px">
-      <div class="pc editable" onclick="editLowPrice()"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
-      <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
-      <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
-    </div>`;
-    marketSlot.innerHTML = mh;
-  }
 
   let h=`<div class="badge ${sv?'sv':'dw'}">${sv?'✅ SAVVY':'❌ DWI'}</div>`;
 
@@ -3395,19 +1986,12 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
-  // ── 3.5 DESCRIPCIÓN eBay (generada automáticamente con Claude) ──────────────
-  h+=`<div class="card" style="border-left:3px solid #7c4dff">
-    <div class="lbl" style="color:#b388ff">📄 eBay Description</div>
-    <div id="ps-desc-result" style="margin-top:8px">${cur&&cur._description?renderDescriptionHTML(cur._description):'<div style="text-align:center;padding:12px"><div class="sp" style="width:20px;height:20px;margin:0 auto 6px"></div><div style="font-size:11px;color:var(--mu)">Generando descripción...</div></div>'}</div>
-  </div>`;
-
-  // (El botón "Ver precio real en eBay" y el Market Data ahora viven arriba,
-  // en #ps-market-data-slot, justo debajo de "paste eBay listing URL")
-
   // ── 4. PACK SELECTOR ─────────────────────────────────────────
-  // (Los 3 cuadros de precio -Lowest/Avg/Bundle- ahora viven arriba,
-  // en #ps-market-data-slot, junto con Active BIN — ver más arriba)
-  h+=
+  h+=`<div class="price-row">
+    <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low">${low>0?fmt(low):'—'}</div></div>
+    <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg">${avg>0?fmt(avg):'—'}</div></div>
+    <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" id="pack-bundle-price">${fmt(bundlePrice)}</div></div>
+  </div>`+
   (function(){
     var _cb=low||avg||0;
     var h2='<div class="card"><div class="lbl">📦 SELECT PACK SIZE</div>';
@@ -3437,53 +2021,24 @@ function renderResult(r){
     return h2;
   }());
 
-  // ── 4b. BULK SPLIT CALCULATOR — reparte unidades del camión entre 1/3/6/12
-  // según la demanda real de eBay (soldCount de los últimos 90 días) ──
-  h+=renderSplitCalculatorHTML(ebay);
-
-  // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
-  const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
-  const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+  // ── 3. BUNDLE PHOTO GENERATOR ────────────────────────────────
   h+=`<div class="bundle-photo-card">
-    <div class="lbl">📸 Front &amp; Back Photos (background removed)</div>
-    <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos <strong>obligatorias</strong> del producto. Se les quita el fondo automáticamente.</div>
-    <div style="display:flex;gap:10px">
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">FRONT${r._frontImg?' ✅':''}</div>
-        <div id="ps-slot-front" onclick="psCapturePhoto('front')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${frontThumb}</div>
-      </div>
-      <div style="flex:1">
-        <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">BACK${r._backImg?' ✅':''}</div>
-        <div id="ps-slot-back" onclick="psCapturePhoto('back')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
-      </div>
+    <div class="lbl">📸 LISTING PHOTO — Bundle Image Generator</div>
+    <div style="background:rgba(255,171,0,.1);border:1px solid rgba(255,171,0,.4);border-radius:8px;padding:8px 12px;margin:6px 0 10px;font-size:11px;line-height:1.6">
+      💡 <strong>Background tip for best results:</strong><br>
+      🖤 Light/white products (vitamins, lotion) → use <strong>BLACK or DARK background</strong><br>
+      ⬜ Dark products (dark bottles, sprays) → use <strong>WHITE or LIGHT background</strong>
     </div>
-    <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
-      <div style="font-size:11px;color:var(--mu);margin-bottom:2px">Fotos extra (opcional) — mismo proceso, se usan como fotos secundarias:</div>
-      <div id="ps-extra-photos-wrap"></div>
+    <div style="display:flex;flex-direction:column;gap:8px;margin-bottom:4px">
+      <button id="bundle-gen-btn" onclick="pgTakePhoto()" style="width:100%;background:linear-gradient(135deg,#FF6B35,#E71D36);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
+        📦 Generate Pack with AI (Remove Background + Bundle)
+      </button>
+      <button onclick="openReadyPhoto()" style="width:100%;background:#1a472a;border:2px solid #2ecc71;border-radius:10px;padding:13px;color:#2ecc71;font-size:14px;font-weight:800;cursor:pointer">
+        📦 Generate Pack with AI (Quitar Fondo + Bundle)
+      </button>
     </div>
-  </div>`;
-
-  // ── 3b. PACK IMAGE GENERATOR — Paso 2: 1/3/6/12 con distintivo ──
-  const hasPhotos = !!(r._frontImg && r._backImg);
-  h+=`<div class="bundle-photo-card">
-    <div class="lbl">🎁 Generar Imágenes de Pack (1/3/6/12)</div>
-    <div id="ps-pack-gen-hint" style="font-size:11px;color:var(--mu);margin:4px 0 10px">
-      ${hasPhotos
-        ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
-        : '⚠️ Primero toma las fotos FRONT y BACK de arriba.'}
-    </div>
-    <button id="ps-gen-packs-btn"
-      onclick="window._psDebug('onclick disparado');psGenerateAllPacks()"
-      ontouchend="event.preventDefault();window._psDebug('ontouchend disparado');psGenerateAllPacks()"
-      style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
-      🎁 Generar Imágenes de Pack (1/3/6/12)
-    </button>
-    <div id="ps-pack-gen-status" style="font-size:11px;color:var(--mu);margin-top:6px;text-align:center"></div>
-    <div id="ps-pack-images-preview"></div>
-    <div style="margin-top:10px;background:#000;border-radius:8px;padding:8px;max-height:140px;overflow-y:auto">
-      <div style="font-size:9px;color:#666;margin-bottom:4px">🐛 DEBUG LOG (siempre visible):</div>
-      <div id="ps-debug-log" style="font-family:monospace;font-size:10px;color:#0f0;white-space:pre-wrap;word-break:break-all">Esperando acción...</div>
-    </div>
+    <div id="bundle-generating" class="bundle-generating" style="display:none">⏳ Processing...</div>
+    <div id="bundle-preview" class="bundle-preview" style="display:none"></div>
   </div>`;
 
   // ── 5. UPC MATCH BADGE ───────────────────────────────────────
@@ -3495,7 +2050,18 @@ function renderResult(r){
     :'<span style="background:rgba(255,107,0,.15);color:var(--ac);font-size:11px;padding:3px 10px;border-radius:10px">🔍 KEYWORD ONLY</span>';
   h+=`<div style="text-align:center;margin:8px 0">${srcBadge}</div>`;
 
-  // ── 6. (Market Data ahora vive en la tarjeta compacta de arriba, junto a Brand/Precio/SKU) ──
+  // ── 6. EBAY MARKET DATA ──────────────────────────────────────
+  if(ebay.activeListings>0){
+    const sold=ebay.pricing&&ebay.pricing.sold;
+    h+=`<div class="card"><div class="lbl">eBay — Market Data (NEW, item+ship)</div>
+      <div class="val" style="font-size:13px;line-height:2">
+        🏷 Active BIN: <strong>${ebay.activeListings}</strong><br>
+        💰 Min: <strong>${fmt(low)}</strong> | Avg: <strong>${fmt(avg)}</strong> | Max: ${fmt(ebay.prices&&ebay.prices.high)}
+        ${sold?`<br>✅ Sold (90d): <strong>${sold.count}</strong> | Avg: <strong>${fmt(sold.avg)}</strong>`:''}
+      </div>
+      ${src!=='gtin_exact'?`<div style="font-size:11px;color:var(--mu);margin-top:4px">⚠️ Keyword prices — verify on eBay</div>`:''}
+    </div>`;
+  }
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
@@ -3503,7 +2069,7 @@ function renderResult(r){
   // ── 9. LOCATION ──────────────────────────────────────────────
   const locVal=r.location||'';
   h+=`<div class="card"><div class="lbl">📍 Warehouse Location</div>
-    <div style="margin-top:8px">${locVal?locBadgeHTML(locVal,'scanner'):locEmptyHTML('scanner')}</div>
+    <div style="margin-top:8px">${locVal?psLocBadgeHTML(locVal):psLocEmptyHTML()}</div>
   </div>`;
 
   h+=sv
@@ -3520,19 +2086,13 @@ function renderResult(r){
 
   setTimeout(function(){
     var ebayPrices=(r.ebay&&r.ebay.prices)?r.ebay.prices:null;
-    initPackWheel(Number(packs)||1,ebayPrices,r.title||'',r.upc||'',r.brand||'',
+    initPackWheel(Number(packs)||2,ebayPrices,r.title||'',r.upc||'',r.brand||'',
       {sku:document.getElementById('pack-sku-display'),
        title:document.getElementById('pack-title-display'),
        price:document.getElementById('pack-bundle-price'),
        display:document.getElementById('pack-sel-display')});
     var si=document.getElementById('shade-input');
-    if(si&&cur&&cur._shade) si.value=cur._shade;
-    window._splitActive = {1:true,3:true,6:true,12:true};
-    updateSplitCalc();
-    if(cur && cur._packImages) renderPackImagesPreview();
-    renderExtraPhotosUI();
-    // Generar descripción automáticamente
-    setTimeout(function(){ psAutoGenerateDescription(); }, 500);
+    if(si&&window.cur&&cur._shade) si.value=cur._shade;
   },80);
 }
 
@@ -3552,137 +2112,123 @@ function clearBulkSession() {
   document.body.appendChild(ov);
 }
 
-function emptyStateHTML(){
-  return `<div class="badge" style="background:var(--sf2);color:var(--mu);border:1px solid var(--bd)">⏳ AWAITING SCAN</div>
-    <div class="card" style="border-left:3px solid var(--bd)">
-      <div class="lbl" style="color:var(--mu)">📝 eBay SEO Title</div>
-      <div class="val" style="font-size:15px;font-weight:700;line-height:1.5;color:var(--mu)">Scan a barcode, type a UPC, or paste an eBay link to begin</div>
-    </div>
-    <div class="card"><div class="lbl">SKU</div><div class="val" style="font-family:monospace;font-size:14px;color:var(--mu)">—</div></div>
-    <div class="card"><div class="lbl">Category</div><div class="val" style="color:var(--mu)">—</div></div>
-    <div class="price-row">
-      <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low" style="color:var(--mu)">—</div></div>
-      <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg" style="color:var(--mu)">—</div></div>
-      <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" style="color:var(--mu)">—</div></div>
-    </div>
-    <div class="card">
-      <div class="lbl">📦 SELECT PACK SIZE</div>
-      <div class="pack-chips" style="opacity:.35;pointer-events:none">
-        <div class="pack-chip"><div class="pc-n">1pk</div></div>
-        <div class="pack-chip sel"><div class="pc-n">3pk</div></div>
-        <div class="pack-chip"><div class="pc-n">6pk</div></div>
-        <div class="pack-chip"><div class="pc-n">12pk</div></div>
-      </div>
-      <div style="font-size:12px;color:var(--mu);margin-top:4px">Pack size will be suggested automatically</div>
-    </div>`;
-}
-
 function scanAnother() {
-  const upcInput = document.getElementById('upcInRes');
+  const upcInput = document.getElementById('upcIn');
   if (upcInput) { upcInput.value = ''; setTimeout(()=>upcInput.focus(), 100); }
-  const ebayUrlInput = document.getElementById('ps-ebay-url');
-  if (ebayUrlInput) ebayUrlInput.value = '';
-  const barcodeResult = document.getElementById('ps-barcode-result');
-  if (barcodeResult) { barcodeResult.style.display='none'; barcodeResult.innerHTML=''; }
-  const rb = document.getElementById('resBody');
-  if (rb) rb.innerHTML = emptyStateHTML();
   _lastBundleUrl = '';
-  screen('res');
+  screen('idle');
 }
 
 function renderBulk(){
-  var el=$('bulkList');
+  const el=$('bulkList');
   if(!el)return;
-  if(!bulk.length){el.innerHTML='<p style="text-align:center;color:#888;padding:20px">No items yet.</p>';return;}
-  el.innerHTML=bulk.map(function(it,i){
-    var qty = it.quantity ? ' \u00b7 qty '+it.quantity : '';
-    return '<div style="display:flex;align-items:center;gap:10px;background:#1a1a1a;border:1px solid #333;border-radius:12px;padding:12px;margin-bottom:8px">'
-      + '<div style="flex:1;min-width:0">'
-      +   '<div style="color:#fff;font-size:13px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">'+esc((it.title||'').substring(0,60))+'</div>'
-      +   '<div style="color:#888;font-size:11px">'+esc(it.sku||'')+qty+'</div>'
-      + '</div>'
-      + '<div style="color:#00e676;font-weight:800;font-size:14px">'+fmt(it.price)+'</div>'
-      + '<button class="bdel" data-i="'+i+'" style="background:none;border:1px solid #555;border-radius:8px;padding:6px 10px;color:#aaa;cursor:pointer">\u2715</button>'
-      + '</div>';
-  }).join('');
-  el.querySelectorAll('.bdel').forEach(function(b){
-    b.addEventListener('click',function(){bulk.splice(+b.dataset.i,1);updateFAB();renderBulk();saveBulkToStorage();});
-  });
+  if(!bulk.length){el.innerHTML='<p style="text-align:center;color:var(--mu);padding:20px">No items yet.</p>';return;}
+  el.innerHTML=bulk.map((it,i)=>`<div class="bi"><div class="bin"><div class="bit">${esc(it.title.substring(0,50))}</div><div class="bis">${esc(it.sku)}</div></div><div class="bip">${fmt(it.price)}</div><button class="bdel" data-i="${i}">✕</button></div>`).join('');
+  el.querySelectorAll('.bdel').forEach(b=>b.addEventListener('click',()=>{bulk.splice(+b.dataset.i,1);updateFAB();renderBulk();}));
 }
 
 // CSV Export
-// ── ENVIAR A HOJA DE REGISTRO (pestaña "Product Scanner") ──────────────
-// Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
-var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxhvH830MoVocWM6ieN_mnsi5uYCVaX1kt37_J38f0LehvUFQvRpFXX7hGpGJOUbPU2mw/exec';
+// ═══════════════════════════════════════════════════════════════════════════
+// PRODUCT SCANNER - INDEPENDENT LOCATION MODULE
+// Totally independent from Clothing & Shoes — separate functions & variables
+// ═══════════════════════════════════════════════════════════════════════════
 
-// ── Convertir descripción (objeto de Claude o string) a HTML/texto ──────
-function descToEbayHTML(d){
-  if(!d) return '';
-  if(typeof d === 'string') return d;
-  try{
-    var h = '';
-    if(d.intro) h += '<p>' + d.intro + '</p>';
-    if(d.benefits && d.benefits.length){
-      h += '<ul>';
-      for(var i=0;i<d.benefits.length;i++){ h += '<li>' + d.benefits[i] + '</li>'; }
-      h += '</ul>';
+let _psLocCallback = null;
+let _psLocTarget = null; // Always 'product' for Product Scanner
+
+async function psLocOpen(target) {
+  _psLocTarget = target;
+  
+  // Ensure loc-overlay exists
+  let overlay = document.getElementById('loc-overlay');
+  if (!overlay) {
+    overlay = document.createElement('div');
+    overlay.id = 'loc-overlay';
+    overlay.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,0.95);z-index:10000;flex-direction:column;align-items:center;justify-content:center;gap:15px;padding:20px;';
+    
+    let videoEl = document.createElement('video');
+    videoEl.id = 'loc-qr-video';
+    videoEl.style.cssText = 'width:100%;max-width:500px;height:500px;object-fit:cover;border-radius:12px;border:3px solid #00e676;';
+    
+    let closeBtn = document.createElement('button');
+    closeBtn.textContent = '✕ Cancelar';
+    closeBtn.style.cssText = 'padding:12px 24px;background:#c0392b;color:white;border:none;border-radius:8px;font-size:16px;font-weight:bold;cursor:pointer;';
+    closeBtn.onclick = psLocClose;
+    
+    overlay.appendChild(videoEl);
+    overlay.appendChild(closeBtn);
+    document.body.appendChild(overlay);
+  }
+  
+  overlay.style.display = 'flex';
+  
+  try {
+    savvyStopScan('loc-qr-video');
+    await savvyStartScan('loc-qr-video', async (code) => {
+      psLocCapture(code.trim());
+    });
+  } catch (e) {
+    console.error('Error opening location scanner:', e);
+    toast('⚠️ Error al abrir cámara de ubicación');
+  }
+}
+
+async function psLocClose() {
+  try {
+    savvyStopScan('loc-qr-video');
+  } catch (e) {}
+  
+  let overlay = document.getElementById('loc-overlay');
+  if (overlay) overlay.style.display = 'none';
+}
+
+function psLocCapture(code) {
+  psLocClose();
+  
+  // Save to current product
+  if (window.psCurrentProduct) {
+    window.psCurrentProduct.location = code;
+    toast('📍 Ubicación: ' + code);
+    
+    // Update badge if visible
+    let badge = document.getElementById('ps-loc-badge');
+    if (badge) {
+      badge.outerHTML = psLocBadgeHTML(code);
     }
-    if(d.package_contents) h += '<p><b>Package Contents:</b> ' + d.package_contents + '</p>';
-    if(d.disclaimer) h += '<p><i>' + d.disclaimer + '</i></p>';
-    return h;
-  }catch(e){ return ''; }
-}
-function descToText(d){
-  return descToEbayHTML(d).replace(/<[^>]*>/g,' ').replace(/\s+/g,' ').trim();
+  }
 }
 
-function psSendToRegistroSheet(items) {
-  if (!items || !items.length) return;
-
-  // UNA FILA POR PACK — formato vertical (más fácil de leer)
-  var rows = items.map(function(it) {
-    var p = Number(it.packs) || 1;
-    var q = Number(it.quantity) || 1;
-    var cat = it.category;
-    if (!cat || cat === 'undefined' || cat === 'null') cat = '';
-    return {
-      tipo: 'product',
-      upc: it.upc || '',
-      fecha: new Date().toISOString().slice(0,19).replace('T',' '),
-      marca: it.brand || '',
-      categoria: cat,
-      titulo: it.title || '',
-      paquete: p + 'pk',
-      unidades: p * q,
-      listados: q,
-      precio: it.price || '',
-      expDate: it.expDate || '',
-      ubicacion: it.location || '',
-      fotos: it.bundleImg || it.photo || '',
-      descripcion: descToText(it.description),
-      escaneadoPor: it.scannedBy || 'unknown'
-    };
-  });
-
-  fetch(PS_SHEET_URL, {
-    method: 'POST',
-    mode: 'no-cors',
-    body: JSON.stringify({ tipo: 'product', items: rows }),
-    headers: {'Content-Type': 'text/plain'}
-  }).catch(function(e) { console.warn('Error enviando a Sheet de registro:', e); });
+function psLocClear() {
+  if (window.psCurrentProduct) {
+    window.psCurrentProduct.location = '';
+    toast('📍 Ubicación borrada');
+    
+    let badge = document.getElementById('ps-loc-badge');
+    if (badge) {
+      badge.outerHTML = psLocEmptyHTML();
+    }
+  }
 }
+
+function psLocBadgeHTML(code) {
+  return `<span style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:#00e676;color:#000;border-radius:6px;font-weight:bold;font-size:13px;" id="ps-loc-badge">
+    <span>📍</span>
+    <span>${code}</span>
+    <button onclick="psLocClear()" style="background:none;border:none;color:#000;cursor:pointer;font-weight:bold;padding:0;">✕</button>
+  </span>`;
+}
+
+function psLocEmptyHTML() {
+  return `<button onclick="psLocOpen('product')" style="display:inline-flex;align-items:center;gap:8px;padding:8px 12px;background:#555;color:#aaa;border:1px solid #777;border-radius:6px;cursor:pointer;font-size:13px;font-weight:600;" id="ps-loc-badge">
+    <span>📦</span><span>Scan location (optional)</span>
+  </button>`;
+}
+-e 
+
 
 function exportCSV(){
   try {
   if(!bulk.length){toast('⚠️ No products');return;}
-
-  // Candado anti doble-tap: evita exports (y filas) duplicados
-  if (window._exportLock) { toast('⏳ Export en proceso...'); return; }
-  window._exportLock = true;
-  setTimeout(function(){ window._exportLock = false; }, 5000);
-
-  // Enviar también a la hoja de registro (pestaña "Product Scanner"), no bloquea
-  psSendToRegistroSheet(bulk);
 
   function q(v) {
     v = String(v==null?'':v);
@@ -3872,11 +2418,11 @@ function exportCSV(){
       it.category||'31786',
       cleanTitle,
       '1000',
-      descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
+      it.description || ('<p>' + cleanTitle + '</p>'),
       pics,
       'FixedPrice','GTC',
       it.price||'9.99',
-      String(it.quantity||1),'1',
+      '1','1',
       'Lumberton, NC','1',
       SHIP, RET, PAY,
       brandFix,
@@ -3974,78 +2520,52 @@ function savvyShowExportOptions(csv, fname, count) {
 document.addEventListener('DOMContentLoaded',()=>{
   if(!localStorage.getItem('savvy_ebay_id'))localStorage.setItem('savvy_ebay_id',DEF_EBAY);
 
-  // ── FAB + panel de export (PRIMERO — a prueba de errores posteriores) ──
-  function ensureBulkOverlay(){
-    if (document.getElementById('bulkOv')) return;
-    var ov = document.createElement('div');
-    ov.id = 'bulkOv';
-    ov.style.cssText = 'position:fixed;inset:0;background:rgba(13,13,13,.97);z-index:5000;display:none;flex-direction:column;padding:16px;padding-top:calc(16px + env(safe-area-inset-top))';
-    ov.innerHTML = ''
-      + '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:12px">'
-      +   '<div style="font-size:18px;font-weight:800;color:#fff">\ud83d\udccb CSV Session</div>'
-      +   '<button id="bulkX" style="background:none;border:1px solid #555;border-radius:10px;padding:8px 14px;color:#aaa;font-size:14px;cursor:pointer">\u2715 Close</button>'
-      + '</div>'
-      + '<div id="bulkList" style="flex:1;overflow-y:auto;margin-bottom:12px"></div>'
-      + '<button id="expBtn" style="width:100%;background:linear-gradient(135deg,#00e676,#00a854);border:none;border-radius:12px;padding:15px;color:#000;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">\ud83d\udce4 EXPORT CSV \u2192 Drive + Sheet</button>'
-      + '<button id="clrBtn" style="width:100%;background:none;border:1px solid #e74c3c;border-radius:12px;padding:12px;color:#e74c3c;font-size:14px;font-weight:800;cursor:pointer">\ud83d\uddd1 Clear Session</button>';
-    document.body.appendChild(ov);
-    document.getElementById('bulkX').addEventListener('click', closeBulk);
-    var eb = document.getElementById('expBtn');
-    eb.addEventListener('touchend', function(e){ e.preventDefault(); exportCSV(); });
-    eb.addEventListener('click', exportCSV);
-    var cb = document.getElementById('clrBtn');
-    function clrHandler(e){
-      if (e && e.type === 'touchend') e.preventDefault();
-      if(bulk.length===0){toast('\u26a0\ufe0f No hay productos en el CSV');return;}
-      var ov2=document.createElement('div');
-      ov2.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
-      ov2.innerHTML='<div style="background:#1a1a1a;border-radius:16px;padding:24px;width:100%;max-width:320px;text-align:center">'
-        +'<div style="font-size:18px;font-weight:800;margin-bottom:8px;color:#fff">\ud83d\uddd1 Clear Session</div>'
-        +'<div style="font-size:14px;color:#888;margin-bottom:20px">Vas a borrar '+bulk.length+' producto(s). \u00bfConfirmas?</div>'
-        +'<button onclick="bulk=[];updateFAB();renderBulk();saveBulkToStorage();this.closest(\'div[style*=fixed]\').remove();toast(\'\u2705 Sesi\u00f3n limpiada\')" style="width:100%;padding:12px;background:#e74c3c;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">S\u00ed, borrar todo</button>'
-        +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="width:100%;padding:10px;background:none;border:1px solid #555;border-radius:10px;color:#888;cursor:pointer">Cancelar</button>'
-        +'</div>';
-      document.body.appendChild(ov2);
-    }
-    cb.addEventListener('touchend', clrHandler);
-    cb.addEventListener('click', function(){ clrHandler(); });
-  }
-  function openBulk(){ ensureBulkOverlay(); renderBulk(); document.getElementById('bulkOv').style.display='flex'; }
-  function closeBulk(){ var o=document.getElementById('bulkOv'); if(o) o.style.display='none'; }
-  window.openBulk = openBulk; window.closeBulk = closeBulk;
-  var _fabEl = document.getElementById('fab');
-  if (_fabEl) {
-    _fabEl.addEventListener('touchend', function(e){ e.preventDefault(); openBulk(); });
-    _fabEl.addEventListener('click', openBulk);
-  }
-
-
   const cfgBtn=$('cfgBtn');
-  if(cfgBtn){
-    cfgBtn.addEventListener('touchend',e=>{e.preventDefault();openCfgWithPin();});
-    cfgBtn.addEventListener('click',openCfgWithPin);
-  }
-  if($('cfgX')) $('cfgX').addEventListener('click',closeCfg);
+  cfgBtn.addEventListener('touchend',e=>{e.preventDefault();openCfgWithPin();});
+  cfgBtn.addEventListener('click',openCfgWithPin);
+  $('cfgX').addEventListener('click',closeCfg);
 
   const camBtn=$('camBtn');
-  if(camBtn){
-    camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
-    camBtn.addEventListener('click',startCam);
-  }else{
-    console.warn('⚠️ camBtn not found in DOM');
-  }
+  camBtn.addEventListener('touchend',e=>{e.preventDefault();startCam();});
+  camBtn.addEventListener('click',startCam);
   const stopBtn=$('camStop');
-  if(stopBtn){
-    stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
-    stopBtn.addEventListener('click',stopCam);
-  }
+  stopBtn.addEventListener('touchend',e=>{e.preventDefault();stopCam();});
+  stopBtn.addEventListener('click',stopCam);
 
-  // NOTE: upcIn/srchBtn from the old idle screen were removed — scr-res
-  // (upcInRes + its 🔍 button) is now the single home screen and is wired
-  // via inline onclick/onkeydown attributes directly in the HTML.
+  const ui=$('upcIn'),sb=$('srchBtn');
+  function chk(){sb.classList.toggle('on',ui.value.trim().replace(/\D/g,'').length>=8);}
+  ui.addEventListener('input',chk);ui.addEventListener('change',chk);ui.addEventListener('paste',()=>setTimeout(chk,50));
+  function doSearch(){const v=ui.value.trim().replace(/\D/g,'');if(v.length>=8)analyze(v);}
+  sb.addEventListener('touchend',e=>{e.preventDefault();doSearch();});
+  sb.addEventListener('click',doSearch);
+  ui.addEventListener('keydown',e=>{if(e.key==='Enter')doSearch();});
 
-  // eBay URL paste box lives in scr-res (ps-ebay-url) and is wired inline in the HTML.
-
+  function openBulk(){renderBulk();$('bulkOv').classList.add('on');}
+  $('fab').addEventListener('touchend',e=>{e.preventDefault();openBulk();});
+  $('fab').addEventListener('click',openBulk);
+  $('bulkX').addEventListener('click',()=>$('bulkOv').classList.remove('on'));
+  $('expBtn').addEventListener('touchend',e=>{e.preventDefault();exportCSV();});
+  $('expBtn').addEventListener('click',exportCSV);
+  $('clrBtn').addEventListener('touchend',e=>{
+    e.preventDefault();
+    if(bulk.length===0){toast('⚠️ No hay productos en el CSV');return;}
+    // No usar confirm() en iOS — usar overlay propio
+    var ov=document.createElement('div');
+    ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.85);z-index:99999;display:flex;align-items:center;justify-content:center;padding:30px';
+    ov.innerHTML='<div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:320px;text-align:center">'
+      +'<div style="font-size:18px;font-weight:800;margin-bottom:8px">🗑 Clear Session</div>'
+      +'<div style="font-size:14px;color:var(--mu);margin-bottom:20px">Vas a borrar '+bulk.length+' producto(s). ¿Confirmas?</div>'
+      +'<button onclick="bulk=[];updateFAB();renderBulk();saveBulkToStorage();this.closest(\'div[style*=fixed]\').remove();toast(\'✅ Sesión limpiada\')" style="width:100%;padding:12px;background:#e74c3c;color:#fff;border:none;border-radius:10px;font-size:15px;font-weight:800;cursor:pointer;margin-bottom:8px">Sí, borrar todo</button>'
+      +'<button onclick="this.closest(\'div[style*=fixed]\').remove()" style="width:100%;padding:10px;background:none;border:1px solid var(--bd);border-radius:10px;color:var(--mu);cursor:pointer">Cancelar</button>'
+      +'</div>';
+    document.body.appendChild(ov);
+  });
+  $('clrBtn').addEventListener('click',function(){
+    if(bulk.length===0){toast('⚠️ No hay productos en el CSV');return;}
+    if(confirm('¿Borrar '+bulk.length+' producto(s) de la sesión?')){
+      bulk=[];updateFAB();renderBulk();saveBulkToStorage();toast('✅ Sesión limpiada');
+    }
+  });
 
   renderSt();
   checkSavedSession();
@@ -4289,7 +2809,7 @@ function locCapture(code) {
   locClose();
   if (_locTarget === 'scanner') {
     if (cur) {
-      cur.location = code;
+      window.psCurrentProduct.location = code;
       // Update location badge in result screen
       const badge = document.getElementById('loc-badge-scanner');
       if (badge) badge.outerHTML = locBadgeHTML(code, 'scanner');
@@ -4306,7 +2826,7 @@ function locCapture(code) {
 
 function locClear(target) {
   if (target === 'scanner' && cur) {
-    cur.location = '';
+    window.psCurrentProduct.location = '';
     const badge = document.getElementById('loc-badge-scanner');
     if (badge) badge.outerHTML = locEmptyHTML('scanner');
   } else if (target === 'clothing') {
@@ -4341,7 +2861,7 @@ function toDash() {
 
 function openScanner() {
   document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
-  $('scr-res').classList.add('on');
+  $('scr-idle').classList.add('on');
 }
 
 function openClothing() {
@@ -4358,3 +2878,2776 @@ function saveSheetsUrl() {
   setTimeout(closeCfg, 700);
 }
 
+function screen(n) {
+  document.querySelectorAll('.scr').forEach(s => s.classList.remove('on'));
+  const el = $('scr-' + n);
+  if (el) el.classList.add('on');
+}
+
+// ═══════════════════════════════════════════════════════════
+// CLOTHING MODULE — Savvy Scanner
+// State, logic, and rendering for clothing intake workflow
+// ═══════════════════════════════════════════════════════════
+
+// ── State ───────────────────────────────────────────────────
+let cl = {
+  sku:'', type:'clothing', gender:'unisex', brand:'', brandCustom:'', category:'', size:'L',
+  color:'', colorCustom:'', condition:'', defects:[], notes:'',
+  photos:{ front:null, back:null, tag:null, detail:null, meas1:null, meas2:null },
+  clothingPrices: { minPrice: null, avgPrice: null, suggestedPrice: null, found: false },
+  pricesLoading: false,
+  step: 1, submitting: false
+};
+
+
+const CL_GENDER_OPTIONS = [
+  { id:'mens',   label:"Men's",   icon:'👔' },
+  { id:'womens', label:"Women's", icon:'👗' },
+  { id:'kids',   label:'Kids',    icon:'👶' },
+  { id:'unisex', label:'Unisex',  icon:'🌍' },
+];
+
+const CL_TYPE_OPTIONS = [
+  { id:'clothing', label:'Ropa', icon:'👕' },
+  { id:'shoes',    label:'Zapatos', icon:'👟' },
+];
+
+const CL_SHOE_CATS = [
+  'Sneakers','Running','Athletic','Basketball','Casual','Dress Shoes',
+  'Boots','Ankle Boots','Sandals','Heels','Flats','Loafers','Slip-On',
+  'Clogs','Mules','Wedges','Platform','Kids Sneakers','Kids Boots','Other'
+];
+
+const CL_SHOE_SIZES_US = [
+  '4','4.5','5','5.5','6','6.5','7','7.5','8','8.5',
+  '9','9.5','10','10.5','11','11.5','12','12.5','13','14','15','16'
+];
+const CL_SHOE_SIZES_KIDS = [
+  '1C','2C','3C','4C','5C','6C','7C','8C','9C','10C',
+  '11C','12C','13C','1Y','2Y','3Y','4Y','5Y','6Y','7Y'
+];
+const CL_SHOE_DEFECTS = [
+  'Scuffs','Sole Wear','Broken Strap','Missing Lace','Toe Box Damage',
+  'Insole Worn','Heel Worn','Creasing','Water Damage','Discoloration',
+  'Glue Separation','Missing Buckle','Other'
+];
+
+const CL_BRANDS = ['Nike','Adidas','Under Armour','Champion','Puma','Reebok','New Balance',
+  'Levi\'s','Wrangler','Lee','Gap','Old Navy','H&M','Zara','Forever 21','American Eagle',
+  'Hollister','Abercrombie','Calvin Klein','Tommy Hilfiger','Ralph Lauren','Polo Ralph Lauren','Lauren Ralph Lauren','Nautica',
+  'Columbia','North Face','Carhartt','Patagonia','Carter\'s','OshKosh','Other'];
+
+const CL_CATS = ['T-Shirt','Shirt','Shacket','Polo','Tank Top','Hoodie','Quarter Zip','Sweatshirt','Sweater',
+  'Jacket','Coat','Vest','Pants','Jeans','Shorts','Dress','Skirt',
+  'Activewear Top','Activewear Bottom','Swimwear','Scrubs','Other'];
+
+const CL_SIZES_ALPHA = ['XXS','XS','S','M','L','XL','XXL','1X','1XB','3XL','4XL','XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT'];
+const CL_SIZES_NUM   = ['28','30','32','34','36','38','40','42','44'];
+const CL_SIZES_KIDS  = ['NB','3M','6M','9M','12M','18M','2T','3T','4T','5T','5/6','7/8','10/12','14','14/16','16','18','20'];
+const CL_SIZES_SHOES = ['5','5.5','6','6.5','7','7.5','8','8.5','9','9.5','10','10.5','11','11.5','12','13'];
+
+const CL_COLORS = [
+  {name:'Black', hex:'#111'},   {name:'White', hex:'#eee'},   {name:'Gray', hex:'#888'},
+  {name:'Navy', hex:'#1a237e'}, {name:'Blue', hex:'#1565c0'}, {name:'Light Blue', hex:'#64b5f6'},
+  {name:'Denim', hex:'#4a6fa5'},
+  {name:'Red', hex:'#c62828'},  {name:'Pink', hex:'#e91e96'}, {name:'Coral', hex:'#ff6b6b'},
+  {name:'Purple', hex:'#6a1b9a'},
+  {name:'Green', hex:'#2e7d32'},{name:'Olive', hex:'#827717'},{name:'Yellow', hex:'#f9a825'},
+  {name:'Orange', hex:'#e65100'},{name:'Brown', hex:'#4e342e'},{name:'Beige', hex:'#d7ccc8'},
+  {name:'Tan', hex:'#d2b48c'},   {name:'Khaki', hex:'#b5a642'},
+  {name:'Multicolor', hex:'linear-gradient(135deg,#f00,#0f0,#00f)'},{name:'Other', hex:'#333'}
+];
+
+const CL_CONDITIONS = [
+  {id:'NWT',   label:'NWT',  sub:'New With Tags'},
+  {id:'NWOT',  label:'NWOT', sub:'New Without Tags'},
+  {id:'EXCEL', label:'Excellent', sub:'Like new, no flaws'},
+  {id:'GOOD',  label:'Good', sub:'Minor wear, clean'},
+  {id:'FAIR',  label:'Fair', sub:'Visible wear/flaws'},
+];
+
+const CL_STYLES = [
+  'Classic', 'Slim', 'Skinny', 'Bootcut', 'Flare', 'Straight', 
+  'Distressed', 'Ripped', 'Relaxed', 'Tight', 'Loose', 'Tapered', 'Other'
+];
+
+
+const CL_DEFECTS = ['Missing Button','Small Stain','Large Stain','Tear','Hole',
+  'Fading','Pilling','Broken Zipper','Missing Tag','Odor','Hem Damage','Other'];
+
+const PHOTO_SLOTS = [
+  {id:'front',  label:'Front',   icon:'👕', hint:'Lay flat, full garment',      required:true},
+  {id:'back',   label:'Back',    icon:'🔄', hint:'Full back view',               required:true},
+  {id:'tag',    label:'Tag',     icon:'🏷️', hint:'Brand + size tag',            required:true},
+  {id:'detail', label:'Detail',  icon:'🔍', hint:'Defects or key details',       required:true},
+  {id:'meas1',  label:'Measure 1', icon:'📏', hint:'Measurement with ruler',    required:false},
+  {id:'meas2',  label:'Measure 2', icon:'📐', hint:'Second measurement',        required:false},
+];
+
+// ── SKU Generator ───────────────────────────────────────────
+function clGenSKU() {
+  const bPfx = (cl.brand && cl.brand !== 'Other' ? cl.brand : cl.brandCustom||'GEN')
+    .replace(/[^a-zA-Z]/g,'').substring(0,3).toUpperCase();
+  const pfx = cl.type==='shoes'?'SHO':'CLO';
+  const ts  = Date.now().toString().slice(-5);
+  return `${pfx}-${bPfx}-${cl.size||'M'}-${ts}`;
+}
+
+// ── Step navigation ─────────────────────────────────────────
+// ════════════════════════════════════════════════════════════════
+// 👔 CLOTHING & SHOES MODULE — COMPLETAMENTE INDEPENDIENTE
+// Keys propias: cl_rbg_key, cl_photoroom_key
+// No comparte estado con Product Scanner
+// Si se rompe Scanner, Clothing sigue funcionando y viceversa
+// ════════════════════════════════════════════════════════════════
+
+// ── PIXIAN.AI REMOVE BACKGROUND ────────────────────────────
+async function removeBackgroundPixian(dataUrl) {
+  console.log('🎯 Pixian.ai background removal...');
+  toast('🎯 Pixian.ai removing background...');
+  
+  const pixianKey = 'cGRiNDgyelNxZ2ticzoxNzkxMFN0YXJtbjI3Z2xjMnNlb2gxMm0zamt1UmxMbDE5cGVkYXQxOTdjcWtzZmY=';
+  const decodedKey = atob(pixianKey);
+  
+  const b64 = dataUrl.split(',')[1];
+  if (!b64) return null;
+  
+  try {
+    const binaryString = atob(b64);
+    const bytes = new Uint8Array(binaryString.length);
+    for (let i = 0; i < binaryString.length; i++) {
+      bytes[i] = binaryString.charCodeAt(i);
+    }
+    const blob = new Blob([bytes], { type: 'image/jpeg' });
+    
+    const fd = new FormData();
+    fd.append('image', blob);
+    
+    const authHeader = 'Basic ' + btoa(decodedKey + ':');
+    
+    const res = await fetch('https://api.pixian.ai/api/v2/remove-background', {
+      method: 'POST',
+      headers: {
+        'Authorization': authHeader
+      },
+      body: fd
+    });
+    
+    if (!res.ok) {
+      console.error('Pixian.ai error:', res.status);
+      return null;
+    }
+    
+    const resultBlob = await res.blob();
+    const reader = new FileReader();
+    
+    return new Promise((resolve) => {
+      reader.onload = (e) => {
+        const b64Result = e.target.result.split(',')[1];
+        console.log('✅ Pixian.ai success');
+        resolve('data:image/png;base64,' + b64Result);
+      };
+      reader.readAsDataURL(resultBlob);
+    });
+    
+  } catch(e) {
+    console.error('❌ Pixian.ai error:', e);
+    return null;
+  }
+}
+
+async function clRemoveBackground(dataUrl) {
+  console.log('🎬 Clothing background removal: Railway rembg');
+  
+  try {
+    const RAILWAY_API = 'https://savvy-rembg-production.up.railway.app/remove-bg';
+    const b64 = dataUrl.split(',')[1]; // Extrae solo la parte base64
+    
+    if (!b64) {
+      clShowBgStatus('❌ Invalid image data', 'var(--dw)');
+      return null;
+    }
+    
+    clShowBgStatus('⏳ Processing with rembg...', 'var(--ac)');
+    
+    const response = await fetch(RAILWAY_API, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json'
+      },
+      body: JSON.stringify({ image: b64 })
+    });
+    
+    if (!response.ok) {
+      clShowBgStatus('❌ Railway API error: ' + response.status, 'var(--dw)');
+      return null;
+    }
+    
+    const data = await response.json();
+    
+    if (data.success && data.image) {
+      clShowBgStatus('✅ Railway rembg — Background removed!', 'var(--sv)');
+      return 'data:image/png;base64,' + data.image;
+    } else {
+      clShowBgStatus('❌ Rembg processing failed', 'var(--dw)');
+      return null;
+    }
+  } catch(error) {
+    console.error('Railway remove-bg error:', error);
+    clShowBgStatus('❌ Error: ' + error.message, 'var(--dw)');
+    return null;
+  }
+}
+
+function clSaveRbgKey() {
+  const v = document.getElementById('cl-rbg-key-in')?.value?.trim();
+  if (!v) { toast('⚠️ Enter Remove.bg key for Clothing'); return; }
+  localStorage.setItem('cl_rbg_key', v);
+  clShowBgStatus('✅ Clothing Remove.bg key saved — no watermark!', 'var(--sv)');
+  toast('✅ Saved');
+}
+
+function clSavePhotoroomKey() {
+  const v = document.getElementById('cl-pr-key-in')?.value?.trim();
+  if (!v) { toast('⚠️ Enter PhotoRoom key for Clothing'); return; }
+  localStorage.setItem('cl_photoroom_key', v);
+  clShowBgStatus('✅ Clothing PhotoRoom key saved as fallback', 'var(--gd)');
+  toast('✅ Saved');
+}
+
+function clShowBgStatus(msg, color) {
+  const el = document.getElementById('cl-bg-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.background = color==='var(--sv)'?'rgba(0,230,118,.1)':'rgba(255,171,0,.1)';
+  el.style.color = color;
+  el.style.display = 'block';
+}
+
+async function clTestBgRemoval() {
+  const rbgKey = localStorage.getItem('cl_rbg_key') || localStorage.getItem('rbg_key') || DEFAULT_RBG_KEY;
+  const prKey  = localStorage.getItem('cl_photoroom_key') || localStorage.getItem('photoroom_key') || DEFAULT_PHOTOROOM_KEY;
+  const usingFallback = !localStorage.getItem('cl_rbg_key') && !localStorage.getItem('cl_photoroom_key');
+  if (!rbgKey && !prKey) { clShowBgStatus('❌ No API keys configured anywhere. Set up Remove.bg or PhotoRoom.', 'var(--dw)'); return; }
+  if (usingFallback) clShowBgStatus('⚠️ Using Scanner keys as fallback. Set Clothing-specific keys above for full independence.', 'var(--gd)');
+  clShowBgStatus('⏳ Testing...', 'var(--gd)');
+  const testImg = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  try {
+    const service = rbgKey ? 'removebg' : 'photoroom';
+    const key = rbgKey || prKey;
+    const r = await fetch(WORKER+'/?action='+service, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ image: testImg, key })
+    });
+    const d = await r.json();
+    clShowBgStatus(
+      (d.success || (d.error&&d.error.includes('400')))
+        ? '✅ '+( rbgKey?'Remove.bg':'PhotoRoom')+' connected for Clothing!'
+        : '❌ Error: '+(d.error||'unknown'),
+      (d.success||(d.error&&d.error.includes('400')))?'var(--sv)':'var(--dw)'
+    );
+  } catch(e) { clShowBgStatus('❌ Connection failed', 'var(--dw)'); }
+}
+
+function clGo(step) {
+  cl.step = step;
+  ['cl-sku','cl-attr','cl-def','cl-photo','cl-review'].forEach((id,i) => {
+    const el = $(id);
+    if (el) el.classList.toggle('on', i+1 === step);
+  });
+  document.querySelectorAll('.scr').forEach(s => {
+    if (!['cl-sku','cl-attr','cl-def','cl-photo','cl-review'].includes(s.id)) {
+      s.classList.remove('on');
+    }
+  });
+  clUpdateProgress(step);
+  window.scrollTo(0,0);
+}
+
+function clUpdateProgress(step) {
+  for (let i=1; i<=5; i++) {
+    const dot = $('cl-step-'+i);
+    if (!dot) continue;
+    dot.className = 'cl-step-dot' + (i < step ? ' done' : i === step ? ' active' : '');
+  }
+}
+
+// ── Step 1: SKU ─────────────────────────────────────────────
+function clRenderSKU() {
+  cl = { sku:'', brand:'', brandCustom:'', category:'', size:'L',
+    color:'', colorCustom:'', condition:'', defects:[], notes:'',
+    photos:{ front:null, back:null, tag:null, detail:null, meas1:null, meas2:null }, location:'', step:1 };
+  // Update session badge
+  clUpdateSessionBadge();
+
+  $('cl-sku').innerHTML = `
+    <div class="cl-step-hdr">
+      <h2>New Item</h2>
+      <p>Create or scan SKU</p>
+    </div>
+    <div class="cl-prog">${[1,2,3,4,5].map(i=>`<div class="cl-step-dot${i===1?' active':''}" id="cl-step-${i}"></div>`).join('<div class="cl-step-line"></div>')}</div>
+    <div class="card" style="margin-top:16px;border:2px solid var(--ac)">
+      <div class="lbl" style="color:var(--ac)">📷 SCAN BARCODE — AUTO-FILL FROM eBay</div>
+      <p style="font-size:12px;color:var(--mu);margin:4px 0 10px">Scan the tag barcode to auto-fill brand, title & prices</p>
+      <div id="cl-barcode-preview" style="display:none;border-radius:8px;overflow:hidden;margin-bottom:8px;background:#000;min-height:180px">
+        <div id="cl-barcode-video" style="width:100%"></div>
+      </div>
+      <div id="cl-barcode-result" style="display:none;background:var(--sf2);border-radius:8px;padding:10px;margin-bottom:8px;font-size:13px"></div>
+      <div style="display:flex;gap:8px">
+        <button id="cl-scan-btn" onclick="clStartBarcodeScanner()" style="flex:1;padding:12px;background:linear-gradient(135deg,#FF6B35,#E71D36);color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">📷 Scan Barcode</button>
+        <button id="cl-scan-stop-btn" onclick="clStopBarcodeScanner()" style="display:none;flex:1;padding:12px;background:#e74c3c;color:#fff;border:none;border-radius:8px;font-size:14px;font-weight:700;cursor:pointer">⏹ Stop</button>
+      </div>
+      <div style="margin-top:8px;display:flex;gap:8px;align-items:center">
+        <input id="cl-upc-manual" class="ui" type="number" placeholder="Or type UPC manually..." style="flex:1;margin:0" oninput="cl.upc=this.value">
+        <button onclick="clLookupBarcode(document.getElementById('cl-upc-manual').value)" style="padding:10px 14px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);cursor:pointer;font-size:13px">🔍</button>
+      </div>
+      <div style="margin-top:10px">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:6px">📋 OR paste eBay listing URL (from eBay app — short links OK)</div>
+        <div style="display:flex;gap:8px;align-items:center">
+          <input id="cl-ebay-url" class="ui" type="url" placeholder="https://ebay.io/m/... or ebay.com/itm/..." style="flex:1;margin:0;font-size:13px">
+          <button onclick="clLookupEbayURL(document.getElementById('cl-ebay-url').value)" style="padding:10px 14px;background:linear-gradient(135deg,#0064d2,#004b9f);border:none;border-radius:8px;color:#fff;cursor:pointer;font-size:13px;font-weight:700;white-space:nowrap">eBay 🛒</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="card" style="margin-top:12px">
+      <div class="lbl">Auto-Generated SKU</div>
+      <div id="cl-sku-display" style="font-family:monospace;font-size:18px;font-weight:800;color:var(--ac);margin:8px 0">CLO-GEN-L-00000</div>
+      <button class="cl-chip-btn" onclick="clAutoSKU()" style="background:var(--sf2);border:1px solid var(--bd);width:100%;padding:10px;border-radius:8px;color:var(--tx);font-size:13px;cursor:pointer">🔄 Regenerate SKU</button>
+    </div>
+    <div class="card">
+      <div class="lbl">Or enter SKU manually</div>
+      <input id="cl-sku-in" class="ui" type="text" placeholder="CLO-NIK-L-12345" style="width:100%;margin-top:6px" oninput="cl.sku=this.value">
+    </div>
+
+    <div id="cl-preview-card" style="display:none;background:var(--sf);border:2px solid var(--ac);border-radius:14px;padding:14px;margin-top:12px">
+      <div style="font-size:11px;color:var(--ac);text-transform:uppercase;letter-spacing:1px;font-weight:700;margin-bottom:10px">📝 eBay Listing Preview</div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:4px">TÍTULO (editable)</div>
+        <textarea id="cl-preview-title" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px;color:var(--tx);font-size:13px;font-weight:600;line-height:1.5;resize:none;font-family:inherit;min-height:60px" oninput="cl._ebayTitle=this.value;document.getElementById('cl-title-chars').textContent=this.value.length+'/80 chars'"></textarea>
+        <div id="cl-title-chars" style="font-size:10px;color:var(--mu);margin-top:2px">0/80 chars</div>
+      </div>
+
+      <div style="margin-bottom:10px">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:4px">DESCRIPCIÓN (editable)</div>
+        <textarea id="cl-preview-desc" style="width:100%;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:10px;color:var(--tx);font-size:12px;line-height:1.6;resize:none;font-family:inherit;min-height:90px" oninput="cl._ebayDesc=this.value"></textarea>
+      </div>
+
+      <div style="margin-bottom:4px">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:4px">💰 PRECIO DE VENTA (editable)</div>
+        <div style="display:flex;align-items:center;gap:8px">
+          <span style="font-size:20px;font-weight:800;color:var(--sv)">$</span>
+          <input id="cl-preview-price" type="number" step="0.01" min="0.99"
+            style="flex:1;background:var(--sf2);border:2px solid var(--sv);border-radius:10px;padding:10px 14px;color:var(--sv);font-size:22px;font-weight:900;text-align:center;outline:none"
+            oninput="cl.suggestedPrice=parseFloat(this.value)||0">
+          <div style="font-size:11px;color:var(--mu);line-height:1.4">Precio<br>eBay más<br>bajo</div>
+        </div>
+        <div id="cl-preview-price-note" style="font-size:11px;color:var(--mu);margin-top:4px;text-align:center"></div>
+      </div>
+
+      <div style="margin-top:12px;border-top:1px solid var(--bd);padding-top:12px">
+        <div style="font-size:11px;color:var(--mu);margin-bottom:6px">🖨️ PRINT LABEL — Zebra ZP450</div>
+        <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+          <span style="font-size:12px;color:var(--mu);white-space:nowrap">PC IP:</span>
+          <input id="cl-printer-ip" type="text" placeholder="192.168.1.25" 
+            value="${localStorage.getItem('savvy_printer_ip')||''}"
+            style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;font-family:monospace"
+            oninput="localStorage.setItem('savvy_printer_ip',this.value)">
+          <button onclick="clTestPrint()" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--mu);font-size:12px;cursor:pointer;white-space:nowrap">🧪 Test</button>
+        </div>
+        <button onclick="clPrintLabel()" style="width:100%;padding:15px;background:linear-gradient(135deg,#00e676,#66bb6a);border:none;border-radius:12px;color:#000;font-size:16px;font-weight:900;cursor:pointer;box-shadow:0 4px 12px rgba(0,230,118,0.3);transition:all 0.2s">
+          🖨️ PRINT LABEL
+        </button>
+        <div id="cl-print-status" style="font-size:12px;text-align:center;margin-top:6px;min-height:16px"></div>
+      </div>
+    </div>
+
+    <div class="cl-sect" style="margin-top:16px">
+      <div class="lbl">ITEM TYPE</div>
+      <div style="display:flex;gap:10px;margin-top:8px">
+        ${CL_TYPE_OPTIONS.map(t=>`<button class="cl-cond-btn${cl.type===t.id?' sel':''}" onclick="cl.type='${t.id}';this.closest('div').querySelectorAll('button').forEach(b=>b.classList.remove('sel'));this.classList.add('sel')" style="flex:1;padding:16px 8px">
+          <div style="font-size:26px;margin-bottom:5px">${t.icon}</div>
+          <div class="cond-lbl" style="font-size:13px">${t.label}</div>
+        </button>`).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" style="margin-top:12px">
+      <div class="lbl">GENDER</div>
+      <div style="display:flex;gap:8px;margin-top:8px;flex-wrap:wrap">
+        ${CL_GENDER_OPTIONS.map(g=>`<button class="cl-cond-btn${cl.gender===g.id?' sel':''}" onclick="cl.gender='${g.id}';this.closest('div').querySelectorAll('button').forEach(b=>b.classList.remove('sel'));this.classList.add('sel')" style="flex:1;min-width:60px;padding:14px 8px">
+          <div style="font-size:22px;margin-bottom:4px">${g.icon}</div>
+          <div class="cond-lbl" style="font-size:12px">${g.label}</div>
+        </button>`).join('')}
+      </div>
+    </div>
+    <button class="add-btn" onclick="clStep1Next()">Continue →</button>`;
+  clAutoSKU();
+}
+
+function clAutoSKU() {
+  const sku = 'CLO-GEN-L-' + Date.now().toString().slice(-5);
+  cl.sku = sku;
+  const el = $('cl-sku-display');
+  if (el) el.textContent = sku;
+}
+
+// ── Barcode Scanner — Clothing Module ─────────────────────────
+
+function clStartBarcodeScanner() {
+  const preview = $('cl-barcode-preview');
+  const scanBtn = $('cl-scan-btn');
+  const stopBtn = $('cl-scan-stop-btn');
+  if (!preview || !scanBtn) return;
+  preview.style.display = 'block';
+  scanBtn.style.display = 'none';
+  stopBtn.style.display = 'flex';
+  savvyStartScan('cl-barcode-video', (decodedText) => {
+    clStopBarcodeScanner();
+    clLookupBarcode(decodedText);
+  });
+}
+
+function clStopBarcodeScanner() {
+  const preview = $('cl-barcode-preview');
+  const scanBtn = $('cl-scan-btn');
+  const stopBtn = $('cl-scan-stop-btn');
+  savvyStopScan('cl-barcode-video');
+  if (preview) preview.style.display = 'none';
+  if (scanBtn) { scanBtn.style.display = 'flex'; scanBtn.style.flex = '1'; }
+  if (stopBtn) stopBtn.style.display = 'none';
+}
+
+async function clLookupBarcode(upc) {
+  if (!upc) return;
+  upc = String(upc).trim();
+  cl.upc = upc;
+  const resultDiv = $('cl-barcode-result');
+  if (!resultDiv) return;
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<span style="color:var(--mu)">🔍 Searching for UPC ' + upc + '...</span>';
+
+  try {
+    // Llamar al endpoint /search-upc en Railway
+    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+    const res = await fetch(`${RAILWAY_URL}/search-upc?upc=${encodeURIComponent(upc)}`);
+
+    if (!res.ok) {
+      resultDiv.innerHTML = '⚠️ Error: ' + res.status + '. Fill in manually below.';
+      return;
+    }
+
+    const data = await res.json();
+
+    // El backend devuelve { data: {...}, status: 'success' }, no { found, product }
+    // Aceptar si hay datos válidos, sin depender únicamente de "status"
+    // (las respuestas desde caché pueden no incluir status en algunas versiones del backend)
+    if (!data.data || (!data.data.name && !data.data.brand)) {
+      resultDiv.innerHTML = '⚠️ Not found. Fill in manually below.';
+      return;
+    }
+
+    const p = data.data;
+    const title = p.name || '';
+    const itemPrice = p.ebay_price || 0;
+    const shippingPrice = p.ebay_shipping || 0;
+    const totalPrice = p.ebay_total || itemPrice;
+    const avgPrice = totalPrice || p.amazon_price || p.walmart_price || 0;
+    const minPrice = avgPrice;
+    const suggestedPrice = p.suggested_price || (avgPrice > 0 ? avgPrice * 0.95 : 19.99);
+
+    // Usar marca de Algopix si viene; si no, detectar del título
+    let brand = (p.brand || '').trim();
+    const titleLower = title.toLowerCase();
+    if (!brand) {
+      brand = 'Unknown';
+      const commonBrands = ['nike', 'adidas', 'puma', 'reebok', 'under armour', 'gap', 'ralph lauren', 'tommy hilfiger', 'levi', 'levis', 'calvin klein', 'champion', 'carhartt', 'supreme'];
+      for (let b of commonBrands) {
+        if (titleLower.includes(b)) {
+          brand = b.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ');
+          break;
+        }
+      }
+    }
+
+    // Auto-detectar categoría del título
+    let category = 'Other';
+    if (titleLower.includes('jeans') || titleLower.includes('denim')) category = 'Jeans';
+    else if (titleLower.includes('pant') || titleLower.includes('trouser')) category = 'Pants';
+    else if (titleLower.includes('short')) category = 'Shorts';
+    else if (titleLower.includes('dress')) category = 'Dress';
+    else if (titleLower.includes('skirt')) category = 'Skirt';
+    else if (titleLower.includes('jacket') || titleLower.includes('coat')) category = 'Jacket';
+    else if (titleLower.includes('1/4 zip') || titleLower.includes('quarter zip') || titleLower.includes('1/4-zip') || titleLower.includes('half zip') || titleLower.includes('1/2 zip')) category = 'Quarter Zip';
+    else if (titleLower.includes('hoodie') || titleLower.includes('hooded')) category = 'Hoodie';
+    else if (titleLower.includes('sweatshirt') || titleLower.includes('sweat shirt')) category = 'Sweatshirt';
+    else if (titleLower.includes('sweater') || titleLower.includes('pullover')) category = 'Sweater';
+    else if (titleLower.includes('tank')) category = 'Tank Top';
+    else if (titleLower.includes('sleeveless')) category = 'Sleeveless';
+    else if (titleLower.includes('polo')) category = 'Polo';
+    else if (titleLower.includes('shacket')) category = 'Shacket';
+    else if (titleLower.includes('shirt') || titleLower.includes('tee') || titleLower.includes('t-shirt')) category = 'T-Shirt';
+    else if (titleLower.includes('vest')) category = 'Vest';
+    else if (titleLower.includes('activewear')) category = 'Activewear';
+    else if (titleLower.includes('swimwear') || titleLower.includes('swimsuit') || titleLower.includes('bikini')) category = 'Swimwear';
+    else if (titleLower.includes('scrub')) category = 'Scrubs';
+    else if (titleLower.includes('sneaker') || titleLower.includes('shoe')) category = 'Sneakers';
+    else if (titleLower.includes('boot')) category = 'Boots';
+
+    // Auto-detectar talla del título
+    let size = 'One Size';
+    const sizePatterns = [
+      { regex: /size\s*([xsl]|m|xx?l|lxl|xl|2xl|3xl|4xl)/i, label: (m) => m.toUpperCase() },
+      { regex: /([0-9]{1,2})\s*(us|men|women|kid)/i, label: (m) => m },
+      { regex: /^([0-9]{1,2})$/, label: (m) => m }
+    ];
+    for (let pat of sizePatterns) {
+      const match = title.match(pat.regex);
+      if (match) {
+        size = pat.label(match[1]);
+        break;
+      }
+    }
+
+    // Auto-rellenar datos
+    // Si la marca viene vacía del backend, extraerla de la primera palabra del título
+    if (!brand || brand === 'Unknown' || brand === '') {
+      // Extraer la primera palabra del título como marca (suele ser la marca)
+      const firstWord = title.split(/\s+/)[0] || '';
+      if (firstWord.length > 1 && !/^\d/.test(firstWord)) {
+        brand = firstWord;
+      }
+    }
+    // Capitalizar correctamente la marca
+    brand = brand.split(' ').map(w => w.charAt(0).toUpperCase() + w.slice(1).toLowerCase()).join(' ');
+
+    cl.brand = CL_BRANDS && CL_BRANDS.includes(brand) ? brand : 'Other';
+    if (!CL_BRANDS?.includes(brand) && brand !== 'Unknown') cl.brandCustom = brand;
+    cl.category = category;
+    cl.size = size;
+
+    // Precios
+    cl.suggestedPrice = suggestedPrice;
+    cl.pricing = { active: { low: minPrice }, sold: { median: avgPrice } };
+    cl.pricingBase = { activeLow: minPrice, soldMed: avgPrice };
+
+    // SKU: 3 primeras letras de marca + UPC completo + -1
+    const brandCode = brand.replace(/[^A-Za-z]/g, '').substring(0, 3).toUpperCase() || 'GEN';
+    const upcFull = upc; // UPC completo (12 dígitos)
+    cl.sku = `${brandCode}-${upcFull}-1`;
+    const skuDisplay = $('cl-sku-display');
+    if (skuDisplay) skuDisplay.textContent = cl.sku;
+    const skuIn = $('cl-sku-in');
+    if (skuIn) skuIn.value = cl.sku;
+
+    // Mostrar resultado
+    const sourceLabel = p.data_source || '';
+    // Construir URL de búsqueda en eBay con filtros: Buy It Now, Sort: Price+Shipping lowest
+    const ebaySearchUrl = 'https://www.ebay.com/sch/i.html?_nkw=' + encodeURIComponent(cl.upc)
+      + '&LH_BIN=1&_sop=15&LH_ItemCondition=3&_ipg=25';
+
+      resultDiv.innerHTML = `
+      <div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found! ${sourceLabel}</div>
+      <div>🏷️ <strong>Brand:</strong> ${brand}</div>
+      <div style="margin:4px 0">📦 ${title.substring(0, 80)}${title.length > 80 ? '...' : ''}</div>
+      ${totalPrice > 0 ? `
+        <div>💰 <strong>Precio:</strong> $${itemPrice.toFixed(2)} + envío $${shippingPrice.toFixed(2)} = <strong style="color:#00e676">$${totalPrice.toFixed(2)} total</strong></div>
+        <div style="font-size:11px;color:var(--mu);margin-top:2px">📊 Precio más bajo en eBay (Buy It Now)</div>
+      ` : '<div style="color:var(--mu)">💰 Sin precio disponible (verificar cuota de Algopix)</div>'}
+      <div>📏 <strong>Size detected:</strong> ${size}</div>
+      <div style="margin-top:4px">🗂️ <strong>Category:</strong> ${category}</div>
+      <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${cl.sku}</span></div>
+      <a href="${ebaySearchUrl}" target="_blank" rel="noopener"
+         style="display:block;margin-top:10px;background:#0064d2;border-radius:10px;padding:10px 14px;
+                color:#fff;font-weight:700;font-size:13px;text-decoration:none;text-align:center">
+        🔍 Ver precio real en eBay →
+      </a>
+      <div style="margin-top:8px;font-size:11px;color:var(--mu)">✔ Datos pre-llenados → Continúa para confirmar</div>
+    `;
+
+  } catch(e) {
+    console.error('clLookupBarcode error:', e);
+    resultDiv.innerHTML = '❌ Error: ' + e.message;
+  }
+}
+
+// ── eBay URL Lookup — Clothing Module (soporta short links ebay.io) ──
+async function clLookupEbayURL(urlStr) {
+  if (!urlStr || !urlStr.trim()) { toast('⚠️ Paste an eBay URL first'); return; }
+  urlStr = urlStr.trim();
+
+  var resultDiv = $('cl-barcode-result');
+  if (!resultDiv) return;
+  resultDiv.style.display = 'block';
+  resultDiv.innerHTML = '<span style="color:var(--mu)">🔗 Resolving eBay URL...</span>';
+
+  var RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
+  var itemId = null;
+
+  // Detectar si es short link (ebay.io) — resolverlo via Railway
+  var isShortLink = urlStr.includes('ebay.io') || urlStr.includes('ebay.com/itm') === false && !urlStr.match(/\d{10,13}/);
+
+  if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//) ) {
+    // Es un short link o no tiene /itm/ — resolver via Railway
+    try {
+      resultDiv.innerHTML = '<span style="color:var(--mu)">🔗 Resolving short link via server...</span>';
+      var resolveRes = await fetch(RAILWAY_URL + '/resolve-url?url=' + encodeURIComponent(urlStr));
+      if (resolveRes.ok) {
+        var resolveData = await resolveRes.json();
+        if (resolveData.status === 'success' && resolveData.item_id) {
+          itemId = resolveData.item_id;
+          resultDiv.innerHTML = '<span style="color:var(--mu)">✅ Short link resolved → Item ' + itemId + ' — loading details...</span>';
+        }
+      }
+    } catch(e) {
+      console.warn('resolve-url error:', e.message);
+    }
+  }
+
+  // Si no se resolvió via servidor, intentar extraer del URL directamente
+  if (!itemId) {
+    try {
+      var u = new URL(urlStr);
+      var pathMatch = u.pathname.match(/\/itm\/(?:[^\/]+\/)?(\d{10,13})/);
+      if (pathMatch) itemId = pathMatch[1];
+      if (!itemId) itemId = u.searchParams.get('item') || u.searchParams.get('itemId');
+      if (!itemId) {
+        var numMatch = u.pathname.match(/(\d{10,13})/);
+        if (numMatch) itemId = numMatch[1];
+      }
+    } catch(e) {
+      var numMatch2 = urlStr.match(/(\d{10,13})/);
+      if (numMatch2) itemId = numMatch2[1];
+    }
+  }
+
+  if (!itemId) {
+    resultDiv.innerHTML = '❌ Could not find eBay Item ID.<br><small style="color:var(--mu)">Try copying the link again from eBay app (3 dots → Share → Copy link)</small>';
+    return;
+  }
+
+  resultDiv.innerHTML = '<span style="color:var(--mu)">🛒 Loading eBay item ' + itemId + '...</span>';
+
+  try {
+    var res = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
+    if (!res.ok) {
+      resultDiv.innerHTML = '⚠️ eBay error ' + res.status + '. Fill in manually below.';
+      return;
+    }
+    var json = await res.json();
+    if (json.status !== 'success' || !json.data) {
+      resultDiv.innerHTML = '⚠️ Item not found. Fill in manually below.';
+      return;
+    }
+
+    var d = json.data;
+    var title = d.title || '';
+    var price = d.price || 0;
+    var shippingCost = d.shipping_cost || 0;
+    var shippingType = d.shipping_type || 'calculated';
+    var totalPrice = d.total_price || price;
+    var brand = d.brand || '';
+    var imageUrl = d.image_url || '';
+
+    // Auto-detectar marca del título si no viene en aspectos
+    if (!brand) {
+      var tl = title.toLowerCase();
+      var knownBrands = ['nike','adidas','puma','reebok','under armour','gap','ralph lauren',
+        'tommy hilfiger','levi','levis','calvin klein','champion','carhartt','supreme',
+        'zara','h&m','forever 21','old navy','patagonia','north face','columbia'];
+      for (var b of knownBrands) {
+        if (tl.includes(b)) {
+          brand = b.split(' ').map(function(w){return w.charAt(0).toUpperCase()+w.slice(1);}).join(' ');
+          break;
+        }
+      }
+    }
+
+    // Auto-detectar categoría
+    var category = 'Other';
+    var tl2 = title.toLowerCase();
+    if (tl2.includes('jeans')||tl2.includes('denim')) category='Jeans';
+    else if (tl2.includes('pant')||tl2.includes('trouser')) category='Pants';
+    else if (tl2.includes('short')) category='Shorts';
+    else if (tl2.includes('dress')) category='Dress';
+    else if (tl2.includes('skirt')) category='Skirt';
+    else if (tl2.includes('jacket')||tl2.includes('coat')) category='Jacket';
+    else if (tl2.includes('hoodie')||tl2.includes('hooded')) category='Hoodie';
+    else if (tl2.includes('shirt')||tl2.includes('tee')||tl2.includes('t-shirt')) category='T-Shirt';
+    else if (tl2.includes('sweater')||tl2.includes('pullover')) category='Sweater';
+    else if (tl2.includes('vest')) category='Vest';
+    else if (tl2.includes('sneaker')||tl2.includes('shoe')) category='Sneakers';
+    else if (tl2.includes('boot')) category='Boots';
+
+    // Auto-detectar talla
+    var size = 'One Size';
+    var sizeM = title.match(/\b(XXS|XS|S|M|L|XL|XXL|2XL|3XL|4XL)\b/i);
+    if (sizeM) size = sizeM[1].toUpperCase();
+
+    // Guardar en cl
+    cl.upc = itemId;
+    cl.brand = (typeof CL_BRANDS !== 'undefined' && CL_BRANDS.includes(brand)) ? brand : 'Other';
+    if (brand && brand !== 'Unknown') cl.brandCustom = brand;
+    cl.category = category;
+    cl.size = size;
+    cl.suggestedPrice = price > 0 ? price * 0.85 : 0;
+    cl.pricing = { active: { low: price }, sold: { median: price } };
+    cl.pricingBase = { activeLow: price, soldMed: price };
+    cl.ebayItemId = itemId;
+    cl.ebayItemUrl = d.item_url || urlStr;
+    if (imageUrl) cl.ebayImageUrl = imageUrl;
+
+    // SKU
+    var brandCode = (brand || 'GEN').replace(/[^A-Z0-9]/gi,'').substring(0,3).toUpperCase();
+    var catRef = (category||'ITEM').replace(/\s+/g,'-').toUpperCase();
+    cl.sku = brandCode + '-' + itemId.slice(-5) + '-' + catRef;
+    var skuDisplay = $('cl-sku-display');
+    if (skuDisplay) skuDisplay.textContent = cl.sku;
+    var skuIn = $('cl-sku-in');
+    if (skuIn) skuIn.value = cl.sku;
+
+    resultDiv.innerHTML =
+      '<div style="color:#00e676;font-weight:700;margin-bottom:6px">✅ Found on eBay!</div>' +
+      (imageUrl ? '<img src="'+imageUrl+'" style="width:80px;height:80px;object-fit:cover;border-radius:8px;margin-bottom:6px;float:right;margin-left:8px">' : '') +
+      '<div>🏷️ <strong>Brand:</strong> ' + (brand||'Unknown') + '</div>' +
+      '<div style="margin:4px 0">📦 ' + title.substring(0,80) + (title.length>80?'...':'') + '</div>' +
+      '<div style="margin-top:8px;background:var(--sf);border-radius:10px;padding:10px">' +
+        '<div style="display:flex;justify-content:space-between;margin-bottom:6px">' +
+          '<span>💰 Item price:</span><strong>$' + price.toFixed(2) + '</strong>' +
+        '</div>' +
+        '<div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px">' +
+          '<span>🚚 Shipping cost:</span>' +
+          '<div style="display:flex;align-items:center;gap:4px">' +
+            '<span style="color:var(--tx)">$</span>' +
+            '<input id="cl-shipping-input" type="number" step="0.01" min="0" placeholder="0.00" value="' + (shippingCost > 0 ? shippingCost.toFixed(2) : '') + '"' +
+            ' style="width:70px;background:var(--sf2);border:1px solid var(--ac);border-radius:6px;padding:4px 6px;color:var(--tx);font-size:14px;font-weight:700;text-align:right"' +
+            ' oninput="clUpdateTotal(' + price + ')">' +
+          '</div>' +
+        '</div>' +
+        '<div style="border-top:1px solid var(--bd);padding-top:6px;display:flex;justify-content:space-between">' +
+          '<span style="color:var(--ac);font-weight:800">Total buyer pays:</span>' +
+          '<strong id="cl-total-display" style="color:var(--ac);font-size:16px">$' + (shippingCost > 0 ? totalPrice.toFixed(2) : price.toFixed(2)) + '</strong>' +
+        '</div>' +
+      '</div>' +
+      '<div style="font-size:11px;color:var(--gd);margin-top:6px">👆 Enter the shipping cost from eBay listing above</div>' +
+      '<div style="margin-top:6px">📏 <strong>Size:</strong> ' + size + ' &nbsp;|&nbsp; 🗂️ ' + category + '</div>' +
+      '<div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">' + cl.sku + '</span></div>' +
+      '<div style="clear:both"></div>';
+
+    // ── Llenar tarjeta de preview usando TOTAL (item + shipping) ──
+    var ebayTitle = (brand ? brand + ' ' : '') + title.replace(brand, '').trim();
+    if (ebayTitle.length > 80) ebayTitle = ebayTitle.substring(0, 77) + '...';
+    var ebayDesc = 'Brand: ' + (brand||'Unknown') + '\n' +
+      'Item: ' + title + '\n' +
+      'Size: ' + size + '\n' +
+      'Category: ' + category + '\n' +
+      'Condition: New\n\n' +
+      'Fast shipping from Lumberton, NC. Ships same business day.\n' +
+      '30-day returns accepted.';
+
+    // Precio de venta = 95% del total que paga el comprador en eBay
+    // Nosotros ofrecemos FREE shipping → nuestro precio cubre envío
+    var salePrice = totalPrice > 0 ? (totalPrice * 0.95).toFixed(2) : '19.99';
+    cl._ebayTitle = ebayTitle;
+    cl._ebayDesc  = ebayDesc;
+    cl.suggestedPrice = parseFloat(salePrice);
+
+    var previewCard  = document.getElementById('cl-preview-card');
+    var previewTitle = document.getElementById('cl-preview-title');
+    var previewDesc  = document.getElementById('cl-preview-desc');
+    var previewPrice = document.getElementById('cl-preview-price');
+    var previewNote  = document.getElementById('cl-preview-price-note');
+    var titleChars   = document.getElementById('cl-title-chars');
+    if (previewCard)  previewCard.style.display = 'block';
+    if (previewTitle) previewTitle.value = ebayTitle;
+    if (previewDesc)  previewDesc.value  = ebayDesc;
+    if (previewPrice) previewPrice.value = salePrice;
+    if (titleChars)   titleChars.textContent = ebayTitle.length + '/80 chars';
+    if (previewNote) {
+      var noteText = 'eBay item $' + price.toFixed(2);
+      if (shippingType === 'free') noteText += ' + FREE shipping';
+      else if (shippingCost > 0)  noteText += ' + $' + shippingCost.toFixed(2) + ' shipping = $' + totalPrice.toFixed(2) + ' total';
+      noteText += ' → tu precio sugerido: $' + salePrice + ' (con envío gratis incluido)';
+      previewNote.textContent = noteText;
+    }
+
+    clGeneratePreviewTitle(brand, title, category, size, totalPrice);
+
+  } catch(e) {
+    console.error('clLookupEbayURL error:', e);
+    resultDiv.innerHTML = '❌ Error: ' + e.message;
+  }
+}
+
+// ── ZEBRA PRINT FUNCTIONS ─────────────────────────────────────
+async function clPrintLabel() {
+  // Look for IP input in review step first, then Step 1 fallback
+  var ipInput = document.getElementById('cl-review-printer-ip') || document.getElementById('cl-printer-ip');
+  var statusEl = document.getElementById('cl-review-print-status') || document.getElementById('cl-print-status');
+  var ip = (ipInput ? ipInput.value.trim() : '') || localStorage.getItem('savvy_printer_ip') || '';
+
+  if (!ip) {
+    if (statusEl) { statusEl.textContent = '⚠️ Enter the PC IP address first'; statusEl.style.color = 'var(--gd)'; }
+    if (ipInput) ipInput.focus();
+    return;
+  }
+
+  // Build title from AI-generated title, or fall back to manual fields
+  var sku   = cl.sku || '';
+  var title = cl._ebayTitle || cl._reviewTitle || '';
+  if (!title) {
+    // Build from manual fields — works 100% without eBay lookup
+    var parts = [];
+    if (cl.brand && cl.brand !== 'Other') parts.push(cl.brand);
+    else if (cl.brandCustom) parts.push(cl.brandCustom);
+    if (cl.category) parts.push(cl.category);
+    if (cl.color)    parts.push(cl.color);
+    if (cl.size)     parts.push('Size ' + cl.size);
+    if (cl.condition) parts.push(cl.condition);
+    title = parts.join(' ');
+  }
+  if (!title) title = sku; // last resort
+
+  if (!sku) {
+    if (statusEl) { statusEl.textContent = '⚠️ No SKU — genera un SKU primero'; statusEl.style.color = 'var(--dw)'; }
+    return;
+  }
+
+  if (statusEl) { statusEl.textContent = '⏳ Sending to printer...'; statusEl.style.color = 'var(--mu)'; }
+
+  try {
+    var res = await fetch('http://' + ip + ':5001/print', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ title: title, sku: sku }),
+      signal: AbortSignal.timeout(5000)
+    });
+    var d = await res.json();
+    if (d.status === 'success') {
+      if (statusEl) { statusEl.textContent = '✅ Label printed!'; statusEl.style.color = 'var(--sv)'; }
+      toast('✅ Label printed on Zebra!');
+    } else {
+      if (statusEl) { statusEl.textContent = '❌ ' + (d.message || 'Print error'); statusEl.style.color = 'var(--dw)'; }
+    }
+  } catch(e) {
+    if (statusEl) {
+      statusEl.textContent = '❌ No se pudo conectar a la PC (192.168.1.25:5001). Verifica que el servidor de impresión esté corriendo.';
+      statusEl.style.color = 'var(--dw)';
+    }
+  }
+}
+
+async function clTestPrint() {
+  var ipInput = document.getElementById('cl-review-printer-ip') || document.getElementById('cl-printer-ip');
+  var statusEl = document.getElementById('cl-review-print-status') || document.getElementById('cl-print-status');
+  var ip = ipInput ? ipInput.value.trim() : '';
+  if (!ip) { if(statusEl){statusEl.textContent='⚠️ Enter PC IP first';statusEl.style.color='var(--gd)';} return; }
+  localStorage.setItem('savvy_printer_ip', ip);
+  if (statusEl) { statusEl.textContent = '⏳ Testing...'; statusEl.style.color = 'var(--mu)'; }
+  try {
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 5000);
+    const res = await fetch('http://' + ip + ':5001/test', { signal: controller.signal });
+    clearTimeout(timeoutId);
+    if (!res.ok) {
+      if (statusEl) { statusEl.textContent = '❌ Server returned error: ' + res.status; statusEl.style.color = 'var(--dw)'; }
+      return;
+    }
+    const d = await res.json();
+    if (statusEl) { statusEl.textContent = '✅ Connected! PC is online.'; statusEl.style.color = 'var(--sv)'; }
+  } catch(e) {
+    if (statusEl) { 
+      const msg = e.name === 'AbortError' ? 'Timeout — PC not responding' : 'Cannot reach PC at ' + ip + ':5001';
+      statusEl.textContent = '❌ ' + msg; 
+      statusEl.style.color = 'var(--dw)'; 
+    }
+  }
+}
+
+// ── Recalcular total cuando usuario ingresa el envío ──────────
+function clUpdateTotal(itemPrice) {
+  var shipInput = document.getElementById('cl-shipping-input');
+  var totalDisplay = document.getElementById('cl-total-display');
+  var previewPrice = document.getElementById('cl-preview-price');
+  var previewNote  = document.getElementById('cl-preview-price-note');
+  if (!shipInput) return;
+
+  var shipCost = parseFloat(shipInput.value) || 0;
+  var total = itemPrice + shipCost;
+  var salePrice = (total * 0.95).toFixed(2);
+
+  if (totalDisplay) totalDisplay.textContent = '$' + total.toFixed(2);
+  if (previewPrice) previewPrice.value = salePrice;
+  if (previewNote)  previewNote.textContent =
+    'Item $' + itemPrice.toFixed(2) + ' + shipping $' + shipCost.toFixed(2) +
+    ' = $' + total.toFixed(2) + ' total → tu precio: $' + salePrice + ' (con envío gratis)';
+
+  cl.suggestedPrice = parseFloat(salePrice);
+}
+
+// ── Generar título SEO con Claude AI para el preview ─────────
+async function clGeneratePreviewTitle(brand, title, category, size, price) {
+  var apiKey = localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY;
+  var previewTitle = document.getElementById('cl-preview-title');
+  var titleChars   = document.getElementById('cl-title-chars');
+  if (!apiKey || !previewTitle) return;
+
+  // Indicar que está generando
+  previewTitle.style.borderColor = 'var(--gd)';
+  previewTitle.style.color = 'var(--gd)';
+
+  var prompt = 'Write a single eBay clothing listing title for this item. MAX 80 characters. Start with brand. End with condition (New or Pre-Owned). No emojis. No quotes.\n\nBrand: ' + (brand||'Unknown') + '\nOriginal title: ' + title + '\nCategory: ' + category + '\nSize: ' + size + '\n\nRespond with ONLY the title text, nothing else.';
+
+  try {
+    var r = await fetch('https://api.anthropic.com/v1/messages', {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-api-key': apiKey,
+        'anthropic-version': '2023-06-01',
+        'anthropic-dangerous-direct-browser-access': 'true'
+      },
+      body: JSON.stringify({
+        model: 'claude-haiku-4-5-20251001',
+        max_tokens: 100,
+        messages: [{ role: 'user', content: prompt }]
+      })
+    });
+    var d = await r.json();
+    var aiTitle = (d.content && d.content[0] && d.content[0].text || '').trim().substring(0, 80);
+    if (aiTitle && aiTitle.length > 10) {
+      previewTitle.value = aiTitle;
+      if (titleChars) titleChars.textContent = aiTitle.length + '/80 chars';
+      cl._ebayTitle = aiTitle;
+    }
+  } catch(e) { /* silently fail — keep the fallback title */ }
+
+  previewTitle.style.borderColor = 'var(--bd)';
+  previewTitle.style.color = 'var(--tx)';
+}
+
+function clStep1Next() {
+  if (!cl.sku) { toast('❌ Genera o ingresa un SKU'); return; }
+  
+  // ✅ Validar que haya seleccionado Gender
+  if (!cl.gender || cl.gender === '') {
+    toast('⚠️ Selecciona el género (Gender)'); return;
+  }
+  
+  clRenderAttr();
+  clGo(2);
+}
+
+// ── Step 2: Attributes ──────────────────────────────────────
+function clRenderAttr() {
+  const el = $('cl-attr');
+
+  el.innerHTML = `
+    <div class="cl-step-hdr"><h2>Item Info</h2><p>Fast — tap to select</p></div>
+    <div class="cl-prog">${[1,2,3,4,5].map(i=>`<div class="cl-step-dot${i<=2?(i<2?' done':' active'):''}" id="cl-step-${i}"></div>`).join('<div class="cl-step-line"></div>')}</div>
+
+    <div class="cl-sect">
+      <div class="lbl">BRAND</div>
+      <div class="cl-chips" id="brand-chips">
+        ${CL_BRANDS.map(b=>`<button class="cl-chip${cl.brand===b?' sel':''}" data-b="${b.replace(/"/g,'&quot;')}" onclick="clSetBrand(this.dataset.b)">${b}</button>`).join('')}
+      </div>
+      <input id="brand-custom-in" class="ui" type="text" placeholder="Custom brand..." style="display:${cl.brand==='Other'?'block':'none'};width:100%;margin-top:8px" value="${cl.brandCustom}" oninput="cl.brandCustom=this.value">
+    </div>
+
+    <div class="cl-sect">
+      <div class="lbl">CATEGORY</div>
+      <div class="cl-chips" id="cat-chips">
+        ${(cl.type==='shoes'?CL_SHOE_CATS:CL_CATS).map(c=>`<button class="cl-chip${cl.category===c?' sel':''}" onclick="clSetCat('${c}')">${c}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="inseam-sect" style="display:${['Pants','Jeans','Shorts'].includes(cl.category)?'block':'none'}">
+      <div class="lbl">INSEAM (largo de pierna)</div>
+      <div class="cl-chips" id="inseam-chips">
+        ${['28"','29"','30"','31"','32"','33"','34"','36"','Unspecified'].map(v=>
+          '<button class="cl-chip cl-inseam-chip' + (cl.inseam===v?' sel':'') + '" data-v="' + v + '" data-action="inseam">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="dresslength-sect" style="display:${['Dress','Skirt'].includes(cl.category)?'block':'none'}">
+      <div class="lbl">DRESS / SKIRT LENGTH</div>
+      <div class="cl-chips" id="dresslength-chips">
+        ${['Mini','Above Knee','Knee Length','Midi','Maxi','Floor Length'].map(v=>
+          '<button class="cl-chip cl-dresslength-chip' + (cl.dressLength===v?' sel':'') + '" data-v="' + v + '" onclick="clSetDressLength(\'' + v + '\')">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="outermaterial-sect" style="display:${['Jacket','Coat','Vest'].includes(cl.category)?'block':'none'}">
+      <div class="lbl">OUTER SHELL MATERIAL</div>
+      <div class="cl-chips" id="outermaterial-chips">
+        ${['Cotton','Polyester','Nylon','Wool','Denim','Leather','Fleece','Down','Synthetic','Other'].map(v=>
+          '<button class="cl-chip cl-outermaterial-chip' + ((cl.outerMaterial||'')==='v'?' sel':'') + '" data-v="' + v + '" onclick="clSetOuterMaterial(\'' + v + '\')">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="swimstyle-sect" style="display:${cl.category==='Swimwear'?'block':'none'}">
+      <div class="lbl">SWIMWEAR STYLE</div>
+      <div class="cl-chips" id="swimstyle-chips">
+        ${['Bikini','One-Piece','Tankini','Board Shorts','Swim Trunks','Rash Guard','Cover-Up','Other'].map(v=>
+          '<button class="cl-chip cl-swimstyle-chip' + ((cl.swimStyle||'')==='v'?' sel':'') + '" data-v="' + v + '" onclick="clSetSwimStyle(\'' + v + '\')">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="activity-sect" style="display:${['Activewear Top','Activewear Bottom'].includes(cl.category)?'block':'none'}">
+      <div class="lbl">ACTIVITY / SPORT</div>
+      <div class="cl-chips" id="activity-chips">
+        ${['Running','Yoga','Training','Basketball','Soccer','Cycling','Tennis','Swimming','General Fitness','Other'].map(v=>
+          '<button class="cl-chip cl-activity-chip' + ((cl.activity||'')==='v'?' sel':'') + '" data-v="' + v + '" onclick="clSetActivity(\'' + v + '\')">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="shoewidth-sect" style="display:${cl.type==='shoes'?'block':'none'}">
+      <div class="lbl">SHOE WIDTH</div>
+      <div class="cl-chips" id="shoewidth-chips">
+        ${['Narrow (AA/A)','Regular (B/M)','Wide (D/W)','Extra Wide (EE/2E)','Extra Wide (EEE/3E)','Not Specified'].map(v=>
+          '<button class="cl-chip cl-shoewidth-chip' + ((cl.shoeWidth||'')==='v'?' sel':'') + '" data-v="' + v + '" onclick="clSetShoeWidth(\'' + v + '\')">' + v + '</button>'
+        ).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect">
+      <div class="lbl">TALLA</div>
+      <div class="cl-size-wrap" id="size-wheel-wrap">
+        <div class="wh-fade-top"></div>
+        <div class="wh-indicator"></div>
+        <div class="wh-fade-bot"></div>
+        <div class="wheel-list" id="wheel-list"></div>
+      </div>
+      <div style="text-align:center;margin-top:8px;font-size:13px;color:var(--mu)">
+        Selected size: <strong id="size-display" style="color:var(--ac);font-size:15px">L</strong>
+      </div>
+      <div id="custom-size-row" style="display:none;margin-top:8px">
+        <input class="ui" id="custom-size-in" type="text" placeholder="Custom size (e.g. 6X, 26W, Petite M...)" oninput="cl.size=this.value">
+      </div>
+    </div>
+
+    <div class="cl-sect">
+      <div class="lbl">COLOR</div>
+      <div class="cl-colors">
+        ${CL_COLORS.map(c=>`<button class="cl-color-chip${cl.color===c.name?' sel':''}" onclick="clSetColor('${c.name}')" style="--swatch:${c.hex}" title="${c.name}">
+          <span class="swatch"></span><span class="cname">${c.name}</span>
+        </button>`).join('')}
+      </div>
+      <input id="color-custom-in" class="ui" type="text" placeholder="Custom color..." style="display:${cl.color==='Other'?'block':'none'};width:100%;margin-top:8px" value="${cl.colorCustom}" oninput="cl.colorCustom=this.value">
+    </div>
+
+    <div class="cl-sect">
+    <div class="cl-sect">
+      <div class="lbl">STYLE</div>
+      <div class="cl-chips" id="style-chips">
+        ${CL_STYLES.map(s=>`<button class="cl-chip cl-style-chip${cl.style===s?' sel':''}" data-s="${s}" onclick="clSetStyle('${s}')">${s}</button>`).join('')}
+      </div>
+    </div>
+
+      <div class="lbl">CONDITION</div>
+      <div class="cl-cond-grid">
+        ${CL_CONDITIONS.map(c=>`<button class="cl-cond-btn${cl.condition===c.id?' sel':''}" onclick="clSetCond('${c.id}')">
+          <div class="cond-lbl">${c.label}</div>
+          <div class="cond-sub">${c.sub}</div>
+        </button>`).join('')}
+      </div>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <button class="ag-btn" onclick="clGo(1)" style="flex:1">← Back</button>
+      <button class="add-btn" onclick="clStep2Next()" style="flex:2;margin-bottom:0">Continue →</button>
+    </div>`;
+}
+
+
+
+
+// ── BACKGROUND REMOVAL SERVICES ──────────────────────────────
+function savePhotoroomKey() {
+  var v = document.getElementById('phroomKeyIn')?.value?.trim();
+  if (!v) { toast('⚠️ Enter PhotoRoom API key'); return; }
+  localStorage.setItem('photoroom_key', v);
+  showRbgStatus('✅ PhotoRoom key saved', 'var(--sv)');
+  toast('✅ PhotoRoom key saved');
+}
+
+// Usar PhotoRoom primero, luego Remove.bg, luego canvas
+async function removeBackground(dataUrl) {
+  // Usar keys de productos, con fallback a keys de ropa si no están configuradas
+  var prKey  = localStorage.getItem('photoroom_key') || localStorage.getItem('cl_photoroom_key') || DEFAULT_PHOTOROOM_KEY;
+  var rbgKey = localStorage.getItem('rbg_key') || localStorage.getItem('cl_rbg_key') || DEFAULT_RBG_KEY;
+  var b64    = dataUrl.split(',')[1];
+  if (!b64) return null;
+
+  // 1. Intentar PhotoRoom
+  if (prKey) {
+    try {
+      var r = await fetch(WORKER + '/?action=photoroom', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ image: b64, key: prKey })
+      });
+      var d = await r.json();
+      if (d.success && d.image) return 'data:image/png;base64,' + d.image;
+    } catch(e) {}
+  }
+
+  // 2. Intentar Remove.bg
+  if (rbgKey) {
+    try {
+      var r2 = await fetch(WORKER + '/?action=removebg', {
+        method: 'POST', headers: {'Content-Type':'application/json'},
+        body: JSON.stringify({ image: b64, key: rbgKey })
+      });
+      var d2 = await r2.json();
+      if (d2.success && d2.image) return 'data:image/png;base64,' + d2.image;
+    } catch(e) {}
+  }
+
+  return null; // fallback al canvas (caller manejará esto)
+}
+
+async function testBgRemoval() {
+  var prKey  = localStorage.getItem('photoroom_key') || DEFAULT_PHOTOROOM_KEY;
+  var rbgKey = localStorage.getItem('rbg_key') || DEFAULT_RBG_KEY;
+  if (!prKey && !rbgKey) {
+    showRbgStatus('❌ No API key configured — add PhotoRoom or Remove.bg key above', 'var(--dw)');
+    return;
+  }
+  showRbgStatus('⏳ Testing...', 'var(--gd)');
+  var testPng='iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==';
+  try {
+    var service = prKey ? 'photoroom' : 'removebg';
+    var key     = prKey || rbgKey;
+    var r = await fetch(WORKER+'/?action='+service, {
+      method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({ image: testPng, key })
+    });
+    var d = await r.json();
+    if (d.success || (d.error && (d.error.includes('roi')||d.error.includes('empty')||d.error.includes('400')))) {
+      showRbgStatus('✅ ' + (prKey?'PhotoRoom':'Remove.bg') + ' connected and working!', 'var(--sv)');
+    } else {
+      showRbgStatus('❌ Error: ' + (d.error||'unknown'), 'var(--dw)');
+    }
+  } catch(e) {
+    showRbgStatus('❌ Could not connect — is the Worker deployed?', 'var(--dw)');
+  }
+}
+
+// ── REMOVE.BG ────────────────────────────────────────────────
+function saveRbgKey() {
+  const v = document.getElementById('rbgKeyIn')?.value?.trim();
+  if (!v) { toast('⚠️ Enter an API key'); return; }
+  localStorage.setItem('rbg_key', v);
+  showRbgStatus('✅ API Key saved — now test the connection', 'var(--sv)');
+  toast('✅ Remove.bg key saved');
+}
+
+function showRbgStatus(msg, color) {
+  const el = document.getElementById('rbg-status');
+  if (!el) return;
+  el.textContent = msg;
+  el.style.display = 'block';
+  el.style.background = color === 'var(--sv)' ? 'rgba(0,230,118,.1)' : color === 'var(--dw)' ? 'rgba(255,23,68,.1)' : 'rgba(255,171,0,.1)';
+  el.style.color = color;
+  el.style.border = '1px solid ' + color;
+}
+
+async function testRbgConnection() {
+  const key = localStorage.getItem('rbg_key') || DEFAULT_RBG_KEY;
+  if (!key) {
+    showRbgStatus('❌ No hay API key guardada — ingresa tu key primero', 'var(--dw)');
+    return;
+  }
+  showRbgStatus('⏳ Testing Remove.bg connection...', 'var(--gd)');
+  try {
+    // Send a tiny 1x1 white pixel PNG as test
+    const testPng = 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwADhQGAWjR9awAAAABJRU5ErkJggg==';
+    const res = await fetch(WORKER + '/?action=removebg', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ image: testPng, key, test: true })
+    });
+    const data = await res.json();
+    if (data.success) {
+      showRbgStatus('✅ Remove.bg connected and working', 'var(--sv)');
+    } else if (data.error && (
+      data.error.toLowerCase().includes('roi') ||
+      data.error.toLowerCase().includes('empty') ||
+      data.error.toLowerCase().includes('could not') ||
+      data.error.toLowerCase().includes('no subject')
+    )) {
+      // "ROI region is empty" = conexión OK, imagen de prueba muy pequeña
+      showRbgStatus('✅ Connected — Remove.bg working 🎉', 'var(--sv)');
+    } else if (data.error && (data.error.includes('402') || data.error.toLowerCase().includes('credit'))) {
+      showRbgStatus('⚠️ Connected but no credits — recharge at remove.bg', 'var(--gd)');
+    } else if (data.error && (data.error.includes('403') || data.error.toLowerCase().includes('invalid'))) {
+      showRbgStatus('❌ Invalid API Key — check at remove.bg/api', 'var(--dw)');
+    } else if (data.workerError) {
+      showRbgStatus('❌ Worker not updated — deploy new worker.js to Cloudflare', 'var(--dw)');
+    } else {
+      showRbgStatus('⚠️ Respuesta: ' + (data.error||'sin detalle'), 'var(--gd)');
+    }
+  } catch(e) {
+    showRbgStatus('❌ No se pudo conectar — ¿actualizaste el worker.js en Cloudflare?', 'var(--dw)');
+  }
+}
+
+// removeBackground: see unified version above (supports PhotoRoom + Remove.bg)
+
+// ── FEEDBACK: sonido + vibración al seleccionar ───────────────
+function playTick() {
+  // Vibración corta (Android) — iOS ignora silenciosamente
+  try { navigator.vibrate && navigator.vibrate(6); } catch(e) {}
+  // Tick de audio (funciona en iOS y Android)
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const buf = ctx.createBuffer(1, ctx.sampleRate * 0.018, ctx.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < data.length; i++) {
+      // Ruido blanco con decaimiento rápido = click mecánico suave
+      data[i] = (Math.random() * 2 - 1) * Math.exp(-i / (ctx.sampleRate * 0.004));
+    }
+    const src = ctx.createBufferSource();
+    src.buffer = buf;
+    const gain = ctx.createGain();
+    gain.gain.value = 0.18;
+    src.connect(gain);
+    gain.connect(ctx.destination);
+    src.start();
+    setTimeout(() => { try { ctx.close(); } catch(e){} }, 200);
+  } catch(e) {}
+}
+
+// ── SIZE WHEEL DRUM ROLL ──────────────────────────────────────
+function clInitSizeWheel() {
+  const ALL_SIZES = cl.type==='shoes'
+    ? (cl.gender==='kids'||cl.category&&cl.category.toLowerCase().includes('kids')?CL_SHOE_SIZES_KIDS:CL_SHOE_SIZES_US).concat(['Custom'])
+    : [
+    'XS','S','M','L','XL','XXL','1X','1XB','3XL','4XL',
+    'XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT',
+    '26','27','28','29','30','31','32','33','34','35','36','38','40','42','44',
+    '0-3M','3-6M','6-12M','18-24M','2T','3T','4T','5/6','7/8','10/12','14/16',
+    'One Size','Custom'
+  ];
+  const ITEM_H = 44;
+  const PAD = 2;
+  const list = document.getElementById('wheel-list');
+  const display = document.getElementById('size-display');
+  if (!list) return;
+  if (!ALL_SIZES.includes(cl.size)) cl.size = 'L';
+  let currentIdx = ALL_SIZES.indexOf(cl.size);
+
+  // Build items
+  const spacer = '<div style="height:44px;flex-shrink:0"></div>';
+  list.innerHTML =
+    Array(PAD).fill(spacer).join('') +
+    ALL_SIZES.map((s, i) =>
+      '<div class="wheel-item' + (i === currentIdx ? ' sel' : '') +
+      '" data-idx="' + i + '">' + s + '</div>'
+    ).join('') +
+    Array(PAD).fill(spacer).join('');
+
+  // Scroll to default WITHOUT animation
+  list.scrollTop = currentIdx * ITEM_H;
+  if (display) display.textContent = ALL_SIZES[currentIdx];
+
+  // Update selection on every scroll tick — no timer needed
+  list.addEventListener('scroll', function() {
+    const raw = list.scrollTop / ITEM_H;
+    const idx = Math.round(raw);
+    const clamped = Math.max(0, Math.min(ALL_SIZES.length - 1, idx));
+
+    if (clamped !== currentIdx) {
+      currentIdx = clamped;
+      // Update visuals
+      list.querySelectorAll('.wheel-item').forEach(function(el, i) {
+        el.classList.toggle('sel', i === clamped);
+      });
+      // Update state immediately
+      cl.size = ALL_SIZES[clamped];
+      playTick();
+      clUpdateSKUDisplay();
+      if (display) display.textContent = cl.size;
+      // Custom input
+      const row = document.getElementById('custom-size-row');
+      if (row) row.style.display = cl.size === 'Custom' ? 'block' : 'none';
+    }
+  }, { passive: true });
+
+  // Tap any item → scroll smoothly to it
+  list.addEventListener('click', function(e) {
+    const item = e.target.closest('[data-idx]');
+    if (!item) return;
+    const idx = parseInt(item.getAttribute('data-idx'));
+    list.scrollTo({ top: idx * ITEM_H, behavior: 'smooth' });
+  });
+}
+
+
+function clSetBrand(b) {
+  cl.brand = b;
+  cl._ebayTitle = null; cl._ebayDesc = null; // forzar regeneración del título
+  clInitSizeWheel();
+  document.querySelectorAll('#brand-chips .cl-chip').forEach(el => el.classList.toggle('sel', el.textContent===b));
+  const customIn = $('brand-custom-in');
+  if (customIn) customIn.style.display = b==='Other'?'block':'none';
+  clUpdateSKUDisplay();
+}
+
+function clSetCat(c) {
+  // Initialize INSEAM listeners whenever category changes
+  clInitInseamListeners();
+  cl.category = c;
+  cl._ebayTitle = null; cl._ebayDesc = null; // forzar regeneración del título
+  document.querySelectorAll('#cat-chips .cl-chip').forEach(el => el.classList.toggle('sel', el.textContent===c));
+  // Inseam — Pants / Jeans / Shorts
+  const needsInseam = ['Pants','Jeans','Shorts'].includes(c);
+  const inseamSect = document.getElementById('inseam-sect');
+  if (inseamSect) inseamSect.style.display = needsInseam ? 'block' : 'none';
+  if (!needsInseam) cl.inseam = '';
+  // Dress Length — Dress / Skirt
+  const needsDL = ['Dress','Skirt'].includes(c);
+  const dlSect = document.getElementById('dresslength-sect');
+  if (dlSect) dlSect.style.display = needsDL ? 'block' : 'none';
+  if (!needsDL) cl.dressLength = '';
+  // Outer Material — Jacket / Coat / Vest
+  const needsOM = ['Jacket','Coat','Vest'].includes(c);
+  const omSect = document.getElementById('outermaterial-sect');
+  if (omSect) omSect.style.display = needsOM ? 'block' : 'none';
+  if (!needsOM) cl.outerMaterial = '';
+  // Swimwear Style
+  const needsSW = c === 'Swimwear';
+  const swSect = document.getElementById('swimstyle-sect');
+  if (swSect) swSect.style.display = needsSW ? 'block' : 'none';
+  if (!needsSW) cl.swimStyle = '';
+  // Activity
+  const needsAct = ['Activewear Top','Activewear Bottom'].includes(c);
+  const actSect = document.getElementById('activity-sect');
+  if (actSect) actSect.style.display = needsAct ? 'block' : 'none';
+  if (!needsAct) cl.activity = '';
+  clInitSizeWheel();
+}
+
+function clSetOuterMaterial(v) {
+  cl.outerMaterial = v;
+  document.querySelectorAll('.cl-outermaterial-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===v));
+}
+function clSetSwimStyle(v) {
+  cl.swimStyle = v;
+  document.querySelectorAll('.cl-swimstyle-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===v));
+}
+function clSetActivity(v) {
+  cl.activity = v;
+  document.querySelectorAll('.cl-activity-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===v));
+}
+function clSetShoeWidth(v) {
+  cl.shoeWidth = v;
+  document.querySelectorAll('.cl-shoewidth-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===v));
+}
+
+function clSetColor(c) {
+  cl.color = c;
+  cl._ebayTitle = null; cl._ebayDesc = null; // forzar regeneración del título
+  document.querySelectorAll('.cl-color-chip').forEach(el => el.classList.toggle('sel', el.title===c));
+  const customIn = $('color-custom-in');
+  if (customIn) customIn.style.display = c==='Other'?'block':'none';
+}
+
+function clSetStyle(b) {
+  cl.style = b;
+  document.querySelectorAll('.cl-style-chip').forEach(el => el.classList.toggle('sel', el.dataset.s===b));
+}
+
+
+// ═══════════════════════════════════════════════════════════════
+// iOS INSEAM FIX: Event listeners instead of onclick
+// ═══════════════════════════════════════════════════════════════  
+function clInitInseamListeners() {
+  document.querySelectorAll('[data-action="inseam"]').forEach(btn => {
+    btn.addEventListener('touchend', function(e) {
+      e.preventDefault();
+      clSetInseam(this.dataset.v);
+    }, false);
+    btn.addEventListener('click', function(e) {
+      e.preventDefault();
+      clSetInseam(this.dataset.v);
+    }, false);
+  });
+}
+
+function clSetInseam(b) {
+  cl.inseam = b;
+  document.querySelectorAll('.cl-inseam-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===b));
+}
+
+function clSetDressLength(b) {
+  cl.dressLength = b;
+  document.querySelectorAll('.cl-dresslength-chip').forEach(el => el.classList.toggle('sel', el.dataset.v===b));
+}
+
+function clSetCond(c) {
+  cl.condition = c;
+  document.querySelectorAll('.cl-cond-btn').forEach(el => {
+    el.classList.toggle('sel', el.querySelector('.cond-lbl').textContent === CL_CONDITIONS.find(x=>x.id===c)?.label);
+  });
+}
+
+function clUpdateSKUDisplay() {
+  const el = $('cl-sku-display');
+  if (!el) return;
+  // Si el SKU viene de barcode (tiene UPC largo en el medio), no lo tocamos
+  if (cl.upc && cl.sku.includes(cl.upc)) {
+    // Solo actualizar la referencia al final si la categoría cambió
+    const brandCode = (cl.brand && cl.brand!=='Other' ? cl.brand : cl.brandCustom||'GEN').replace(/[^A-Z0-9]/gi,'').substring(0,3).toUpperCase();
+    const catRef    = (cl.category || 'ITEM').replace(/\s+/g,'-').toUpperCase();
+    cl.sku = `${brandCode}-${cl.upc}-${catRef}`;
+    el.textContent = cl.sku;
+    const skuIn = $('cl-sku-in');
+    if (skuIn) skuIn.value = cl.sku;
+    return;
+  }
+  // SKU manual/autogenerado — lógica original
+  if (cl.sku.startsWith('CLO-')) {
+    const bPfx = (cl.brand && cl.brand!=='Other' ? cl.brand : cl.brandCustom||'GEN').replace(/[^a-zA-Z]/g,'').substring(0,3).toUpperCase();
+    const ts = cl.sku.split('-').pop();
+    cl.sku = `CLO-${bPfx}-${cl.size||'M'}-${ts}`;
+    el.textContent = cl.sku;
+  }
+}
+
+function clStep2Next() {
+  // ✅ Campos básicos obligatorios
+  if (!cl.brand) { toast('⚠️ Selecciona la marca'); return; }
+  if (!cl.category) { toast('⚠️ Selecciona la categoría'); return; }
+  if (!cl.condition) { toast('⚠️ Selecciona la condición'); return; }
+  
+  // ✅ Size es obligatorio
+  if (!cl.size || cl.size === 'Size') { 
+    toast('⚠️ Selecciona la talla (Size)'); return; 
+  }
+  
+  // ✅ Color es obligatorio (a menos que sea Unknown)
+  if (!cl.color || cl.color === 'Color') { 
+    toast('⚠️ Selecciona el color'); return; 
+  }
+  
+  // ✅ Style es obligatorio para Jeans, Pants, Shorts, Dress, Skirt
+  const needsStyle = ['Jeans','Pants','Shorts','Dress','Skirt'].includes(cl.category);
+  if (needsStyle && (!cl.style || cl.style === 'Select style')) {
+    toast('⚠️ Selecciona el Style (' + cl.category + ')'); return;
+  }
+  
+  // ✅ Inseam es obligatorio para Jeans, Pants, Shorts
+  const needsInseam = ['Jeans','Pants','Shorts'].includes(cl.category);
+  if (needsInseam && (!cl.inseam || cl.inseam === '')) {
+    toast('⚠️ Ingresa el Inseam'); return;
+  }
+  
+  if (cl.brand === 'Other') cl.brand = cl.brandCustom || 'Other';
+  if (cl.color === 'Other') cl.color = cl.colorCustom || 'Other';
+  // size kept live in cl.size via wheel
+  clUpdateSKUDisplay();
+  clRenderDefects();
+  clGo(3);
+}
+
+// ── Step 3: Defects ─────────────────────────────────────────
+function clRenderDefects() {
+  $('cl-def').innerHTML = `
+    <div class="cl-step-hdr"><h2>Defects</h2><p>Select all that apply</p></div>
+    <div class="cl-prog">${[1,2,3,4,5].map(i=>`<div class="cl-step-dot${i<3?' done':i===3?' active':''}" id="cl-step-${i}"></div>`).join('<div class="cl-step-line"></div>')}</div>
+
+    <div class="cl-sect">
+      <div class="lbl">DEFECTS (optional — select all that apply)</div>
+      <div class="cl-chips" style="margin-top:10px">
+        ${(cl.type==='shoes'?CL_SHOE_DEFECTS:CL_DEFECTS).map(d=>`<button class="cl-chip defect${cl.defects.includes(d)?' sel':''}" onclick="clToggleDefect('${d}')">${d}</button>`).join('')}
+      </div>
+    </div>
+
+    <div class="cl-sect" id="notes-sect" style="margin-top:12px">
+      <div class="lbl">ADDITIONAL NOTES</div>
+      <textarea id="cl-notes" class="ui" rows="3" placeholder="E.g. small stain on left sleeve, fading on collar..." style="width:100%;resize:none;margin-top:6px;padding:12px;font-size:14px;font-family:inherit">${cl.notes}</textarea>
+    </div>
+
+    <div style="display:flex;gap:10px;margin-top:4px">
+      <button class="ag-btn" onclick="clGo(2);clRenderAttr()" style="flex:1">← Back</button>
+      <button class="add-btn" onclick="clStep3Next()" style="flex:2;margin-bottom:0">Continue →</button>
+    </div>`;
+}
+
+function clToggleDefect(elOrName) {
+  var d = (typeof elOrName === 'string') ? elOrName : elOrName.textContent;
+  if (cl.defects.includes(d)) cl.defects = cl.defects.filter(function(x){ return x!==d; });
+  else cl.defects.push(d);
+  // Update all defect chip buttons visible right now
+  document.querySelectorAll('.cl-chip.defect').forEach(function(el) {
+    el.classList.toggle('sel', cl.defects.includes(el.textContent));
+  });
+}
+
+function clStep3Next() {
+  cl.notes = $('cl-notes')?.value || '';
+  clRenderPhotos();
+  clGo(4);
+}
+
+// ── Step 4: Photos ──────────────────────────────────────────
+function clRenderPhotos() {
+  const done = PHOTO_SLOTS.filter(s => cl.photos[s.id]).length;
+  $('cl-photo').innerHTML = `
+    <div class="cl-step-hdr"><h2>Photos</h2><p>${done}/4 completed — all required</p></div>
+    <div class="cl-prog">${[1,2,3,4,5].map(i=>`<div class="cl-step-dot${i<4?' done':i===4?' active':''}" id="cl-step-${i}"></div>`).join('<div class="cl-step-line"></div>')}</div>
+
+    <div class="cl-photo-grid">
+      ${PHOTO_SLOTS.map(slot => `
+        <div class="cl-photo-slot${cl.photos[slot.id]?' captured':''}" id="slot-${slot.id}" onclick="clTakePhoto('${slot.id}')">
+          ${cl.photos[slot.id]
+            ? `<img src="${cl.photos[slot.id]}" class="cl-photo-preview">
+            <div class="cl-photo-ok">✓</div>
+            ${cl.photos[slot.id+'_bg_removed']?'<div style="position:absolute;bottom:6px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,.7);border-radius:6px;padding:2px 6px;font-size:10px;color:var(--sv);white-space:nowrap">🖼 Background removed</div>':''}`
+            : `<div class="cl-photo-icon">${slot.icon}</div><div class="cl-photo-label">${slot.label}</div><div class="cl-photo-hint">${slot.hint}</div>`
+          }
+        </div>`).join('')}
+    </div>
+
+    <div class="cl-photo-progress">
+      <div class="cl-photo-bar" style="width:${done*25}%"></div>
+    </div>
+    <div style="text-align:center;font-size:13px;color:var(--mu);margin:8px 0 16px">${done===4?'✅ All photos complete':'Tap each slot to capture photo'}</div>
+
+    <div style="display:flex;gap:10px">
+      <button class="ag-btn" onclick="clGo(3);clRenderDefects()" style="flex:1">← Back</button>
+      <button class="add-btn" id="cl-photo-next" onclick="clStep4Next()" style="flex:2;margin-bottom:0;opacity:${done===4?1:0.4}">Continue →</button>
+    </div>`;
+}
+
+
+// ── WHITE SQUARE WITH AUTO-CROP ──────────────────────────────
+// 1. Detect product bounding box (non-transparent pixels)
+// 2. Crop to product
+// 3. Center on white 1200x1200 canvas with padding
+function applyWhiteSquare(dataUrl, size=1600) {
+  return new Promise(resolve => {
+    const timeoutId = setTimeout(() => {
+      console.warn('⏱ applyWhiteSquare timeout — creating fallback white square');
+      // Si falla timeout, retorna canvas blanco 400x400 puro
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      c.getContext('2d').fillStyle = '#FFFFFF';
+      c.getContext('2d').fillRect(0, 0, size, size);
+      resolve(c.toDataURL('image/jpeg', 1.0));
+    }, 2000);
+    
+    const img = new Image();
+    img.onload = () => {
+      clearTimeout(timeoutId);
+      try {
+        const canvas = document.createElement('canvas');
+        canvas.width = size;
+        canvas.height = size;
+        const ctx = canvas.getContext('2d');
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        
+        // Llenar fondo blanco
+        ctx.fillStyle = '#FFFFFF';
+        ctx.fillRect(0, 0, size, size);
+        
+        // Detectar bounds del producto
+        const tmp = document.createElement('canvas');
+        tmp.width = img.width; tmp.height = img.height;
+        tmp.getContext('2d').drawImage(img, 0, 0);
+        const px = tmp.getContext('2d').getImageData(0, 0, img.width, img.height).data;
+        
+        let x0=img.width, x1=0, y0=img.height, y1=0;
+        for (let y=0; y<img.height; y++) {
+          for (let x=0; x<img.width; x++) {
+            if (px[(y*img.width+x)*4+3] > 15) {
+              if (x<x0) x0=x; if (x>x1) x1=x;
+              if (y<y0) y0=y; if (y>y1) y1=y;
+            }
+          }
+        }
+        
+        // Fallback si no detectó nada
+        if (x0>=x1 || y0>=y1) { x0=0; x1=img.width; y0=0; y1=img.height; }
+        
+        const cropW = x1-x0, cropH = y1-y0;
+        const pad = size * 0.06, maxSide = size - pad*2;
+        const ratio = Math.min(maxSide/cropW, maxSide/cropH);
+        const dW = cropW*ratio, dH = cropH*ratio;
+        const dx = (size-dW)/2, dy = (size-dH)/2;
+        
+        // Dibujar producto centrado sobre fondo blanco
+        ctx.drawImage(img, x0, y0, cropW, cropH, dx, dy, dW, dH);
+        resolve(canvas.toDataURL('image/jpeg', 0.92));
+      } catch (err) {
+        console.error('Canvas error:', err);
+        // Si hay error, retorna fondo blanco puro
+        const c = document.createElement('canvas');
+        c.width = size; c.height = size;
+        c.getContext('2d').fillStyle = '#FFFFFF';
+        c.getContext('2d').fillRect(0, 0, size, size);
+        resolve(c.toDataURL('image/jpeg', 1.0));
+      }
+    };
+    
+    img.onerror = () => {
+      clearTimeout(timeoutId);
+      console.warn('⚠️ PNG load error — creating white square fallback');
+      // Si PNG no carga, retorna canvas blanco
+      const c = document.createElement('canvas');
+      c.width = size; c.height = size;
+      c.getContext('2d').fillStyle = '#FFFFFF';
+      c.getContext('2d').fillRect(0, 0, size, size);
+      resolve(c.toDataURL('image/jpeg', 1.0));
+    };
+    
+    img.src = dataUrl;
+  });
+}
+
+function clTakePhoto(slotId) {
+  return new Promise(resolve => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/*';
+    // SIN input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto / Seleccionar archivo
+    input.onchange = async e => {
+      const file = e.target.files[0];
+      if (!file) return resolve();
+
+      const slot = document.getElementById('slot-' + slotId);
+      if (slot) slot.innerHTML = '<div style="text-align:center;padding:20px"><div class="sp" style="width:32px;height:32px;margin:0 auto 8px"></div><div style="font-size:11px;color:var(--mu)">Processing...</div></div>';
+
+      let dataUrl = await clCompressImage(file, 1600, 0.92);
+
+      // SOLO para FRONT y BACK - procesar con Railway rembg
+      if ((slotId === 'front' || slotId === 'back')) {
+        console.log('🚂 Starting rembg for ' + slotId);
+        if (slot) slot.innerHTML = '<div style="text-align:center;padding:16px"><div class="sp" style="width:28px;height:28px;margin:0 auto 8px"></div><div style="font-size:11px;color:var(--gd)">🚂 Railway rembg...</div></div>';
+
+        try {
+          const b64 = dataUrl.split(',')[1];
+          console.log('📤 Sending to Worker proxy...');
+          
+          const workerRes = await fetch(WORKER + '/?action=railway_rembg', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ image: b64 })
+          });
+
+          console.log('📥 Worker response status: ' + workerRes.status);
+          const result = await workerRes.json();
+          console.log('📊 Result:', result);
+
+          if (result.success && result.image) {
+            console.log('✅ Background removed successfully');
+            const pngUrl = 'data:image/png;base64,' + result.image;
+            
+            if (slot) slot.innerHTML = '<div style="text-align:center;padding:20px"><div class="sp" style="width:28px;height:28px;margin:0 auto 8px"></div><div style="font-size:11px;color:var(--gd)">Applying white background...</div></div>';
+            
+            // Intentar aplicar fondo blanco
+            const whiteSquareUrl = await applyWhiteSquare(pngUrl, 1600);
+            
+            // Si applyWhiteSquare retorna algo vacío o inválido, usa PNG directamente
+            if (whiteSquareUrl && whiteSquareUrl.length > 100) {
+              dataUrl = whiteSquareUrl;
+              console.log('✅ White background applied');
+            } else {
+              console.warn('⚠️ White background failed, using PNG with transparency');
+              dataUrl = pngUrl;  // Fallback a PNG transparente
+            }
+            
+            cl.photos[slotId + '_bg_removed'] = true;
+            toast('✅ Background removed!');
+          } else {
+            console.warn('❌ Result not successful:', result);
+            cl.photos[slotId + '_bg_removed'] = false;
+            toast('⚠️ Background removal unavailable');
+          }
+        } catch(err) {
+          console.error('❌ Error:', err);
+          cl.photos[slotId + '_bg_removed'] = false;
+          toast('❌ Error: ' + err.message);
+        }
+      }
+
+      // 🔑 FIX: Subir a ImgBB y guardar URL (no base64)
+      if (slot) slot.innerHTML = '<div style="text-align:center;padding:20px"><div class="sp" style="width:28px;height:28px;margin:0 auto 8px"></div><div style="font-size:11px;color:var(--gd)">📤 Uploading to ImgBB...</div></div>';
+      
+      const imgbbKey = localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY;
+      if (imgbbKey) {
+        const imgUrl = await clUploadPhotoToImgBB(dataUrl, imgbbKey, slotId);
+        if (imgUrl) {
+          console.log('✅ ImgBB URL saved:', imgUrl);
+          cl.photos[slotId] = imgUrl;
+          toast('✅ Photo uploaded to eBay');
+        } else {
+          console.warn('⚠️ ImgBB upload failed for ' + slotId);
+          toast('⚠️ ImgBB failed — checking retry...');
+          cl.photos[slotId] = dataUrl; // Fallback a base64
+        }
+      } else {
+        console.warn('⚠️ ImgBB not configured');
+        toast('⚠️ Configure ImgBB in Settings ⚙️');
+        cl.photos[slotId] = dataUrl; // Fallback a base64
+      }
+      
+      clRenderPhotos();
+      resolve();
+    };
+    input.click();
+  });
+}
+
+function clCompressImage(file, maxW=900, quality=0.75) {
+  return new Promise(resolve => {
+    const reader = new FileReader();
+    reader.onload = e => {
+      const img = new Image();
+      img.onload = () => {
+        const ratio = Math.min(maxW/img.width, maxW/img.height, 1);
+        const canvas = document.createElement('canvas');
+        canvas.width = Math.round(img.width * ratio);
+        canvas.height = Math.round(img.height * ratio);
+        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        resolve(canvas.toDataURL('image/jpeg', quality));
+      };
+      img.src = e.target.result;
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+function clStep4Next() {
+  const missing = PHOTO_SLOTS.filter(s => s.required && !cl.photos[s.id]).map(s=>s.label);
+  if (missing.length) { toast('⚠️ Missing: '+missing.join(', ')); return; }
+  clRenderReview();
+  clGo(5);
+}
+
+// ── Obtener precios de eBay desde Railway ──────────────────
+async function getClothingPrice() {
+  if (!cl.brand || !cl.category || !cl.size) {
+    console.log('Missing required fields for price lookup');
+    return;
+  }
+
+  cl.pricesLoading = true;
+  const priceStatusEl = document.getElementById('cl-prices-status');
+  if (priceStatusEl) priceStatusEl.innerHTML = '🔄 Buscando precios en eBay...';
+
+  try {
+    const query = `${cl.brand} ${cl.category} ${cl.color || ''}`.trim();
+    const url = `https://savvy-ebay-prices-production.up.railway.app/search?q=${encodeURIComponent(query)}&size=${encodeURIComponent(cl.size)}`;
+    
+    const response = await fetch(url, { method: 'GET' });
+    const data = await response.json();
+
+    if (data.found && data.stats) {
+      cl.clothingPrices = {
+        minPrice: data.stats.minPrice,
+        avgPrice: data.stats.avgPrice,
+        suggestedPrice: data.suggested?.price || (data.stats.avgPrice * 0.75),
+        found: true,
+        totalListings: data.stats.totalListings
+      };
+
+      const priceInput = document.getElementById('cl-price-input');
+      if (priceInput && cl.clothingPrices.suggestedPrice > 0) {
+        cl.suggestedPrice = cl.clothingPrices.suggestedPrice;
+        priceInput.value = cl.clothingPrices.suggestedPrice.toFixed(2);
+      }
+
+      if (priceStatusEl) {
+        priceStatusEl.innerHTML = `
+          <div style="background:rgba(0,230,118,.1);border:1px solid var(--sv);border-radius:8px;padding:10px;margin:10px 0;font-size:12px;line-height:1.6">
+            <div style="color:var(--sv);font-weight:700;margin-bottom:6px">✅ Precios encontrados (${cl.clothingPrices.totalListings} active)</div>
+            <div style="display:flex;gap:12px;flex-wrap:wrap;color:var(--tx)">
+              <span><strong>Mínimo:</strong> $${cl.clothingPrices.minPrice.toFixed(2)}</span>
+              <span><strong>Promedio:</strong> $${cl.clothingPrices.avgPrice.toFixed(2)}</span>
+              <span><strong>Tu precio:</strong> <span style="color:var(--ac);font-weight:800">$${cl.clothingPrices.suggestedPrice.toFixed(2)}</span></span>
+            </div>
+          </div>
+        `;
+      }
+    } else {
+      if (priceStatusEl) {
+        priceStatusEl.innerHTML = `<div style="color:var(--mu);font-size:12px;padding:8px">ℹ️ No se encontraron precios en eBay para este item.</div>`;
+      }
+    }
+  } catch (err) {
+    console.error('Error fetching prices:', err);
+    if (priceStatusEl) {
+      priceStatusEl.innerHTML = `<div style="color:var(--dw);font-size:12px;padding:8px">⚠️ Error buscando precios</div>`;
+    }
+  } finally {
+    cl.pricesLoading = false;
+  }
+}
+
+// ── Step 5: Review & Submit ──────────────────────────────────
+function clRenderReview() {
+  const condition = CL_CONDITIONS.find(c=>c.id===cl.condition);
+  $('cl-review').innerHTML = `
+    <div class="cl-step-hdr"><h2>Review & Submit</h2><p>Confirm before saving</p></div>
+    <div class="cl-prog">${[1,2,3,4,5].map(i=>`<div class="cl-step-dot${i<5?' done':' active'}" id="cl-step-${i}"></div>`).join('<div class="cl-step-line"></div>')}</div>
+
+    <div class="cl-review-photos">
+      ${PHOTO_SLOTS.map(s=>`<img src="${cl.photos[s.id]||''}" class="cl-review-thumb" title="${s.label}">`).join('')}
+    </div>
+
+    <div class="card">
+      <div class="lbl">SKU</div>
+      <div class="val" style="font-family:monospace;font-size:16px;color:var(--ac)">${cl.sku}</div>
+    </div>
+
+    <div class="card" style="border-left:3px solid var(--ac)">
+      <div class="lbl" style="color:var(--ac)">📝 eBay SEO Title</div>
+      <div id="cl-title-display" style="font-size:14px;font-weight:700;line-height:1.5;min-height:40px;color:var(--tx)">
+        <span style="color:var(--mu);font-style:italic">Generating title...</span>
+      </div>
+      <div style="font-size:10px;color:var(--mu);margin-top:4px" id="cl-title-chars"></div>
+    </div>
+
+    <div class="card">
+      <div class="lbl">📋 eBay Description</div>
+      <div id="cl-desc-display" style="font-size:12px;line-height:1.6;color:var(--tx);min-height:60px">
+        <span style="color:var(--mu);font-style:italic">Generating description...</span>
+      </div>
+    </div>
+    <div class="card" style="margin-bottom:10px">
+      <div class="lbl">Type &amp; Gender</div>
+      <div class="val">${cl.type==='shoes'?'👟 Zapatos':'👕 Ropa'} · ${CL_GENDER_OPTIONS.find(g=>g.id===cl.gender)?.icon||''} ${CL_GENDER_OPTIONS.find(g=>g.id===cl.gender)?.label||cl.gender}</div>
+    </div>
+
+    <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:6px">Toca cualquier dato para editarlo</div>
+    <div style="background:var(--sf2);border-radius:12px;padding:12px;margin-bottom:4px;display:flex;align-items:center;gap:10px">
+      <span style="font-size:16px;font-weight:800;color:var(--sv)">💰</span>
+      <span style="font-size:14px;color:var(--mu)">Precio eBay:</span>
+      <span style="font-size:16px;font-weight:800;color:var(--sv)">$</span>
+      <input id="cl-price-input" type="text" inputmode="decimal" pattern="[0-9]*\.?[0-9]*" step="0.01" min="0.99" value="${cl.suggestedPrice > 0 ? cl.suggestedPrice.toFixed(2) : '19.99'}"
+        style="width:90px;background:var(--sf);border:1px solid var(--bd);border-radius:8px;padding:6px;color:var(--tx);font-size:18px;font-weight:800;text-align:center"
+        oninput="cl.price=this.value">
+    </div>
+    <div id="cl-prices-status" style="min-height:20px;margin-bottom:10px"></div>
+    <div class="price-row" style="margin-bottom:10px">
+      <div class="pc editable" onclick="clOpenSheet('brand')"><div class="lbl">Marca</div><div class="val" style="font-size:14px;font-weight:700">${cl.brand}</div></div>
+      <div class="pc editable" onclick="clOpenSheet('category')"><div class="lbl">Category</div><div class="val" style="font-size:13px;font-weight:700">${cl.category}</div></div>
+      <div class="pc editable" onclick="clOpenSheet('size')"><div class="lbl">Talla</div><div class="pc-num avg">${cl.size}</div></div>
+    </div>
+
+    <div class="price-row" style="margin-bottom:10px">
+      <div class="pc editable" onclick="clOpenSheet('color')">
+        <div class="lbl">Color</div>
+        <div style="display:flex;align-items:center;gap:6px;justify-content:center;margin-top:4px">
+          <div style="width:16px;height:16px;border-radius:50%;background:${CL_COLORS.find(c=>c.name===cl.color)?.hex||'#888'};border:1px solid var(--bd)"></div>
+          <span style="font-size:13px">${cl.color}</span>
+        </div>
+      </div>
+      <div class="pc editable" onclick="clOpenSheet('condition')"><div class="lbl">Condición</div><div class="val" style="font-size:13px;font-weight:700;color:var(--sv)">${condition?.label||cl.condition}</div></div>
+      <div class="pc editable" onclick="clOpenSheet('defects')"><div class="lbl">Defects</div><div class="val" style="font-size:12px">${cl.defects.length||'Ninguno'}</div></div>
+    </div>
+
+    ${cl.defects.length ? `<div class="card" style="margin-bottom:10px"><div class="lbl">Defects</div><div class="val" style="font-size:13px">${cl.defects.join(' · ')}</div></div>` : ''}
+    ${cl.notes ? `<div class="card" style="margin-bottom:10px"><div class="lbl">Notas</div><div class="val" style="font-size:13px">${cl.notes}</div></div>` : ''}
+
+    <div class="card" style="margin-bottom:10px">
+      <div class="lbl">📍 Product Location</div>
+      <div style="margin-top:6px">${cl.location ? locBadgeHTML(cl.location,'clothing') : locEmptyHTML('clothing')}</div>
+    </div>
+
+    <div id="cl-submit-status" style="min-height:20px;margin-bottom:10px;text-align:center;font-size:13px;color:var(--mu)"></div>
+
+    <div class="card" style="margin-bottom:14px;border:2px solid #00e676;background:rgba(0,230,118,0.05)">
+      <div style="font-size:12px;color:#00e676;text-transform:uppercase;letter-spacing:1px;font-weight:800;margin-bottom:10px">🖨️ IMPRIMIR ETIQUETA — Zebra ZP450</div>
+      <div style="font-size:12px;color:var(--mu);margin-bottom:8px">SKU: <span style="font-family:monospace;font-weight:800;color:var(--ac)">${cl.sku}</span></div>
+      <div style="display:flex;gap:8px;align-items:center;margin-bottom:8px">
+        <span style="font-size:12px;color:var(--mu);white-space:nowrap">PC IP:</span>
+        <input id="cl-review-printer-ip" type="text" placeholder="192.168.1.25"
+          value="${localStorage.getItem('savvy_printer_ip')||''}"
+          style="flex:1;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:14px;font-family:monospace"
+          oninput="localStorage.setItem('savvy_printer_ip',this.value)">
+        <button onclick="clTestPrint()" style="padding:8px 12px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--mu);font-size:12px;cursor:pointer;white-space:nowrap">🧪 Test</button>
+      </div>
+      <button onclick="clPrintLabel()" style="width:100%;padding:15px;background:linear-gradient(135deg,#00e676,#66bb6a);border:none;border-radius:12px;color:#000;font-size:16px;font-weight:900;cursor:pointer;box-shadow:0 4px 12px rgba(0,230,118,0.3);transition:all 0.2s">
+        🖨️ PRINT LABEL — Put on Bag
+      </button>
+      <div id="cl-review-print-status" style="font-size:12px;text-align:center;margin-top:6px;min-height:16px"></div>
+    </div>
+
+    <button class="add-btn" id="cl-complete-btn" onclick="clSubmit()">✅ COMPLETAR LISTING</button>
+    <button class="ag-btn" onclick="clGo(4);clRenderPhotos()" style="margin-top:8px">← Back</button>`;
+
+  // Generar título y descripción con Claude AI + precios eBay
+  setTimeout(() => {
+    clGenerateEbayTitle();
+    getClothingPrice();
+  }, 150);
+}
+
+
+
+// Generar título y descripción eBay para ropa usando Claude AI
+async function clGenerateEbayTitle() {
+  const apiKey = (localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY);
+  const titleEl = document.getElementById('cl-title-display');
+  const descEl  = document.getElementById('cl-desc-display');
+  const charsEl = document.getElementById('cl-title-chars');
+
+  if (cl._ebayTitle) {
+    if (titleEl) { titleEl.textContent = cl._ebayTitle; if(charsEl) charsEl.textContent = cl._ebayTitle.length + '/80 chars'; }
+    if (descEl && cl._ebayDesc) descEl.innerHTML = cl._ebayDesc;
+    return;
+  }
+
+  if (!apiKey) {
+    if (titleEl) titleEl.textContent = buildClothingTitle();
+    if (descEl)  descEl.innerHTML = buildClothingDesc();
+    return;
+  }
+
+  const condition = CL_CONDITIONS.find(c=>c.id===cl.condition);
+  const condText = clCondText();
+  const gdrText = cl.gender==='mens'?"Men's":cl.gender==='womens'?"Women's":cl.gender==='kids'?"Kids":cl.gender||'';
+  const colorText = cl.color && cl.color!=='Unknown' ? cl.color : '';
+  const defectsLine = cl.defects.length ? cl.defects.join(', ') : 'none';
+
+  const prompt = `You are an expert eBay clothing seller. Write rich, detailed descriptions.
+
+Item: ${cl.brand} ${cl.category} | ${colorText} | Size ${cl.size} | ${gdrText} | ${condText}
+Defects: ${defectsLine}
+
+Return ONLY valid JSON with NO newlines in values:
+{
+  "title": "[Brand] [Item] [Color] Size [Size] [Gender] [Condition] - 75-80 chars",
+  "opening": "Compelling 5-6 sentence pitch for brand, style, material, condition, occasions. Include why this item is valuable. Write as ONE continuous sentence.",
+  "condition": "${condText}. Describe tags, wear, fabric quality in 2-3 sentences as ONE line.",
+  "defects": "${defectsLine}",
+  "shipping": "Ships fast from Lumberton NC. Most within 1 business day.",
+  "returns": "30-day returns. Buyer satisfaction priority.",
+  "disclaimer": "Review photos carefully. All items 100% authentic."
+}`;
+
+  // Use detailed descriptions built with JavaScript
+  cl._ebayTitle = buildClothingTitle();
+  cl._ebayDesc = buildClothingDesc();
+
+  if (titleEl) { titleEl.textContent = cl._ebayTitle; if(charsEl) charsEl.textContent = cl._ebayTitle.length + '/80 chars'; }
+  if (descEl) descEl.innerHTML = cl._ebayDesc;
+}
+
+function buildClothingDescHTML(obj) {
+  let h = '';
+  if (obj.opening)    h += '<p><strong>' + (cl.brand||'Item') + '</strong><br>' + obj.opening + '</p>';
+  if (obj.condition)  h += '<p><strong>Condition:</strong><br>' + obj.condition + '</p>';
+  if (obj.defects && obj.defects !== 'none' && obj.defects !== 'No defects') h += '<p><strong>Defects:</strong><br>' + obj.defects + '</p>';
+  if (obj.shipping)   h += '<p><strong>Shipping:</strong><br>• Ships fast from Lumberton, NC<br>• Most orders within 1 business day<br>• Fast handling and tracking</p>';
+  if (obj.returns)    h += '<p><strong>Returns:</strong><br>• 30-day returns accepted<br>• Buyer satisfaction priority</p>';
+  if (obj.disclaimer) h += '<p><strong>Disclaimer:</strong><br>' + obj.disclaimer + '</p>';
+  return h || buildClothingDesc();
+}
+
+// Condición en texto legible
+function clCondText() {
+  const map = { NWT:'New With Tags', NWOT:'New Without Tags', EXCEL:'Excellent Used', GOOD:'Good Used', FAIR:'Fair Used' };
+  return map[cl.condition] || cl.condition || 'Used';
+}
+function clCondShort() {
+  const map = { NWT:'NWT', NWOT:'NWOT', EXCEL:'Excellent', GOOD:'Good Used', FAIR:'Fair' };
+  return map[cl.condition] || cl.condition || 'Used';
+}
+
+// Fallback title sin AI — optimizado para 80 chars
+function buildClothingTitle() {
+  const cond  = clCondShort();
+  const gdr   = cl.gender==='mens'?"Men's":cl.gender==='womens'?"Women's":cl.gender==='kids'?"Boys/Girls":cl.gender||'';
+  const color = cl.color && cl.color !== 'Unknown' ? cl.color + ' ' : '';
+  const parts = [cl.brand, cl.category, color + 'Size ' + cl.size, gdr, cond].filter(Boolean);
+  let t = parts.join(' ').replace(/\s+/g,' ').trim();
+  if (t.length < 75 && !t.includes('NWT')) t += ' NWT';
+  return t.substring(0,80);
+}
+
+function buildClothingDesc() {
+  const brand = cl.brand || 'Item';
+  const category = cl.category || 'Clothing';
+  const color = (cl.color || '').toLowerCase();
+  const size = cl.size || 'One Size';
+  const cond = clCondText();
+  
+  let opening = `${brand} ${category} in ${color} color, Size ${size}. `;
+  opening += `Authentic piece in excellent condition. Perfect for collectors and everyday wear. `;
+  opening += `High quality fabric, expertly crafted. ${brand} brand reliability and style. `;
+  opening += `This item is ready to wear or display. Premium authentic piece at great value.`;
+  
+  let condition = `${cond}. `;
+  if(cl.condition === 'NWT') condition += `Original tags attached, never worn. Perfect pristine condition. Stored properly with no flaws, shrinkage, or damage. `;
+  else if(cl.condition === 'NWOT') condition += `Never worn or tried on. Perfect condition without tags. No wear marks or defects. `;
+  else condition += `Gently used, well maintained. No major flaws or damage. `;
+  condition += `Ready to wear immediately.`;
+  
+  let defects = '';
+  if(cl.defects && cl.defects !== 'none' && cl.defects !== 'No defects') {
+    defects = `Defects: ${cl.defects}`;
+  }
+  
+  let html = `<p><strong>${brand} ${category} - ${color} Size ${size}</strong><br>${opening}</p>`;
+  html += `<p><strong>Condition:</strong><br>${condition}</p>`;
+  if(defects) html += `<p><strong>Defects:</strong><br>${defects}</p>`;
+  html += `<p><strong>Shipping:</strong><br>Ships fast from Lumberton, NC. Most orders ship within 1 business day. Fast handling and tracking provided.</p>`;
+  html += `<p><strong>Returns:</strong><br>30-day returns accepted. Buyer satisfaction is our priority.</p>`;
+  html += `<p><strong>Disclaimer:</strong><br>Please review all photos carefully before purchasing. All items are 100% authentic.</p>`;
+  
+  return html;
+}
+
+
+
+// ── IMGBB PHOTO HOSTING (Clothing module) ─────────────────────
+function saveDriveUrl() {
+  var url = document.getElementById('drive-url-input').value.trim();
+  if (!url || !url.includes('script.google.com')) {
+    document.getElementById('drive-status').textContent = '⚠️ URL inválida';
+    return;
+  }
+  localStorage.setItem('cl_drive_url', url);
+  document.getElementById('drive-status').textContent = '✅ URL guardada';
+}
+
+// ============================================
+// IndexedDB para persistencia real
+// ============================================
+
+const DB_NAME = 'SavvyConfig';
+const STORE_NAME = 'imgbb_config';
+
+function openIndexedDB() {
+  return new Promise((resolve, reject) => {
+    const request = indexedDB.open(DB_NAME, 1);
+    request.onerror = () => reject(request.error);
+    request.onsuccess = () => resolve(request.result);
+    request.onupgradeneeded = (event) => {
+      const db = event.target.result;
+      if (!db.objectStoreNames.contains(STORE_NAME)) {
+        db.createObjectStore(STORE_NAME);
+      }
+    };
+  });
+}
+
+async function saveToIndexedDB(key, value) {
+  try {
+    const db = await openIndexedDB();
+    const tx = db.transaction(STORE_NAME, 'readwrite');
+    const store = tx.objectStore(STORE_NAME);
+    store.put(value, key);
+    return new Promise((resolve, reject) => {
+      tx.oncomplete = () => resolve(true);
+      tx.onerror = () => reject(tx.error);
+    });
+  } catch (err) {
+    console.error('Error saving to IndexedDB:', err);
+    return false;
+  }
+}
+
+async function getFromIndexedDB(key) {
+  try {
+    const db = await openIndexedDB();
+    const tx = db.transaction(STORE_NAME, 'readonly');
+    const store = tx.objectStore(STORE_NAME);
+    const request = store.get(key);
+    return new Promise((resolve, reject) => {
+      request.onsuccess = () => resolve(request.result);
+      request.onerror = () => reject(request.error);
+    });
+  } catch (err) {
+    console.error('Error reading from IndexedDB:', err);
+    return null;
+  }
+}
+
+
+async function clSaveImgbbKey() {
+  const v = document.getElementById('imgbb-key-in')?.value?.trim();
+  if (!v) { toast('⚠️ Enter ImgBB API key'); return; }
+  
+  const savedLocally = await saveToIndexedDB('imgbb_key', v);
+  localStorage.setItem('cl_imgbb_key', v);
+  
+  if (savedLocally) {
+    document.getElementById('imgbb-status').textContent = '⏳ Sincronizando...';
+  } else {
+    console.warn('IndexedDB save failed');
+  }
+  
+  try {
+    const res = await fetch('https://savvy-config-production.up.railway.app/api/imgbb-key', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ key: v })
+    });
+    
+    if (res.ok) {
+      document.getElementById('imgbb-status').textContent = '✅ ImgBB key guardada (IndexedDB + Railway)';
+      toast('✅ Guardada');
+    } else {
+      document.getElementById('imgbb-status').textContent = '✅ Guardada en IndexedDB (Railway offline)';
+      toast('✅ Guardada en IndexedDB');
+    }
+  } catch (err) {
+    document.getElementById('imgbb-status').textContent = '✅ Guardada en IndexedDB';
+    toast('✅ Guardada en IndexedDB');
+  }
+}
+
+async function clTestImgbbKey() {
+  const key = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+  if (!key) { toast('⚠️ No ImgBB key configured'); return; }
+  const statusEl = document.getElementById('imgbb-status');
+  if (statusEl) statusEl.textContent = '🔄 Testing ImgBB key...';
+  // Create a tiny 1x1 red pixel as test image
+  const canvas = document.createElement('canvas'); canvas.width=1; canvas.height=1;
+  canvas.getContext('2d').fillStyle='red'; canvas.getContext('2d').fillRect(0,0,1,1);
+  const testImg = canvas.toDataURL('image/jpeg', 0.5);
+  const result = await clUploadPhotoToImgBB(testImg, key);
+  if (result) {
+    if (statusEl) statusEl.textContent = '✅ ImgBB key WORKS — ' + result.substring(0,40) + '...';
+    toast('✅ ImgBB key is working!');
+  } else {
+    if (statusEl) statusEl.textContent = '❌ ImgBB key FAILED — check the key in imgbb.com';
+    toast('❌ ImgBB key failed — check settings');
+  }
+}
+
+async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
+  try {
+    const b64 = dataUrl ? dataUrl.split(',')[1] : null;
+    if (!b64) { console.warn('ImgBB: no image data'); return null; }
+    const fd  = new FormData();
+    fd.append('key', key);
+    fd.append('image', b64);
+    fd.append('name', (slotName || 'photo') + '-' + Date.now() + '.jpg');
+    const res = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body: fd });
+    const d   = await res.json();
+    console.log('ImgBB response:', JSON.stringify(d).substring(0,200));
+    if (d.success) {
+      let imgUrl = d.data.image?.url || d.data.display_url || d.data.url;
+      if (imgUrl && !imgUrl.match(/\.(jpg|jpeg|png|gif|webp)(\?|$)/i)) {
+        imgUrl += '.jpg';
+      }
+      console.log('ImgBB upload OK:', imgUrl);
+      return imgUrl;
+    } else {
+      const errMsg = d.error?.message || JSON.stringify(d.error) || 'unknown error';
+      console.error('ImgBB upload failed:', errMsg);
+      toast('⚠️ ImgBB error: ' + errMsg);
+      return null;
+    }
+  } catch(e) {
+    console.error('ImgBB network error:', e.message);
+    toast('⚠️ ImgBB network error: ' + e.message);
+    return null;
+  }
+}
+
+async function clUploadAllPhotos() {
+  const key = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+  if (!key) return null;
+  const urls = [];
+  const slots = ['front','back','tag','detail','meas1','meas2'];
+  for (const s of slots) {
+    if (cl.photos[s]) {
+      var photoVal = cl.photos[s];
+      var url;
+      // Si ya es URL pública (subida al capturar), úsala directo — no re-subir
+      if (typeof photoVal === 'string' && photoVal.startsWith('https://')) {
+        url = photoVal;
+        console.log('✅ Reusing existing ImgBB URL for ' + s + ':', url.substring(0,60));
+      } else {
+        // Es base64 (fallback cuando ImgBB falló al capturar) — subir ahora
+        url = await clUploadPhotoToImgBB(photoVal, key, s);
+        console.log('📤 Uploaded base64 photo for ' + s + ':', url ? url.substring(0,60) : 'FAILED');
+      }
+      if (url) urls.push(url);
+    }
+  }
+  return urls.length > 0 ? urls.join('|') : null;
+}
+
+// ── EBAY PREFILL TEMPLATE EXPORT ──────────────────────────────
+// Columnas: SKU | Photo URLs | Title | Category | Aspects
+function clBuildAspects() {
+  const condMap = { NWT:'New with tags', NWOT:'New without tags', EXCEL:'Used - Excellent', GOOD:'Used - Good', FAIR:'Used - Acceptable' };
+  const dept = cl.gender==='mens' ? 'Men' : cl.gender==='womens' ? 'Women' : cl.gender==='kids' ? 'Boys' : '';
+  const parts = [
+    cl.brand                               ? 'Brand='      + cl.brand                        : '',
+    cl.size                                ? 'Size='       + cl.size                         : '',
+    cl.color && cl.color!=='Unknown'       ? 'Color='      + cl.color                        : '',
+    cl.condition                           ? 'Item Condition=' + (condMap[cl.condition]||cl.condition) : '',
+    dept                                   ? 'Department=' + dept                             : '',
+    cl.type==='shoes'                      ? 'Type=Shoes'  : cl.category ? 'Type=' + cl.category : '',
+  ].filter(Boolean).filter(function(p){ return p.indexOf('=') === -1 || p.split('=')[1].trim() !== ''; });
+  return parts.join('|');
+}
+
+function clBuildEbayCategory() {
+  const map = {
+    'Dress':'Dresses','Jeans':'Jeans','Pants':'Pants','Shorts':'Shorts',
+    'T-Shirt':'T-Shirts','Shirt':'Shirts','Jacket':'Jackets & Coats',
+    'Hoodie':'Hoodies & Sweatshirts','Sweater':'Sweaters','Sweatshirt':'Hoodies & Sweatshirts','Quarter Zip':'Hoodies & Sweatshirts',
+    'Shoes':'Shoes','Sneakers':'Athletic Shoes','Boots':'Boots',
+    'Skirt':'Skirts','Coat':'Jackets & Coats','Blouse':'Tops & Blouses',
+    'Tank Top':'Tops & Blouses','Sleeveless':'Tops & Blouses','Vest':'Jackets & Coats',
+    'Polo':'Shirts','Shacket':'Shirts','Activewear':'Activewear','Activewear Top':'Tops & Blouses','Activewear Bottom':'Pants',
+    'Swimwear':'Swimwear','Scrubs':'Scrubs',
+  };
+  return map[cl.category] || cl.category || '';
+}
+
+function clGetEbayCategoryId() {
+  // eBay category IDs for US clothing
+  const m = cl.gender === 'mens' ? {
+    'Jeans':11483,'Pants':57989,'Shorts':15689,'T-Shirt':15687,
+    'Shirt':57990,'Jacket':57988,'Coat':57988,'Vest':15691,'Hoodie':155183,'Sweatshirt':155183,'Quarter Zip':155183,
+    'Shacket':57990,
+    'Sweater':11484,'Shoes':93427,'Sneakers':15709,'Boots':11498,
+    'Dress':15687,'Skirt':15687,'Blouse':57990,'Tank Top':15687,'Sleeveless':15687,
+    'Polo':57990,'Activewear':137084,'Activewear Top':137085,'Activewear Bottom':137086,'Swimwear':15690,'Scrubs':11516,
+  } : cl.gender === 'kids' ? {
+    'Jeans':57989,'Pants':57989,'Dress':3009,'T-Shirt':3008,
+    'Shirt':3008,'Shoes':57929,'Tank Top':3008,'Sleeveless':3008,'Vest':3008,'Shacket':3008,'Quarter Zip':3008,
+    'Polo':3008,'Activewear':3008,'Activewear Top':3008,'Activewear Bottom':3008,'Swimwear':3008,'Scrubs':3008,
+  } : {
+    'Dress':63861,'Jeans':11554,'Pants':63863,'Shorts':11555,
+    'T-Shirt':53159,'Shirt':53159,'Blouse':53159,'Jacket':63862,'Vest':63862,'Shacket':53159,
+    'Coat':63862,'Hoodie':155183,'Sweatshirt':155183,'Sweater':63866,'Skirt':63864,'Quarter Zip':155183,
+    'Shoes':55793,'Sneakers':15709,'Boots':53557,'Tank Top':53159,'Sleeveless':53159,
+    'Polo':53159,'Activewear':185079,'Activewear Top':185082,'Activewear Bottom':185081,'Swimwear':63867,'Scrubs':11516,
+  };
+  return m[cl.category] || (cl.gender==='mens' ? 57990 : 53159);
+}
+
+function clGetConditionId() {
+  return {NWT:1000, NWOT:1500, EXCEL:3000, GOOD:3000, FAIR:3000}[cl.condition] || 1000;
+}
+
+function clBuildEbayRow(photoUrls) {
+  const title = cl._ebayTitle || buildClothingTitle();
+  const desc  = document.getElementById('cl-desc-display') ? document.getElementById('cl-desc-display').innerHTML : '';
+  const dept  = cl.gender==='mens' ? 'Men' : cl.gender==='womens' ? 'Women' : 'Unisex Adults';
+  const priceEl = document.getElementById('cl-price-input');
+  return {
+    sku:        cl.sku || '',
+    photos:     photoUrls || '',
+    title:      title,
+    category:   clBuildEbayCategory ? clBuildEbayCategory() : cl.category || '',
+    categoryId: clGetEbayCategoryId ? clGetEbayCategoryId() : '63861',
+    conditionId:clGetConditionId ? clGetConditionId() : 1000,
+    aspects:    clBuildAspects(),
+    brand:      cl.brand || '',
+    sizeType:   'Regular',
+    size:       cl.size || '',
+    department: dept,
+    color:      (cl.color && cl.color!=='Unknown') ? cl.color : '',
+    style:      cl.style || '',
+    inseam:     cl.inseam || '',
+    dressLength:cl.dressLength || '',
+    outerMaterial: cl.outerMaterial || '',
+    swimStyle:  cl.swimStyle || '',
+    activity:   cl.activity || '',
+    shoeWidth:  cl.shoeWidth || '',
+    type:       cl.category || '',
+    description:desc || ('<p>' + title + '</p><p>Ships fast from Lumberton, NC.</p>'),
+    price:      priceEl ? priceEl.value : '19.99',
+    location:   'Lumberton, NC',
+    warehouseLocation: cl.location || '',
+  };
+}
+
+// Guardar en sesión para export masivo
+function clSaveToSession(row) {
+  let session = JSON.parse(localStorage.getItem('cl_ebay_session') || '[]');
+  // Evitar duplicados por SKU
+  session = session.filter(r => r.sku !== row.sku);
+  session.push(row);
+  localStorage.setItem('cl_ebay_session', JSON.stringify(session));
+  console.log('Saved to eBay session:', row.sku, 
+    'photos:', row.photos ? row.photos.substring(0,50)+'...' : 'EMPTY',
+    'total items:', session.length);
+  return session.length;
+}
+
+function clGetSessionCount() {
+  return JSON.parse(localStorage.getItem('cl_ebay_session') || '[]').length;
+}
+
+function clClearSession() {
+  // Borrar COMPLETAMENTE todo
+  localStorage.removeItem('cl_ebay_session');
+  clBulk = [];
+  // Actualizar badge a 0
+  const fabN = document.getElementById('cl-fab-n');
+  if (fabN) fabN.textContent = '0';
+  const fab = document.getElementById('cl-fab');
+  if (fab) fab.classList.remove('on');
+  // Cerrar cualquier modal abierto
+  document.querySelectorAll('div[style*="position:fixed"]').forEach(el => el.remove());
+  toast('🗑 Sesión borrada — lista para nueva sesión');
+  clUpdateClFAB();
+}
+
+function clUpdateSessionBadge() {
+  const n = clGetSessionCount();
+  const el = document.getElementById('cl-session-badge');
+  if (el) el.textContent = n > 0 ? n + ' items ready to export' : '';
+  // Also update the FAB badge
+  clUpdateClFAB();
+}
+
+// Exportar CSV — función SÍNCRONA para que navigator.share funcione en iOS Safari
+// Debug: show exactly what's in the eBay session
+function clPreviewSession() {
+  const sess = JSON.parse(localStorage.getItem('cl_ebay_session') || '[]');
+  if (!sess.length) { alert('Session is empty — scan a garment first'); return; }
+  let info = 'SESSION: ' + sess.length + ' item(s)\n\n';
+  sess.forEach(function(r, i) {
+    info += '--- #' + (i+1) + ' ' + r.sku + ' ---\n';
+    info += 'Photos: ' + (r.photos ? r.photos.substring(0,80) : '⚠️ EMPTY') + '\n';
+    info += 'Title: '  + (r.title  || '⚠️ EMPTY') + '\n';
+    info += 'Cat: '    + (r.category || '⚠️ EMPTY') + '\n';
+    info += 'Aspects: '+ (r.aspects ? r.aspects.substring(0,80) : '⚠️ EMPTY') + '\n\n';
+  });
+  alert(info.substring(0, 2500));
+}
+
+// OLD EXPORT REMOVED — see clExportEbayCSV FX below
+function clShowCsvFallback(csv, fname, blob) {
+  // Detect iOS Safari — skip download attempt (doesn't work), go straight to overlay
+  const isIOS = /iPad|iPhone|iPod/.test(navigator.userAgent);
+  if (!isIOS) {
+    try {
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url; a.download = fname;
+      document.body.appendChild(a); a.click();
+      setTimeout(function(){ document.body.removeChild(a); URL.revokeObjectURL(url); }, 1500);
+      toast('✅ Downloading: ' + fname);
+      return;
+    } catch(e) {}
+  }
+
+  // iOS fallback: show overlay with copy + email options
+  const safeCSV = csv.replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  const emailHref = 'mailto:?subject=' + encodeURIComponent('eBay Listings') +
+                    '&body=' + encodeURIComponent(csv.substring(0, 1800));
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.95);z-index:9999;display:flex;flex-direction:column;padding:16px;gap:10px;overflow-y:auto';
+  overlay.innerHTML =
+    '<div style="color:#fff;font-size:17px;font-weight:800">📋 Get the CSV</div>'
+   +'<div style="color:#aaa;font-size:12px">Option 1: Copy → paste in an email to yourself → save as .csv on Mac</div>'
+   +'<button id="copybtn" style="background:var(--sv);border:none;border-radius:10px;padding:14px;color:#000;font-weight:800;font-size:15px;cursor:pointer">📋 Copy CSV to Clipboard</button>'
+   +'<a href="' + emailHref + '" style="display:block;background:#1a73e8;border-radius:10px;padding:14px;color:#fff;font-weight:800;font-size:15px;text-align:center;text-decoration:none">📧 Open in Mail App</a>'
+   +'<div style="color:#aaa;font-size:12px">Or copy manually from below:</div>'
+   +'<textarea id="csv-ta" style="background:#111;color:#0f0;font-family:monospace;font-size:9px;border:1px solid #333;border-radius:8px;padding:8px;min-height:120px;resize:vertical">' + safeCSV + '</textarea>'
+   +'<button onclick="this.parentElement.remove()" style="background:none;border:1px solid #444;border-radius:10px;padding:10px;color:#888;cursor:pointer;font-size:14px">Close</button>';
+  document.body.appendChild(overlay);
+
+  document.getElementById('copybtn').onclick = function() {
+    if (navigator.clipboard) {
+      navigator.clipboard.writeText(csv).then(function(){
+        toast('✅ Copied! Paste in email to yourself');
+      }).catch(function(){
+        var ta = document.getElementById('csv-ta');
+        if (ta) { ta.select(); document.execCommand('copy'); toast('✅ Copied!'); }
+      });
+    } else {
+      var ta = document.getElementById('csv-ta');
+      if (ta) { ta.select(); document.execCommand('copy'); toast('✅ Copied!'); }
+    }
+  };
+  setTimeout(function(){
+    var ta = document.getElementById('csv-ta'); if(ta){ta.focus();ta.select();}
+  }, 300);
+}
+
+
+// ── QUICK-EDIT SHEET ──────────────────────────────────────
+function clOpenSheet(field) {
+  const ov    = document.getElementById('cl-sheet-ov');
+  const title = document.getElementById('cl-sheet-title');
+  const body  = document.getElementById('cl-sheet-body');
+  const labels = { brand:'Cambiar Marca', category:'Cambiar Category', size:'Cambiar Talla', color:'Cambiar Color', condition:'Cambiar Condición', defects:'Defects y Notas', notes:'Notas' };
+  title.textContent = labels[field] || 'Editar';
+  ov.classList.add('on');   // ← FIX: abrir el sheet
+
+  if (field === 'brand') {
+    body.innerHTML = '<div class="cl-chips">' + CL_BRANDS.map(function(b) {
+      var safeBrand=b.replace(/"/g,'&quot;');return '<button class="cl-chip' + (cl.brand===b?' sel':'') + '" data-b="'+safeBrand+'" onclick="cl.brand=this.dataset.b;cl._ebayTitle=null;cl._ebayDesc=null;clUpdateSKUDisplay();clCloseSheet();clRenderReview()">' + b + '</button>';
+    }).join('') + '</div>';
+
+  } else if (field === 'category') {
+    body.innerHTML = '<div class="cl-chips">' + CL_CATS.map(function(c) {
+      return '<button class="cl-chip' + (cl.category===c?' sel':'') + '" onclick="cl._ebayTitle=null;cl._ebayDesc=null;cl.category=\'' + c + '\';clCloseSheet();clRenderReview()">' + c + '</button>';
+    }).join('') + '</div>';
+
+  } else if (field === 'size') {
+    body.innerHTML =
+      '<div class="cl-size-wrap"><div class="wh-fade-top"></div><div class="wh-indicator"></div><div class="wh-fade-bot"></div><div class="wheel-list" id="sheet-wheel-list"></div></div>' +
+      '<div style="text-align:center;margin:10px 0 4px;font-size:13px;color:var(--mu)">Selected size: <strong id="sheet-size-lbl" style="color:var(--ac);font-size:15px">' + cl.size + '</strong></div>' +
+      '<button class="add-btn" id="sheet-size-confirm" onclick="cl._ebayTitle=null;cl._ebayDesc=null;clCloseSheet();clRenderReview()" style="margin-top:8px">✓ Confirmar talla</button>';
+    setTimeout(function() { clInitSheetWheel(); }, 40);
+
+  } else if (field === 'color') {
+    body.innerHTML = '<div class="cl-colors">' + CL_COLORS.map(function(c) {
+      return '<button class="cl-color-chip' + (cl.color===c.name?' sel':'') + '" onclick="cl._ebayTitle=null;cl._ebayDesc=null;cl.color=\'' + c.name + '\';clCloseSheet();clRenderReview()" style="--swatch:' + c.hex + '" title="' + c.name + '"><span class="swatch"></span><span class="cname">' + c.name + '</span></button>';
+    }).join('') + '</div>';
+
+  } else if (field === 'condition') {
+    body.innerHTML = '<div class="cl-cond-grid">' + CL_CONDITIONS.map(function(c) {
+      return '<button class="cl-cond-btn' + (cl.condition===c.id?' sel':'') + '" onclick="cl.condition=\'' + c.id + '\';clCloseSheet();clRenderReview()"><div class="cond-lbl">' + c.label + '</div><div class="cond-sub">' + c.sub + '</div></button>';
+    }).join('') + '</div>';
+  } else if (field === 'defects') {
+    var chips = CL_DEFECTS.map(function(d) {
+      var sel = cl.defects.includes(d) ? ' sel' : '';
+      return '<button class="cl-chip defect' + sel + '" onclick="clToggleDefect(this)">' + d + '</button>';
+    }).join('');
+    body.innerHTML = '<div class="cl-chips" id="defect-chips">' + chips + '</div>' +
+      '<div style="margin-top:14px"><div class="lbl" style="margin-bottom:6px">NOTAS</div>' +
+      '<textarea id="sheetNotes" class="ui" rows="2" style="width:100%;resize:none;padding:10px;font-size:14px;font-family:inherit" placeholder="Notas adicionales...">' + (cl.notes||'') + '</textarea></div>' +
+      '<button class="add-btn" onclick="clSaveDefects()" style="margin-top:10px">✓ Guardar</button>';
+  }
+}
+function clSaveDefects(){var el=document.getElementById("sheetNotes");if(el)cl.notes=el.value;clCloseSheet();clRenderReview();}
+
+function clSheetOvClick(e) {
+  if (e.target === document.getElementById('cl-sheet-ov')) clCloseSheet();
+}
+function clCloseSheet() {
+  document.getElementById('cl-sheet-ov').classList.remove('on');
+}
+
+// Size wheel inside the sheet (uses different list ID)
+function clInitSheetWheel() {
+  const ALL_SIZES = [
+    'XS','S','M','L','XL','XXL','1X','1XB','3XL','4XL',
+    'XLT','2XB','2XLT','3XB','3XLT','4XB','4XLT',
+    '26','27','28','29','30','31','32','33','34','35','36','38','40','42','44',
+    '0-3M','3-6M','6-12M','18-24M','2T','3T','4T','5/6','7/8','10/12','14/16',
+    'One Size','Custom'
+  ];
+  const ITEM_H = 44, PAD = 2;
+  const list = document.getElementById('sheet-wheel-list');
+  const lbl  = document.getElementById('sheet-size-lbl');
+  const confirm = document.getElementById('sheet-size-confirm');
+  if (!list) return;
+  if (!ALL_SIZES.includes(cl.size)) cl.size = 'L';
+  let curIdx = ALL_SIZES.indexOf(cl.size);
+  const spacer = '<div style="height:44px;scroll-snap-align:none"></div>';
+  list.innerHTML =
+    Array(PAD).fill(spacer).join('') +
+    ALL_SIZES.map(function(s,i) {
+      return '<div class="wheel-item' + (i===curIdx?' sel':'') + '" data-idx="' + i + '">' + s + '</div>';
+    }).join('') +
+    Array(PAD).fill(spacer).join('');
+  list.scrollTop = curIdx * ITEM_H;
+  list.addEventListener('scroll', function() {
+    const idx = Math.max(0, Math.min(ALL_SIZES.length-1, Math.round(list.scrollTop/ITEM_H)));
+    if (idx !== curIdx) {
+      curIdx = idx;
+      list.querySelectorAll('.wheel-item').forEach(function(el,i){ el.classList.toggle('sel', i===idx); });
+      cl.size = ALL_SIZES[idx];
+      playTick();
+      if (lbl) lbl.textContent = cl.size;
+      if (confirm) confirm.textContent = '✓ Confirmar ' + cl.size;
+      clUpdateSKUDisplay();
+    }
+  }, { passive: true });
+  list.addEventListener('click', function(e) {
+    const item = e.target.closest('[data-idx]');
+    if (item) list.scrollTo({ top: parseInt(item.getAttribute('data-idx'))*ITEM_H, behavior:'smooth' });
+  });
+}
+
+
+// ── Submit ───────────────────────────────────────────────────
+async function clSubmit() {
+  if (cl.submitting) return;
+
+  // ── Validate inseam for bottom garments ───────────────────
+  const needsInseam = ['Pants','Jeans','Shorts'].includes(cl.category);
+  if (needsInseam && !cl.inseam) {
+    toast('⚠️ Selecciona el Inseam antes de guardar');
+    const inseamSect = document.getElementById('inseam-sect');
+    if (inseamSect) inseamSect.scrollIntoView({behavior:'smooth', block:'center'});
+    return;
+  }
+
+  cl.submitting = true;
+  const btn = $('cl-complete-btn');
+  const status = $('cl-submit-status');
+  if (btn) btn.textContent = '⏳ Saving...';
+
+  const listing = {
+    sku: cl.sku,
+    brand: cl.brand,
+    category: cl.category,
+    size: cl.size,
+    color: cl.color,
+    condition: cl.condition,
+    defects: cl.defects,
+    notes: cl.notes,
+    photos: cl.photos,
+    location: cl.location||'',
+    timestamp: new Date().toISOString(),
+  };
+
+  // Save locally to session
+  try {
+    const saved = JSON.parse(localStorage.getItem('cl_sessions')||'[]');
+    const forSave = {...listing, photos: {
+      front: listing.photos.front?'[captured]':null,
+      back:  listing.photos.back?'[captured]':null,
+      tag:   listing.photos.tag?'[captured]':null,
+      detail:listing.photos.detail?'[captured]':null,
+    }};
+    saved.unshift(forSave);
+    localStorage.setItem('cl_sessions', JSON.stringify(saved.slice(0,100)));
+  } catch(e) {}
+
+  // Send to Google Sheets webhook if configured
+  const webhookUrl = localStorage.getItem('cl_sheets_url');
+  if (webhookUrl) {
+    if (status) status.textContent = '📤 Sending to Google Sheets...';
+    try {
+      await fetch(webhookUrl, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(listing),
+        mode: 'no-cors'
+      });
+      if (status) status.innerHTML = '✅ Sent to Google Sheets';
+    } catch(e) {
+      if (status) status.innerHTML = '⚠️ Could not send to Sheets — saved locally';
+    }
+  } else {
+    if (status) status.innerHTML = '💾 Saved locally <span style="color:var(--mu)">(configure Sheets in ⚙)</span>';
+  }
+
+  // Show success
+  if (btn) {
+    btn.textContent = '✅ LISTING COMPLETE';
+    btn.style.background = 'var(--sv)';
+    btn.style.color = '#000';
+  }
+
+  // Add to clothing bulk (old format — Google Sheets)
+  clBulk.unshift(listing);
+  saveClBulkToStorage();
+  clUpdateClFAB();
+
+  // ── SAVE TO EBAY PREFILL SESSION ──────────────────────────
+  // Uploads photos to ImgBB and saves row in eBay format
+  try {
+    if (status) status.textContent = '📸 Uploading photos for eBay...';
+    const imgbbKey = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
+    const photoUrls = imgbbKey ? (await clUploadAllPhotos() || '') : '';
+    if (photoUrls && status) status.textContent = '✅ Photos uploaded!';
+    const ebayRow = clBuildEbayRow(photoUrls);
+    const n = clSaveToSession(ebayRow);
+    clUpdateSessionBadge();
+    if (status) status.textContent = '✅ Saved! ' + n + ' items ready to export for eBay.';
+  } catch(e) {
+    console.warn('eBay session save error:', e);
+    toast('⚠️ Error guardando sesión: ' + (e.message || e));
+  }
+
+  setTimeout(() => {
+    cl.submitting = false;
+    toast(`✅ ${cl.sku} guardado`);
+    clRenderSKU();
+    clGo(1);
+  }, 2000);
+}
+
+// ── Clothing Bulk Session ────────────────────────────────────
+let clBulk = [];
+
+function clUpdateClFAB() {
+  const fab = $('cl-fab');
+  const cnt = $('cl-fab-n');
+  if (!fab || !cnt) return;
+  // Use cl_ebay_session as source of truth (survives page refresh)
+  const sess = JSON.parse(localStorage.getItem('cl_ebay_session') || '[]');
+  const n = sess.length;
+  cnt.textContent = n;
+  fab.classList.toggle('on', n > 0);
+}
+
+
+// ── FILE EXCHANGE CSV ─────────────────────────────────────
+// URL del Apps Script conectado a la hoja "Savvy Scanner - Registro de Productos"
+var CL_SHEET_URL = 'https://script.google.com/macros/s/AKfycbze10nxA1khXx1KckMSs19qW_9O6SIkq8RRJW-laW768ZAjecwLOTCKxVsP15w7GHsO5Q/exec';
+
+function clSendToRegistroSheet(sess) {
+  if (!sess.length) return;
+  var items = sess.map(function(it) {
+    return {
+      sku: it.sku || '',
+      ubicacion: it.warehouseLocation || '',
+      fecha: it.timestamp || new Date().toISOString().slice(0,19).replace('T',' '),
+      marca: it.brand || '',
+      categoria: it.type || it.category || '',
+      genero: it.department || '',
+      talla: it.size || '',
+      color: it.color || '',
+      condicion: it.conditionId == 1000 ? 'NWT' : it.conditionId == 1500 ? 'NWOT' : 'Used',
+      precio: it.price || '',
+      titulo: it.title || '',
+      fotos: it.photos || '',
+      descripcion: (it.description || '').replace(/<[^>]*>/g, '').trim(),
+      defectos: (it.defects || []).join(', '),
+      notas: it.notes || ''
+    };
+  });
+  fetch(CL_SHEET_URL, {
+    method: 'POST',
+    mode: 'no-cors',
+    body: JSON.stringify({items: items}),
+    headers: {'Content-Type': 'text/plain'}
+  }).catch(function(e) { console.warn('Error enviando a Sheet de registro:', e); });
+}
+
+function clExportEbayCSV() {
+  var sess = JSON.parse(localStorage.getItem('cl_ebay_session') || '[]');
+  if (!sess.length) { toast('⚠️ No items — complete a listing first'); return; }
+
+  // Enviar también a la hoja de registro de Google Sheets (en paralelo, no bloquea)
+  clSendToRegistroSheet(sess);
+
+  function q(v) {
+    v = String(v==null?'':v);
+    return (v.indexOf(',')>=0||v.indexOf('"')>=0||v.indexOf('\n')>=0)
+      ? '"'+v.replace(/"/g,'""')+'"' : v;
+  }
+  var SHIP='Flat:Standard Shipp(Free),Same business day';
+  var RET='30 Day return Copy';
+  var PAY='eBay Payments';
+  var HDR=['*Action(SiteID=US|Country=US|Currency=USD|Version=1193|CC=UTF-8)',
+    'CustomLabel','*Category','*Title','*ConditionID',
+    '*C:Brand','*C:Size Type','*C:Size','*C:Department','*C:Color','*C:Style','C:Type',
+    'C:Inseam','C:Dress Length','C:Outer Shell Material','C:Performance/Activity','C:Width',
+    'PicURL','*Description','*Format','*Duration',
+    '*StartPrice','*Quantity','ImmediatePayRequired','*Location','*DispatchTimeMax',
+    'ShippingProfileName','ReturnProfileName','PaymentProfileName'];
+  var lines=['Info,Version=1.0.0,Template=fx_category_template_EBAY_US',HDR.join(',')];
+  sess.forEach(function(r){
+    var needsInseam = ['Jeans','Pants','Shorts'].includes(r.type);
+    var needsDressLen = ['Dress','Skirt'].includes(r.type);
+    var needsOuter = ['Jacket','Coat','Vest'].includes(r.type);
+    var needsActivity = ['Activewear Top','Activewear Bottom'].includes(r.type);
+    var needsWidth = (r.type === 'shoes');
+    lines.push([
+      'Add',r.sku||'',r.categoryId||'63861',r.title||'',r.conditionId||'1000',
+      r.brand||'',r.sizeType||'Regular',r.size||'',r.department||'',r.color||'',
+      r.style||'',r.type||'',
+      (r.inseam || (needsInseam ? '30"' : '')),
+      (r.dressLength || (needsDressLen ? 'Knee Length' : '')),
+      (r.outerMaterial || (needsOuter ? 'Polyester' : '')),
+      (r.activity || (needsActivity ? 'General Fitness' : '')),
+      (r.shoeWidth || (needsWidth ? 'Regular (B/M)' : '')),
+      r.photos||'',
+      r.description||('<p>'+(r.title||'')+'</p>'),
+      'FixedPrice','GTC',r.price||'19.99','1','1','Lumberton, NC','1',SHIP,RET,PAY
+    ].map(q).join(','));
+  });
+  var csv=lines.join('\r\n');
+  var now=new Date();
+  var stamp=now.toISOString().slice(0,10)+'-'
+    +now.getHours().toString().padStart(2,'0')+now.getMinutes().toString().padStart(2,'0');
+  var fname='eBay-FX-'+stamp+'-'+sess.length+'items.csv';
+  var driveUrl = localStorage.getItem('cl_drive_url') || 'https://script.google.com/macros/s/AKfycbyVgEEID8dqZMymlqQMpjO7fLBMYkfj0mmcWk2ImudTy9evKGlOi4oHUc9vhcdmpFeDDQ/exec';
+  if (driveUrl) {
+    toast('📤 Subiendo a Google Drive...');
+    // no-cors: bypasses CORS block — file IS saved to Drive even without readable response
+    fetch(driveUrl, {
+      method: 'POST',
+      mode: 'no-cors',
+      body: JSON.stringify({csv: csv, filename: fname}),
+      headers: {'Content-Type': 'text/plain'}
+    })
+    .then(function() {
+      // With no-cors we can't read response, but file was saved — show success
+      var ov=document.createElement('div');
+      ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.88);z-index:99999;'
+        +'display:flex;flex-direction:column;align-items:center;justify-content:center;'
+        +'padding:30px;gap:16px;text-align:center';
+      ov.innerHTML='<div style="font-size:60px">✅</div>'
+        +'<div style="color:#fff;font-size:22px;font-weight:800">CSV en Google Drive</div>'
+        +'<div style="color:#aaa;font-size:14px">'+fname+'</div>'
+        +'<div style="color:#aaa;font-size:13px;line-height:1.6">'
+        +'En Windows abre <b style="color:#fff">drive.google.com</b><br>'
+        +'Carpeta <b style="color:#fff">eBay Listings</b><br>'
+        +'Descarga el CSV → sube a eBay</div>'
+        +'<a href="https://drive.google.com/drive/folders" target="_blank" '
+        +'style="background:#1a73e8;border-radius:12px;padding:14px 28px;color:#fff;'
+        +'font-weight:800;font-size:16px;text-decoration:none">📁 Abrir Google Drive</a>'
+        +'<button onclick="this.parentElement.remove()" '
+        +'style="background:none;border:1px solid #555;border-radius:10px;padding:10px 24px;'
+        +'color:#888;cursor:pointer;font-size:14px">Cerrar</button>';
+      document.body.appendChild(ov);
+    })
+    .catch(function() {
+      clShowExportOptions(csv, fname, sess.length);
+    });
+  } else {
+    clShowExportOptions(csv, fname, sess.length);
+  }
+}
+
+function clShowExportOptions(csv, fname, count) {
+  var old=document.getElementById('csv-export-overlay');
+  if(old) old.remove();
+  var emailBody='File: '+fname+'\n\n'+csv.substring(0,4000);
+  var mailtoUrl='mailto:?subject='+encodeURIComponent('eBay FX '+fname)
+    +'&body='+encodeURIComponent(emailBody);
+  var ov=document.createElement('div');
+  ov.id='csv-export-overlay';
+  ov.style.cssText='position:fixed;inset:0;background:rgba(0,0,0,.92);z-index:99999;'
+    +'display:flex;flex-direction:column;padding:20px;gap:12px;overflow-y:auto;'
+    +'-webkit-overflow-scrolling:touch';
+  var safeCSV=csv.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+  ov.innerHTML='<div style="color:#fff;font-size:18px;font-weight:800">📦 '+count+' listing(s)</div>'
+    +'<div style="color:#aaa;font-size:12px">'+fname+'</div>'
+    +'<a href="'+mailtoUrl+'" style="display:block;background:#1a73e8;border-radius:12px;'
+    +'padding:16px;color:#fff;font-weight:800;font-size:15px;text-align:center;text-decoration:none">'
+    +'📧 Abrir en Mail — envíatelo</a>'
+    +'<button id="csv-copy-btn2" style="background:#f0a500;border:none;border-radius:12px;'
+    +'padding:16px;color:#000;font-weight:800;font-size:15px;cursor:pointer;width:100%">'
+    +'📋 Copiar al Clipboard</button>'
+    +'<div style="color:#888;font-size:11px">CSV content (copia manualmente si es necesario):</div>'
+    +'<textarea id="csv-ta2" readonly style="background:#111;color:#0f0;font-family:monospace;'
+    +'font-size:9px;border-radius:8px;padding:10px;min-height:80px;border:1px solid #333;resize:vertical">'
+    +safeCSV+'</textarea>'
+    +'<button onclick="document.getElementById(\'csv-export-overlay\').remove()" '
+    +'style="background:none;border:1px solid #555;border-radius:10px;padding:12px;'
+    +'color:#888;cursor:pointer;font-size:14px">✕ Cerrar</button>';
+  document.body.appendChild(ov);
+  document.getElementById('csv-copy-btn2').onclick=function(){
+    var ta=document.getElementById('csv-ta2');
+    ta.value=csv;
+    if(navigator.clipboard){
+      navigator.clipboard.writeText(csv)
+        .then(function(){toast('✅ Copiado!');})
+        .catch(function(){ta.select();document.execCommand('copy');toast('✅ Copiado!');});
+    } else { ta.select(); document.execCommand('copy'); toast('✅ Copiado!'); }
+  };
+}
