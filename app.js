@@ -2223,7 +2223,6 @@ function psLocEmptyHTML() {
     <span>📦</span><span>Scan location (optional)</span>
   </button>`;
 }
--e 
 
 
 function exportCSV(){
