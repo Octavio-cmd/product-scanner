@@ -4281,7 +4281,7 @@ async function locOpen(target) {
     ov.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.95);z-index:99999;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px';
     ov.innerHTML =
       '<div style="color:#fff;font-weight:800;font-size:16px">\uD83D\uDCCD Scan Location (QR / Barcode)</div>' +
-      '<video id="loc-qr-video" playsinline style="width:100%;max-width:480px;height:320px;object-fit:cover;border-radius:14px;border:3px solid #00e676;background:#000"></video>' +
+      '<div id="loc-qr-video" style="width:100%;max-width:480px;min-height:320px;border-radius:14px;border:3px solid #00e676;background:#000;overflow:hidden"></div>' +
       '<input id="loc-manual-in" type="text" placeholder="O escribe la ubicaci\u00f3n (ej: K/P6)" style="width:100%;max-width:480px;padding:14px;border-radius:10px;border:1px solid #555;background:#111;color:#fff;font-size:16px">' +
       '<button id="loc-manual-ok" style="width:100%;max-width:480px;padding:14px;background:#00e676;color:#000;border:none;border-radius:10px;font-size:16px;font-weight:800">\u2714 Usar esta ubicaci\u00f3n</button>' +
       '<button id="loc-cancel-btn" style="width:100%;max-width:480px;padding:12px;background:none;color:#aaa;border:1px solid #555;border-radius:10px;font-size:15px">\u2715 Cancelar</button>';
@@ -4314,6 +4314,12 @@ function locCapture(code) {
   if (_locTarget === 'scanner') {
     if (cur) {
       cur.location = code;
+      // Actualizar también los packs YA agregados al CSV de este mismo producto,
+      // para que la ubicación llegue al Sheet aunque se capture después de ADD TO CSV
+      for (var bi = 0; bi < bulk.length; bi++) {
+        if (bulk[bi].upc === cur.upc) bulk[bi].location = code;
+      }
+      try { saveBulkToStorage(); } catch(e) {}
       // Update location badge in result screen
       const badge = document.getElementById('loc-badge-scanner');
       if (badge) badge.outerHTML = locBadgeHTML(code, 'scanner');
