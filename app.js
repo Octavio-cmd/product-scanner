@@ -3639,61 +3639,28 @@ function descToText(d){
 function psSendToRegistroSheet(items) {
   if (!items || !items.length) return;
 
-  // Agrupar por UPC → UNA fila por producto, unidades por pack en columnas
-  var byUpc = {};
-  items.forEach(function(it) {
-    var key = it.upc || it.sku || 'unknown';
-    if (!byUpc[key]) byUpc[key] = [];
-    byUpc[key].push(it);
-  });
-
-  var rows = Object.keys(byUpc).map(function(upc) {
-    var group = byUpc[upc];
-    var first = group[0];
-
-    // Unidades por pack (pack × cantidad de listados). 0 si no se agregó ese pack.
-    var unitsByPack = {1:0, 3:0, 6:0, 12:0};
-    var listingsByPack = {1:0, 3:0, 6:0, 12:0};
-    var precios = [];
-    var fotoSet = [];
-    group.forEach(function(it) {
-      var p = Number(it.packs) || 1;
-      var q = Number(it.quantity) || 1;
-      if (unitsByPack[p] !== undefined) {
-        unitsByPack[p] += p * q;
-        listingsByPack[p] += q;
-      }
-      if (it.price) precios.push(p + 'pk: $' + it.price);
-      var ph = it.bundleImg || it.photo || '';
-      ph.split('|').forEach(function(u) {
-        u = (u || '').trim();
-        if (u && fotoSet.indexOf(u) === -1) fotoSet.push(u);
-      });
-    });
-    var totalUnits = unitsByPack[1] + unitsByPack[3] + unitsByPack[6] + unitsByPack[12];
-
-    // Título base sin "Pack of N"
-    var baseTitle = (first.title || '').replace(/\s*Pack of \d+\s*/gi, ' ').replace(/\s+/g, ' ').trim();
-
+  // UNA FILA POR PACK — formato vertical (más fácil de leer)
+  var rows = items.map(function(it) {
+    var p = Number(it.packs) || 1;
+    var q = Number(it.quantity) || 1;
+    var cat = it.category;
+    if (!cat || cat === 'undefined' || cat === 'null') cat = '';
     return {
       tipo: 'product',
-      upc: upc,
+      upc: it.upc || '',
       fecha: new Date().toISOString().slice(0,19).replace('T',' '),
-      marca: first.brand || '',
-      categoria: first.category || '',
-      titulo: baseTitle,
-      pk1: unitsByPack[1],
-      pk3: unitsByPack[3],
-      pk6: unitsByPack[6],
-      pk12: unitsByPack[12],
-      totalUnidades: totalUnits,
-      listados: listingsByPack[1] + listingsByPack[3] + listingsByPack[6] + listingsByPack[12],
-      precios: precios.join(' / '),
-      expDate: first.expDate || '',
-      ubicacion: first.location || '',
-      fotos: fotoSet.join('|'),
-      descripcion: descToText(first.description),
-      escaneadoPor: first.scannedBy || 'unknown'
+      marca: it.brand || '',
+      categoria: cat,
+      titulo: it.title || '',
+      paquete: p + 'pk',
+      unidades: p * q,
+      listados: q,
+      precio: it.price || '',
+      expDate: it.expDate || '',
+      ubicacion: it.location || '',
+      fotos: it.bundleImg || it.photo || '',
+      descripcion: descToText(it.description),
+      escaneadoPor: it.scannedBy || 'unknown'
     };
   });
 
@@ -3708,6 +3675,11 @@ function psSendToRegistroSheet(items) {
 function exportCSV(){
   try {
   if(!bulk.length){toast('⚠️ No products');return;}
+
+  // Candado anti doble-tap: evita exports (y filas) duplicados
+  if (window._exportLock) { toast('⏳ Export en proceso...'); return; }
+  window._exportLock = true;
+  setTimeout(function(){ window._exportLock = false; }, 5000);
 
   // Enviar también a la hoja de registro (pestaña "Product Scanner"), no bloquea
   psSendToRegistroSheet(bulk);
