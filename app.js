@@ -2826,17 +2826,20 @@ function updateSplitCalc(){
   [1,3,6,12].forEach(function(p){
     const d = split[p];
     const isOn = !!active[p];
+    const inSb = !!(window._psSbExisting && window._psSbExisting[p]);
     if (isOn) {
+      const sbTag = inSb ? '<span style="font-size:10px;color:#ffb300;border:1px solid rgba(255,179,0,.45);border-radius:6px;padding:2px 6px;margin-left:6px;white-space:nowrap">✅ En Sellbrite</span>' : '';
       rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
-        <div style="font-weight:800">${p}pk</div>
+        <div style="font-weight:800">${p}pk${sbTag}</div>
         <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
         <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
         <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
       </div>`;
     } else {
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);opacity:.45">
+      const exTxt = inSb ? '<span style="color:var(--sv);font-weight:700">✅ Ya en Sellbrite</span>' : 'excluido';
+      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd);opacity:.55">
         <div style="font-weight:800;text-decoration:line-through">${p}pk</div>
-        <div style="color:var(--mu);font-size:12px">excluido</div>
+        <div style="color:var(--mu);font-size:12px">${exTxt}</div>
         <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:8px;padding:5px 10px;color:var(--sv);font-size:12px;font-weight:800;cursor:pointer;margin-left:8px">↩ incluir</button>
       </div>`;
     }
@@ -2970,6 +2973,7 @@ function cycleSplitTier(){
 async function psCheckSellbrite(upc){
   const statusEl = $('ps-sellbrite-status');
   if(!statusEl) return;
+  window._psSbExisting = {}; // limpiar estado del producto anterior
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
   try{
     const upcClean = String(upc).replace(/\D/g,'');
@@ -2982,6 +2986,28 @@ async function psCheckSellbrite(upc){
     }
 
     const products = data.products;
+    // ── Detectar qué packs (1/3/6/12) YA existen en Sellbrite y auto-excluirlos ──
+    var sbExisting = {};
+    products.forEach(function(p){
+      var m = String(p.sku || '').toUpperCase().match(/-(\d+)\s*PK$/);
+      if (m && String(p.sku || '').indexOf(upcClean) >= 0) {
+        var pn = parseInt(m[1], 10);
+        if (pn === 1 || pn === 3 || pn === 6 || pn === 12) sbExisting[pn] = true;
+      }
+    });
+    window._psSbExisting = sbExisting;
+    if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+    var autoExcluded = [];
+    [1,3,6,12].forEach(function(pn){
+      if (sbExisting[pn] && window._splitActive[pn]) {
+        window._splitActive[pn] = false;
+        autoExcluded.push(pn + 'pk');
+      }
+    });
+    if (autoExcluded.length) {
+      toast('✅ Ya en Sellbrite: ' + autoExcluded.join(', ') + ' — excluidos del reparto');
+      try { updateSplitCalc(); } catch(e) {}
+    }
     _psSellbriteProducts = {}; // guardar info para el update por SKU
     let html = '📦 <strong style="color:#00e676">En Sellbrite: ' + products.length + ' listado' + (products.length>1?'s':'') + '</strong>';
     products.forEach(function(p, idx){
@@ -3573,6 +3599,9 @@ function renderResult(r){
     var si=document.getElementById('shade-input');
     if(si&&cur&&cur._shade) si.value=cur._shade;
     window._splitActive = {1:true,3:true,6:true,12:true};
+    // Respetar packs ya detectados en Sellbrite (auto-excluidos)
+    var _sbEx = window._psSbExisting || {};
+    [1,3,6,12].forEach(function(pn){ if (_sbEx[pn]) window._splitActive[pn] = false; });
     updateSplitCalc();
     if(cur && cur._packImages) renderPackImagesPreview();
     renderExtraPhotosUI();
@@ -3661,29 +3690,31 @@ function renderBulk(){
 var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxhvH830MoVocWM6ieN_mnsi5uYCVaX1kt37_J38f0LehvUFQvRpFXX7hGpGJOUbPU2mw/exec';
 
 // ── Ajustar la descripción al pack correspondiente (1pk/3pk/6pk/12pk) ──────
-// Cada listado debe decir SU cantidad correcta en Package Contents.
+// Cada listado debe decir SU cantidad correcta en intro y Package Contents.
 function descForPack(desc, packs) {
   if (!desc) return desc;
-  var unitStr = packs + ' unit' + (packs > 1 ? 's' : '');
-  var qtyLine = 'This listing includes ' + unitStr + ', brand new and factory-sealed.';
+  var unitWord = packs > 1 ? 'units' : 'unit';
+  var qtyLine = 'This listing includes ' + packs + ' ' + unitWord + ', brand new and factory-sealed.';
+  function fixQty(text) {
+    if (!text) return text;
+    return String(text)
+      // "3 brand new, factory-sealed units" / "1 unit" → cantidad del pack
+      .replace(/\b\d+((?:\s+[A-Za-z,\-]+){0,4})\s+units?\b/gi, function(m, mid){
+        return packs + (mid || '') + ' ' + unitWord;
+      })
+      // "3 packs of..." → cantidad del pack (no toca "15-count pack" ni "pack of 15 chews")
+      .replace(/\b\d+\s+packs?\b/gi, packs + ' ' + (packs > 1 ? 'packs' : 'pack'));
+  }
   if (typeof desc === 'string') {
-    var s = desc
-      .replace(/\b\d+\s*unit\(?s?\)?/gi, unitStr)
-      .replace(/\bpack of \d+\b/gi, 'Pack of ' + packs);
-    if (!/\bunits?\b/i.test(desc)) s = qtyLine + ' ' + s;
+    var s = fixQty(desc);
+    if (!/\bunits?\b/i.test(s)) s = qtyLine + ' ' + s;
     return s;
   }
-  var pc = desc.package_contents || '';
-  if (pc) {
-    pc = pc
-      .replace(/\b\d+\s*unit\(?s?\)?/gi, unitStr)
-      .replace(/\bpack of \d+\b/gi, 'Pack of ' + packs);
-    if (!/\d+\s*unit/i.test(desc.package_contents || '')) pc = qtyLine + ' ' + pc;
-  } else {
-    pc = qtyLine;
-  }
+  var pc = fixQty(desc.package_contents || '');
+  if (!pc) pc = qtyLine;
+  else if (!/\bunits?\b/i.test(pc)) pc = qtyLine + ' ' + pc;
   return {
-    intro: desc.intro || '',
+    intro: fixQty(desc.intro || ''),
     benefits: (desc.benefits || []).slice(),
     package_contents: pc,
     disclaimer: desc.disclaimer || ''
