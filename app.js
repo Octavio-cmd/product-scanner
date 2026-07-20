@@ -3613,7 +3613,7 @@ function renderBulk(){
 // CSV Export
 // ── ENVIAR A HOJA DE REGISTRO (pestaña "Product Scanner") ──────────────
 // Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
-var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbze10nxA1khXx1KckMSs19qW_9O6SIkq8RRJW-laW768ZAjecwLOTCKxVsP15w7GHsO5Q/exec';
+var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxhvH830MoVocWM6ieN_mnsi5uYCVaX1kt37_J38f0LehvUFQvRpFXX7hGpGJOUbPU2mw/exec';
 
 // ── Convertir descripción (objeto de Claude o string) a HTML/texto ──────
 function descToEbayHTML(d){
