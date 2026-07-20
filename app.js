@@ -256,6 +256,14 @@ function showLoadingInline(initialMsg){
     + '</div>';
 }
 
+// Categoría eBay válida (solo dígitos). Si viene vacía, "undefined" o "null",
+// devuelve el fallback — evita el Error 37 de eBay (CategoryID invalid).
+function psSafeCategory(cat, fallback){
+  var c = String(cat == null ? '' : cat).trim();
+  if (!c || c === 'undefined' || c === 'null' || !/^\d+$/.test(c)) return fallback || '26395';
+  return c;
+}
+
 // SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
 function makeSKU(brand,upc,packs,title){
   packs=packs||1; title=title||'';
@@ -2715,7 +2723,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     expDate:     expDate,
     upc:         (cur && cur.upc)         || '',
     brand:       (cur && cur.brand)       || 'Generic',
-    category:    (cur && cur.category)    || '26395',
+    category:    psSafeCategory(cur && cur.category),
     description: descToEbayHTML(descForPack((cur && (cur._description || cur.description)) || '', packs)) || '',
     location:    location,
     packs:       packs,
@@ -2966,7 +2974,7 @@ async function addSplitPacksToCSV(){
       expDate:     expDate,
       upc:         cur.upc || '',
       brand:       cur.brand || 'Generic',
-      category:    cur.category || '26395',
+      category:    psSafeCategory(cur.category),
       description: descToEbayHTML(descForPack(cur._description || cur.description, p)) || '',
       location:    location,
       packs:       p,
@@ -4023,7 +4031,7 @@ function exportCSV(){
     lines.push([
       'Add',
       it.sku||'',
-      it.category||'31786',
+      psSafeCategory(it.category, '31786'),
       cleanTitle,
       '1000',
       descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
