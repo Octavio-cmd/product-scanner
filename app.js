@@ -160,8 +160,11 @@ async function doLogin() {
   const hash = await sha256(pass);
   if (SAVVY_USERS[user] && SAVVY_USERS[user] === hash) {
     SAVVY_CURRENT_USER = user;
-    localStorage.setItem('savvy_user', user);
-    document.getElementById('login-screen').style.display = 'none';
+    // sessionStorage: dura mientras la pestaña esté abierta.
+    // Al cerrar Safari/la pestaña se borra sola → vuelve a pedir login.
+    try { sessionStorage.setItem('savvy_session_user', user); } catch(e) {}
+    var scr = document.getElementById('login-screen');
+    if (scr) scr.style.display = 'none';
     // Show username in header
     const hdrUser = document.getElementById('hdr-user');
     if (hdrUser) hdrUser.textContent = '👤 ' + user;
@@ -171,19 +174,55 @@ async function doLogin() {
   }
 }
 
+// Crea la pantalla de login dinámicamente (el HTML de Product Scanner no la trae)
+function ensureLoginScreen() {
+  var scr = document.getElementById('login-screen');
+  if (scr) return scr;
+  scr = document.createElement('div');
+  scr.id = 'login-screen';
+  scr.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:#0d0d0d;z-index:999999;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;padding:30px';
+  scr.innerHTML =
+    '<div style="font-size:22px;font-weight:900;color:#fff">\uD83D\uDED2 <span style="color:#ff6d1f">Savvy</span> Product Scanner</div>' +
+    '<div style="color:#888;font-size:13px;margin-bottom:10px">Inicia sesi\u00f3n para continuar</div>' +
+    '<input id="login-user" type="text" placeholder="Usuario" autocapitalize="none" autocomplete="off" style="width:100%;max-width:340px;padding:14px;border-radius:10px;border:1px solid #444;background:#161616;color:#fff;font-size:16px">' +
+    '<input id="login-pass" type="password" placeholder="Contrase\u00f1a" style="width:100%;max-width:340px;padding:14px;border-radius:10px;border:1px solid #444;background:#161616;color:#fff;font-size:16px">' +
+    '<div id="login-err" style="display:none;color:#ff5252;font-size:13px">Usuario o contrase\u00f1a incorrectos</div>' +
+    '<button id="login-btn" style="width:100%;max-width:340px;padding:14px;background:#ff6d1f;color:#fff;border:none;border-radius:10px;font-size:16px;font-weight:800">Entrar</button>';
+  document.body.appendChild(scr);
+  var btn = document.getElementById('login-btn');
+  btn.addEventListener('touchend', function(e){ e.preventDefault(); doLogin(); });
+  btn.addEventListener('click', doLogin);
+  var passIn = document.getElementById('login-pass');
+  passIn.addEventListener('keydown', function(e){ if(e.key==='Enter') doLogin(); });
+  return scr;
+}
+
 function checkLogin() {
-  // Auto-login - no authentication required
-  SAVVY_CURRENT_USER = 'demo';
-  const hdrUser = document.getElementById('hdr-user');
-  if (hdrUser) hdrUser.textContent = '👤 demo';
+  // Si la pestaña sigue abierta, la sesión sigue viva (sessionStorage).
+  // Al cerrar Safari/la pestaña, iOS borra sessionStorage → pide login otra vez.
+  var u = null;
+  try { u = sessionStorage.getItem('savvy_session_user'); } catch(e) {}
+  if (u && SAVVY_USERS[u]) {
+    SAVVY_CURRENT_USER = u;
+    const hdrUser = document.getElementById('hdr-user');
+    if (hdrUser) hdrUser.textContent = '👤 ' + u;
+    var old = document.getElementById('login-screen');
+    if (old) old.style.display = 'none';
+    return;
+  }
+  SAVVY_CURRENT_USER = null;
+  var scr = ensureLoginScreen();
+  scr.style.display = 'flex';
 }
 
 function doLogout() {
+  try { sessionStorage.removeItem('savvy_session_user'); } catch(e) {}
   localStorage.removeItem('savvy_user');
   SAVVY_CURRENT_USER = null;
-  document.getElementById('login-screen').style.display = 'flex';
-  document.getElementById('login-user').value='';
-  document.getElementById('login-pass').value='';
+  var scr = ensureLoginScreen();
+  scr.style.display = 'flex';
+  var ui = document.getElementById('login-user'); if (ui) ui.value = '';
+  var pi = document.getElementById('login-pass'); if (pi) pi.value = '';
   const errEl = document.getElementById('login-err');
   if(errEl) errEl.style.display='none';
 }
@@ -1883,12 +1922,18 @@ function rebuildTitle(base, n, shade, expDate) {
     .replace(/\bnew\b\s*$/gi, '').replace(/\s{2,}/g, ' ').trim()
     .replace(/[·\-,\.]+\s*$/, '').trim();
   var expStr = formatExpForTitle(expDate);
-  // Order: base [shade] [Exp MM/YY] Pack of N New
-  if (shade)  t = t + ' ' + shade;
-  if (expStr) t = t + ' ' + expStr;
-  t = t + ' Pack of ' + n + ' New';
-  if (t.length > 80) t = t.substring(0, 77).replace(/\s+\S*$/, '...');
-  return t;
+  // El sufijo (shade + Exp + Pack of N New) SIEMPRE va completo dentro de los 80 chars de eBay.
+  // Si el título es muy largo, se recorta el NOMBRE del producto, nunca el "Pack of N".
+  var suffix = '';
+  if (shade)  suffix += ' ' + shade;
+  if (expStr) suffix += ' ' + expStr;
+  suffix += ' Pack of ' + n + ' New';
+  var maxBase = 80 - suffix.length;
+  if (maxBase < 0) maxBase = 0;
+  if (t.length > maxBase) {
+    t = t.substring(0, maxBase).replace(/\s+\S*$/, '').trim();
+  }
+  return (t + suffix).trim().substring(0, 80);
 }
 
 function initPackWheel(currentPacks, ebayPricesObj, baseTitle, baseUPC, baseBrand) {
@@ -2671,7 +2716,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     upc:         (cur && cur.upc)         || '',
     brand:       (cur && cur.brand)       || 'Generic',
     category:    (cur && cur.category)    || '26395',
-    description: (cur && cur.description) || '',
+    description: descToEbayHTML(descForPack((cur && (cur._description || cur.description)) || '', packs)) || '',
     location:    location,
     packs:       packs,
     photo:       photoUrl,
@@ -2885,7 +2930,7 @@ async function addSplitPacksToCSV(){
       upc:         cur.upc || '',
       brand:       cur.brand || 'Generic',
       category:    cur.category || '26395',
-      description: descToEbayHTML(cur._description) || cur.description || '',
+      description: descToEbayHTML(descForPack(cur._description || cur.description, p)) || '',
       location:    location,
       packs:       p,
       quantity:    split[p].listings,
@@ -3614,6 +3659,36 @@ function renderBulk(){
 // ── ENVIAR A HOJA DE REGISTRO (pestaña "Product Scanner") ──────────────
 // Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
 var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxhvH830MoVocWM6ieN_mnsi5uYCVaX1kt37_J38f0LehvUFQvRpFXX7hGpGJOUbPU2mw/exec';
+
+// ── Ajustar la descripción al pack correspondiente (1pk/3pk/6pk/12pk) ──────
+// Cada listado debe decir SU cantidad correcta en Package Contents.
+function descForPack(desc, packs) {
+  if (!desc) return desc;
+  var unitStr = packs + ' unit' + (packs > 1 ? 's' : '');
+  var qtyLine = 'This listing includes ' + unitStr + ', brand new and factory-sealed.';
+  if (typeof desc === 'string') {
+    var s = desc
+      .replace(/\b\d+\s*unit\(?s?\)?/gi, unitStr)
+      .replace(/\bpack of \d+\b/gi, 'Pack of ' + packs);
+    if (!/\bunits?\b/i.test(desc)) s = qtyLine + ' ' + s;
+    return s;
+  }
+  var pc = desc.package_contents || '';
+  if (pc) {
+    pc = pc
+      .replace(/\b\d+\s*unit\(?s?\)?/gi, unitStr)
+      .replace(/\bpack of \d+\b/gi, 'Pack of ' + packs);
+    if (!/\d+\s*unit/i.test(desc.package_contents || '')) pc = qtyLine + ' ' + pc;
+  } else {
+    pc = qtyLine;
+  }
+  return {
+    intro: desc.intro || '',
+    benefits: (desc.benefits || []).slice(),
+    package_contents: pc,
+    disclaimer: desc.disclaimer || ''
+  };
+}
 
 // ── Convertir descripción (objeto de Claude o string) a HTML/texto ──────
 function descToEbayHTML(d){
