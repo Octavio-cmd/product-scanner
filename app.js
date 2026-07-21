@@ -109,26 +109,22 @@ const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
 // ── Default API keys (loaded from Railway savvy-config)
 let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
-let DEFAULT_IMGBB_KEY = '';
+// FORZAR key nueva SIEMPRE — Railway savvy-config tiene la vieja desactualizada
+let DEFAULT_IMGBB_KEY = atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=');
 let DEFAULT_CLAUDE_KEY = '';
 let _keysLoaded = false;
-// Load keys from Railway on startup
+// Load keys from Railway on startup (excepto imgbb — esa se queda hardcoded arriba)
 (async function loadKeys() {
   try {
     const r = await fetch(SAVVY_CONFIG + '/config');
     if (r.ok) {
       const d = await r.json();
-      if (d.imgbb)      DEFAULT_IMGBB_KEY  = d.imgbb;
+      // IMPORTANTE: NO sobrescribir DEFAULT_IMGBB_KEY con la vieja de Railway
+      // if (d.imgbb) DEFAULT_IMGBB_KEY = d.imgbb;  ← DESACTIVADO
       if (d.claude)     DEFAULT_CLAUDE_KEY = d.claude;
       if (d.sheets_url) localStorage.setItem('cl_sheets_url', d.sheets_url);
-      // drive_url: NO sobrescribir — usamos URL fija hardcodeada
     }
   } catch(e) { console.warn('Could not load keys from Railway savvy-config'); }
-  // Fallback hardcoded (always applies if Railway didn't provide)
-  const _k = [
-    ['DEFAULT_IMGBB_KEY', atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=')],
-  ];
-  _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   // Drive URL fija — siempre la correcta
   localStorage.setItem('cl_drive_url', 'https://script.google.com/macros/s/AKfycbyVgEEID8dqZMymlqQMpjO7fLBMYkfj0mmcWk2ImudTy9evKGlOi4oHUc9vhcdmpFeDDQ/exec');
   _keysLoaded = true;
@@ -264,14 +260,21 @@ if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
 }
 
-// Limpiar API keys viejas de ImgBB en localStorage — fuerza usar la key nueva
-// que está hardcodeada arriba. Esto evita que iOS use una key vieja cacheada.
+// FORZAR limpieza de API keys viejas de ImgBB en localStorage
+// Si tienes CUALQUIER key en localStorage y NO es la nueva, la borramos.
+// Esto obliga a la app a usar SIEMPRE la key hardcodeada nueva.
 try {
-  var _oldKeys = ['1e8ecea2fc2ea918caca74369928ef63'];
+  var NEW_IMGBB_KEY = 'c8a48ce4e5e536f0a8345161997dcfe3';
   var _clKey = localStorage.getItem('cl_imgbb_key');
-  if (_clKey && _oldKeys.indexOf(_clKey) >= 0) localStorage.removeItem('cl_imgbb_key');
+  if (_clKey && _clKey !== NEW_IMGBB_KEY) {
+    localStorage.removeItem('cl_imgbb_key');
+    console.log('🧹 Cleared old cl_imgbb_key from localStorage');
+  }
   var _svKey = localStorage.getItem('savvy_imgbb_key');
-  if (_svKey && _oldKeys.indexOf(_svKey) >= 0) localStorage.removeItem('savvy_imgbb_key');
+  if (_svKey && _svKey !== NEW_IMGBB_KEY) {
+    localStorage.removeItem('savvy_imgbb_key');
+    console.log('🧹 Cleared old savvy_imgbb_key from localStorage');
+  }
 } catch(e) {}
 
 let bulk=[],cur=null;
