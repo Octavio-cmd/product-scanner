@@ -4496,31 +4496,6 @@ async function locOpen(target) {
   _locTarget = target;
   if (window._psDebug) window._psDebug('📍 LOC: iniciando...');
 
-  // ── LIBERAR MEMORIA antes de abrir la cámara ──
-  // Cuando hay muchas fotos base64 cargadas (packs generados), iOS Safari
-  // se queda sin memoria y no puede arrancar el video de la cámara nueva.
-  // Ocultamos temporalmente las imágenes pesadas — se restauran al cerrar.
-  try {
-    var heavyImgs = document.querySelectorAll(
-      '#pack-images-preview img, #extra-photos-preview img, #bundle-preview img, ' +
-      '.pack-thumb img, .extra-thumb img, img[src^="data:image"]'
-    );
-    window._locHiddenImgs = [];
-    heavyImgs.forEach(function(img){
-      if (img.src && img.src.length > 5000) { // solo las pesadas (base64 grandes)
-        window._locHiddenImgs.push({el: img, src: img.src});
-        img.dataset.locSrc = img.src;
-        img.src = 'data:image/gif;base64,R0lGODlhAQABAAAAACw='; // pixel transparente
-      }
-    });
-    if (window._psDebug) window._psDebug('📍 LOC: ' + window._locHiddenImgs.length + ' imgs liberadas de memoria');
-  } catch(e) {
-    if (window._psDebug) window._psDebug('⚠️ LOC: no se pudo liberar mem: ' + e.message);
-  }
-
-  // Dar tiempo al navegador de liberar memoria (garbage collection)
-  await new Promise(function(res){ setTimeout(res, 300); });
-
   // Overlay full-screen estilo scanner principal (idéntico al de escanear producto)
   var ov = document.getElementById('loc-overlay');
   if (!ov) {
@@ -4655,20 +4630,10 @@ async function locClose() {
   var ov = document.getElementById('loc-overlay');
   if (ov) {
     ov.style.display = 'none';
-    ov.style.pointerEvents = 'none'; // Asegurar que no intercepta toques
-    // También ocultar el panel manual si quedó abierto
+    ov.style.pointerEvents = 'none';
     var mp = document.getElementById('loc-manual-panel');
     if (mp) mp.style.display = 'none';
   }
-  // ── RESTAURAR las imágenes que ocultamos para liberar memoria ──
-  try {
-    if (window._locHiddenImgs && window._locHiddenImgs.length) {
-      window._locHiddenImgs.forEach(function(item){
-        if (item.el && item.src) item.el.src = item.src;
-      });
-      window._locHiddenImgs = [];
-    }
-  } catch(e) {}
 }
 
 function locCapture(code) {
