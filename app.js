@@ -4557,10 +4557,12 @@ async function locOpen(target) {
   var mp = document.getElementById('loc-manual-panel'); if (mp) mp.style.display = 'none';
   ov.style.pointerEvents = 'auto'; // re-habilitar tras un locClose previo
   ov.style.display = 'flex';
+  if (window._psDebug) window._psDebug('📍 LOC: overlay abierto');
 
   // Esperar a que el layout se compute (crítico en iOS Safari para que el
   // <video> arranque con dimensiones reales y no salga en negro)
   await new Promise(function(res){ setTimeout(res, 350); });
+  if (window._psDebug) window._psDebug('📍 LOC: 350ms esperados');
 
   // Forzar reflow del contenedor
   var videoDiv = document.getElementById('loc-qr-video');
@@ -4568,21 +4570,38 @@ async function locOpen(target) {
     videoDiv.style.display = 'none';
     void videoDiv.offsetHeight; // reflow
     videoDiv.style.display = '';
+    if (window._psDebug) window._psDebug('📍 LOC: div encontrado ' + videoDiv.offsetWidth + 'x' + videoDiv.offsetHeight);
+  } else {
+    if (window._psDebug) window._psDebug('❌ LOC: video div NO existe');
   }
 
   try {
     // Detener CUALQUIER cámara que pueda estar corriendo (evita conflictos en iOS)
     try { savvyStopScan('qr-video'); } catch(e) {}
     try { savvyStopScan('loc-qr-video'); } catch(e) {}
+    if (window._psDebug) window._psDebug('📍 LOC: cámaras previas detenidas');
     // Pequeña pausa para que iOS libere completamente la cámara
     await new Promise(function(res){ setTimeout(res, 200); });
 
+    if (window._psDebug) window._psDebug('📍 LOC: llamando savvyStartScan...');
     var prom = savvyStartScan('loc-qr-video', async (code) => {
+      if (window._psDebug) window._psDebug('✅ LOC: QR detectado ' + code);
       locCapture(code.trim());
     });
-    if (prom && typeof prom.catch === 'function') {
-      prom.catch(function(err){
-        console.warn('Loc camera failed:', err);
+    if (prom && typeof prom.then === 'function') {
+      prom.then(function(){
+        if (window._psDebug) window._psDebug('✅ LOC: cámara arrancó OK');
+        // Verificar si el video se está renderizando
+        setTimeout(function(){
+          var v = document.querySelector('#loc-qr-video video');
+          if (v) {
+            if (window._psDebug) window._psDebug('📹 LOC: video ' + v.videoWidth + 'x' + v.videoHeight + ' ready=' + v.readyState);
+          } else {
+            if (window._psDebug) window._psDebug('❌ LOC: NO hay <video> en el div');
+          }
+        }, 1500);
+      }).catch(function(err){
+        if (window._psDebug) window._psDebug('❌ LOC: cámara falló ' + (err && err.message ? err.message : err));
         // Si la cámara falla, mostrar el panel manual automáticamente
         var mp2 = document.getElementById('loc-manual-panel');
         if (mp2) {
@@ -4593,7 +4612,7 @@ async function locOpen(target) {
       });
     }
   } catch(e) {
-    console.warn('loc scanner:', e);
+    if (window._psDebug) window._psDebug('❌ LOC: excepción ' + (e && e.message ? e.message : e));
     var mp3 = document.getElementById('loc-manual-panel');
     if (mp3) mp3.style.display = 'flex';
   }
