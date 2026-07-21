@@ -245,67 +245,20 @@ window.addEventListener('load', function(){
   }, 500);
 });
 
-// ── LIMPIADOR CONTINUO cada 2 segundos ──
-// Si por alguna razón el scanner de ubicación se cuelga y su overlay queda
-// tapando la pantalla, este vigía lo detecta y lo elimina en máximo 2 segundos.
+// ── LIMPIADOR CONTINUO cada 5 segundos ──
+// Solo elimina overlays REALMENTE huérfanos (más de 60 segundos abiertos)
 setInterval(function(){
   var lo = document.getElementById('loc-overlay');
-  if (lo) {
-    // Si existe pero el scanner ya no está corriendo, es huérfano
-    var isRunning = _savvyScanners && _savvyScanners['loc-qr-video'];
-    var isVisible = lo.style.display !== 'none' && lo.offsetHeight > 0;
-    // Si NO está corriendo pero SÍ está visible/tapando → huérfano → eliminar
-    if (!isRunning && isVisible) {
-      try { lo.parentNode.removeChild(lo); } catch(e) {
-        lo.style.display = 'none';
-        lo.style.pointerEvents = 'none';
-      }
-      if (window._psDebug) window._psDebug('🧹 vigía: overlay huérfano removido');
+  if (lo && lo.dataset.openedAt) {
+    var age = Date.now() - parseInt(lo.dataset.openedAt, 10);
+    // Solo eliminar si tiene más de 60 segundos abierto
+    if (age > 60000) {
+      try { lo.parentNode.removeChild(lo); } catch(e) {}
+      if (window._psDebug) window._psDebug('🧹 vigía: overlay muy viejo removido (' + Math.round(age/1000) + 's)');
     }
   }
-  var mp = document.getElementById('loc-manual-panel');
-  if (mp && mp.style.display !== 'none' && !document.getElementById('loc-overlay')) {
-    try { mp.parentNode.removeChild(mp); } catch(e) {}
-  }
-}, 2000);
+}, 5000);
 
-// ── BOTÓN FLOTANTE DE EMERGENCIA ──
-// Aparece FIJO en la parte superior, con z-index gigante para que nada lo tape.
-// Cuando se toca, llama directamente a addBulk() saltándose todos los intermediarios.
-window.addEventListener('load', function(){
-  setTimeout(function(){
-    if (document.getElementById('emergAddBtn')) return;
-    var btn = document.createElement('button');
-    btn.id = 'emergAddBtn';
-    btn.textContent = '⚡ ADD TO CSV';
-    btn.style.cssText = 'position:fixed;top:80px;right:10px;z-index:2147483647;background:#00e676;color:#000;border:3px solid #fff;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:900;box-shadow:0 4px 20px rgba(0,0,0,.6);cursor:pointer;display:none';
-    var fn = function(e){
-      if(e && e.preventDefault) e.preventDefault();
-      if(e && e.stopPropagation) e.stopPropagation();
-      // Limpieza brutal antes de llamar addBulk
-      ['loc-overlay','loc-manual-panel'].forEach(function(id){
-        var el = document.getElementById(id);
-        if (el) { try { el.parentNode.removeChild(el); } catch(e){} }
-      });
-      if (window._psDebug) window._psDebug('⚡ EMERG addBulk...');
-      try {
-        addBulk();
-        if (window._psDebug) window._psDebug('⚡ EMERG addBulk OK');
-      } catch(err) {
-        if (window._psDebug) window._psDebug('⚡ EMERG error: ' + (err && err.message || err));
-      }
-    };
-    btn.addEventListener('touchstart', function(e){ e.stopPropagation(); });
-    btn.addEventListener('touchend', fn);
-    btn.addEventListener('click', fn);
-    document.body.appendChild(btn);
-    // Mostrarlo solo cuando cur exista (producto escaneado)
-    setInterval(function(){
-      var b = document.getElementById('emergAddBtn');
-      if (b) b.style.display = (typeof cur !== 'undefined' && cur) ? 'block' : 'none';
-    }, 1000);
-  }, 800);
-});
 // Initialize Zebra printer IP if not set
 if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
@@ -3744,94 +3697,20 @@ function renderResult(r){
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
 
   h+=sv
-    ? `<button class="add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ ADD TO CSV</button>`
-    : `<button class="ov-add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ Add anyway (DWI override)</button>`;
-  // Botón ROJO de LIMPIEZA — quita cualquier overlay bloqueando la pantalla
-  h+=`<button id="cleanBtn" style="width:100%;background:#ff3b30;color:#fff;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:9999">🚨 DESBLOQUEAR PANTALLA (toca ANTES de ADD TO CSV)</button>`;
-  // Botón diagnóstico amarillo
-  h+=`<button id="diagBtn" style="width:100%;background:#ffcc00;color:#000;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:9999">🔧 DIAGNÓSTICO</button>`;
+    ? `<button class="add-btn" id="addBtn">➕ ADD TO CSV</button>`
+    : `<button class="ov-add-btn" id="addBtn">➕ Add anyway (DWI override)</button>`;
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
-
-  // ── LIMPIEZA BRUTAL AUTOMÁTICA al renderizar la pantalla del producto ──
-  // Elimina cualquier overlay/elemento position:fixed que pueda estar tapando
-  setTimeout(function(){
-    var suspects = document.querySelectorAll('div[style*="position:fixed"], div[style*="position: fixed"]');
-    suspects.forEach(function(el){
-      // No tocar el header/nav, ni tostadas, ni el debug log
-      if (el.id === 'toast-container' || el.id === 'ps-debug-overlay' ||
-          el.classList.contains('toast') || el.tagName === 'HEADER') return;
-      // Si cubre buena parte de la pantalla → matarlo
-      var r = el.getBoundingClientRect();
-      if (r.width > window.innerWidth * 0.5 && r.height > window.innerHeight * 0.3) {
-        if (window._psDebug) window._psDebug('🧹 removiendo overlay colgado: ' + el.id + ' ' + el.tagName);
-        try { el.parentNode.removeChild(el); } catch(e) {
-          el.style.display = 'none';
-          el.style.pointerEvents = 'none';
-          el.style.zIndex = '-1';
-        }
-      }
-    });
-  }, 100);
 
   const addB=$('addBtn');
   if(addB){
     var addFn = function(e){
       if(e && e.preventDefault) e.preventDefault();
-      if (window._psDebug) window._psDebug('🟢 addBtn CLICKED - ' + (e ? e.type : 'unknown'));
       addBulk();
     };
-    addB.addEventListener('touchstart', function(e){
-      if (window._psDebug) window._psDebug('👆 touchstart en addBtn');
-    });
     addB.addEventListener('touchend', addFn);
     addB.addEventListener('click', addFn);
-    if (window._psDebug) window._psDebug('✅ addBtn bindeado');
-  }
-
-  // Botón ROJO — limpieza brutal + intenta addBulk
-  var cleanB = document.getElementById('cleanBtn');
-  if (cleanB) {
-    var cleanFn = function(e){
-      if(e && e.preventDefault) e.preventDefault();
-      // Eliminar TODOS los overlays sospechosos
-      var count = 0;
-      document.querySelectorAll('div').forEach(function(el){
-        var st = window.getComputedStyle(el);
-        if ((st.position === 'fixed' || st.position === 'absolute') &&
-            parseInt(st.zIndex||'0') > 50 &&
-            el.id !== 'toast-container' && el.id !== 'ps-debug-overlay') {
-          var r = el.getBoundingClientRect();
-          if (r.width > 300 && r.height > 300) {
-            try { el.parentNode.removeChild(el); count++; } catch(e){}
-          }
-        }
-      });
-      if (window._psDebug) window._psDebug('🧹 ' + count + ' elementos removidos');
-      // Ahora intentar addBulk
-      try { addBulk(); if(window._psDebug) window._psDebug('✅ addBulk ejecutado'); }
-      catch(err) { if(window._psDebug) window._psDebug('❌ addBulk error: ' + err.message); }
-    };
-    cleanB.addEventListener('touchend', cleanFn);
-    cleanB.addEventListener('click', cleanFn);
-  }
-
-  var diagB = document.getElementById('diagBtn');
-  if (diagB) {
-    var diagFn = function(e){
-      if(e && e.preventDefault) e.preventDefault();
-      if (window._psDebug) window._psDebug('🔧 DIAG - cur: ' + (cur ? cur.upc : 'NULL'));
-      var b = document.getElementById('addBtn');
-      if (b) {
-        var rect = b.getBoundingClientRect();
-        var elAt = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
-        if (window._psDebug) window._psDebug('⛔ encima del btn: ' + (elAt ? elAt.tagName + '#' + elAt.id : 'nada'));
-      }
-      try { addBulk(); } catch(err) { if(window._psDebug) window._psDebug('❌ ' + err.message); }
-    };
-    diagB.addEventListener('touchend', diagFn);
-    diagB.addEventListener('click', diagFn);
   }
 
   const agB=$('agBtn');
@@ -4654,6 +4533,24 @@ async function locOpen(target) {
   var ov = document.createElement('div');
   ov.id = 'loc-overlay';
   ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.95);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px';
+
+  // Marca para evitar auto-cierre en los primeros 500ms (evita bug de propagación de touch)
+  ov.dataset.openedAt = String(Date.now());
+
+  // ATRAPAR y detener CUALQUIER touch/click que llegue al overlay durante los primeros 500ms
+  // Esto evita que el touch que abrió el overlay lo cierre inmediatamente
+  var swallowEarly = function(e){
+    var age = Date.now() - parseInt(ov.dataset.openedAt || '0', 10);
+    if (age < 500) {
+      e.stopPropagation();
+      e.stopImmediatePropagation();
+      if (window._psDebug) window._psDebug('🛡️ LOC: touch temprano bloqueado (' + age + 'ms)');
+    }
+  };
+  ov.addEventListener('touchstart', swallowEarly, true);
+  ov.addEventListener('touchend', swallowEarly, true);
+  ov.addEventListener('click', swallowEarly, true);
+
   ov.innerHTML =
     '<div style="color:#fff;font-size:20px;font-weight:900;text-align:center">📍 Warehouse Location</div>' +
     '<div style="color:#aaa;font-size:13px;text-align:center;margin-bottom:8px">Escribe la ubicación del producto</div>' +
@@ -4672,6 +4569,10 @@ async function locOpen(target) {
 
   var saveMe = function(e){
     if(e && e.preventDefault) e.preventDefault();
+    if(e && e.stopPropagation) e.stopPropagation();
+    // Ignorar toques muy tempranos (bug de propagación)
+    var age = Date.now() - parseInt(ov.dataset.openedAt || '0', 10);
+    if (age < 500) return;
     var v = (input.value || '').trim();
     if (!v) { input.focus(); return; }
     closeMe();
@@ -4683,6 +4584,10 @@ async function locOpen(target) {
 
   var cancelMe = function(e){
     if(e && e.preventDefault) e.preventDefault();
+    if(e && e.stopPropagation) e.stopPropagation();
+    // Ignorar toques muy tempranos (bug de propagación)
+    var age = Date.now() - parseInt(ov.dataset.openedAt || '0', 10);
+    if (age < 500) return;
     closeMe();
   };
   cnBtn.addEventListener('touchend', cancelMe);
@@ -4690,8 +4595,11 @@ async function locOpen(target) {
 
   input.addEventListener('keydown', function(e){ if(e.key==='Enter') saveMe(); });
 
-  // Focus automático en el input
-  setTimeout(function(){ input.focus(); }, 100);
+  // Focus automático en el input DESPUÉS del delay de propagación
+  setTimeout(function(){
+    var i = document.getElementById('loc-input-v2');
+    if (i) i.focus();
+  }, 600);
 }
 
 async function locClose() {
