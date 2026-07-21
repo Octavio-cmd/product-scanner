@@ -4541,8 +4541,25 @@ async function locOpen(target) {
   ov.style.pointerEvents = 'auto'; // re-habilitar tras un locClose previo
   ov.style.display = 'flex';
 
+  // Esperar a que el layout se compute (crítico en iOS Safari para que el
+  // <video> arranque con dimensiones reales y no salga en negro)
+  await new Promise(function(res){ setTimeout(res, 350); });
+
+  // Forzar reflow del contenedor
+  var videoDiv = document.getElementById('loc-qr-video');
+  if (videoDiv) {
+    videoDiv.style.display = 'none';
+    void videoDiv.offsetHeight; // reflow
+    videoDiv.style.display = '';
+  }
+
   try {
-    savvyStopScan('loc-qr-video');
+    // Detener CUALQUIER cámara que pueda estar corriendo (evita conflictos en iOS)
+    try { savvyStopScan('qr-video'); } catch(e) {}
+    try { savvyStopScan('loc-qr-video'); } catch(e) {}
+    // Pequeña pausa para que iOS libere completamente la cámara
+    await new Promise(function(res){ setTimeout(res, 200); });
+
     var prom = savvyStartScan('loc-qr-video', async (code) => {
       locCapture(code.trim());
     });
