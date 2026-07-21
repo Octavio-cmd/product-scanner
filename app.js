@@ -3682,14 +3682,73 @@ function renderResult(r){
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
 
   h+=sv
-    ? `<button class="add-btn" id="addBtn" ${cur && cur._bundleImg===undefined ? '' : ''}>➕ ADD TO CSV</button>`
-    : `<button class="ov-add-btn" id="addBtn">➕ Add anyway (DWI override)</button>`;
+    ? `<button class="add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ ADD TO CSV</button>`
+    : `<button class="ov-add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ Add anyway (DWI override)</button>`;
+  // Botón diagnóstico amarillo — dice EXACTAMENTE qué está bloqueando
+  h+=`<button id="diagBtn" style="width:100%;background:#ffcc00;color:#000;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:100">🔧 DIAGNÓSTICO — Toca aquí si ADD TO CSV no funciona</button>`;
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
 
   const addB=$('addBtn');
-  if(addB){addB.addEventListener('touchend',e=>{e.preventDefault();addBulk();});addB.addEventListener('click',addBulk);}
+  if(addB){
+    // Múltiples eventos para atrapar el touch en iOS
+    var addFn = function(e){
+      if(e && e.preventDefault) e.preventDefault();
+      if (window._psDebug) window._psDebug('🟢 addBtn CLICKED - evento: ' + (e ? e.type : 'unknown'));
+      addBulk();
+    };
+    addB.addEventListener('touchstart', function(e){
+      if (window._psDebug) window._psDebug('👆 touchstart en addBtn');
+    });
+    addB.addEventListener('touchend', addFn);
+    addB.addEventListener('click', addFn);
+    // Log al final para confirmar bind
+    if (window._psDebug) window._psDebug('✅ addBtn bindeado');
+  } else {
+    if (window._psDebug) window._psDebug('❌ addBtn NO existe en el DOM');
+  }
+
+  // Botón diagnóstico
+  var diagB = document.getElementById('diagBtn');
+  if (diagB) {
+    var diagFn = function(e){
+      if(e && e.preventDefault) e.preventDefault();
+      var log = [];
+      log.push('🔧 DIAG iniciado');
+      // 1. cur existe?
+      log.push('cur: ' + (cur ? 'OK (' + cur.upc + ')' : 'NULL'));
+      // 2. bulk existe?
+      log.push('bulk: ' + (Array.isArray(bulk) ? bulk.length + ' items' : 'NO ES ARRAY'));
+      // 3. addBtn existe?
+      var b = document.getElementById('addBtn');
+      log.push('addBtn en DOM: ' + (b ? 'SÍ' : 'NO'));
+      if (b) {
+        var rect = b.getBoundingClientRect();
+        log.push('addBtn pos: ' + Math.round(rect.top) + ',' + Math.round(rect.left) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height));
+        // Qué elemento está encima
+        var elAtCenter = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+        log.push('encima del btn: ' + (elAtCenter ? elAtCenter.tagName + '#' + elAtCenter.id + '.' + elAtCenter.className : 'nada'));
+      }
+      // 4. Overlays colgados?
+      var lo = document.getElementById('loc-overlay');
+      log.push('loc-overlay: ' + (lo ? 'EXISTE (display=' + lo.style.display + ')' : 'no'));
+      // 5. Intentar llamar addBulk directamente
+      log.push('llamando addBulk() directamente...');
+      if (window._psDebug) {
+        log.forEach(function(l){ window._psDebug(l); });
+      }
+      // Llamar addBulk directamente sin depender del botón
+      try {
+        addBulk();
+        if (window._psDebug) window._psDebug('✅ addBulk() ejecutó sin error');
+      } catch(err) {
+        if (window._psDebug) window._psDebug('❌ addBulk error: ' + (err.message || err));
+      }
+    };
+    diagB.addEventListener('touchend', diagFn);
+    diagB.addEventListener('click', diagFn);
+  }
   const agB=$('agBtn');
   if(agB){agB.addEventListener('touchend',e=>{e.preventDefault();scanAnother();});agB.addEventListener('click',scanAnother);}
 
