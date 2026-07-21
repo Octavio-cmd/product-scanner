@@ -109,22 +109,26 @@ const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
 // ── Default API keys (loaded from Railway savvy-config)
 let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
-// FORZAR key nueva SIEMPRE — Railway savvy-config tiene la vieja desactualizada
-let DEFAULT_IMGBB_KEY = atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=');
+let DEFAULT_IMGBB_KEY = '';
 let DEFAULT_CLAUDE_KEY = '';
 let _keysLoaded = false;
-// Load keys from Railway on startup (excepto imgbb — esa se queda hardcoded arriba)
+// Load keys from Railway on startup
 (async function loadKeys() {
   try {
     const r = await fetch(SAVVY_CONFIG + '/config');
     if (r.ok) {
       const d = await r.json();
-      // IMPORTANTE: NO sobrescribir DEFAULT_IMGBB_KEY con la vieja de Railway
-      // if (d.imgbb) DEFAULT_IMGBB_KEY = d.imgbb;  ← DESACTIVADO
+      if (d.imgbb)      DEFAULT_IMGBB_KEY  = d.imgbb;
       if (d.claude)     DEFAULT_CLAUDE_KEY = d.claude;
       if (d.sheets_url) localStorage.setItem('cl_sheets_url', d.sheets_url);
+      // drive_url: NO sobrescribir — usamos URL fija hardcodeada
     }
   } catch(e) { console.warn('Could not load keys from Railway savvy-config'); }
+  // Fallback hardcoded (always applies if Railway didn't provide)
+  const _k = [
+    ['DEFAULT_IMGBB_KEY', atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=')],
+  ];
+  _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   // Drive URL fija — siempre la correcta
   localStorage.setItem('cl_drive_url', 'https://script.google.com/macros/s/AKfycbyVgEEID8dqZMymlqQMpjO7fLBMYkfj0mmcWk2ImudTy9evKGlOi4oHUc9vhcdmpFeDDQ/exec');
   _keysLoaded = true;
@@ -260,21 +264,14 @@ if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
 }
 
-// FORZAR limpieza de API keys viejas de ImgBB en localStorage
-// Si tienes CUALQUIER key en localStorage y NO es la nueva, la borramos.
-// Esto obliga a la app a usar SIEMPRE la key hardcodeada nueva.
+// Limpiar API keys viejas de ImgBB en localStorage — fuerza usar la key nueva
+// que está hardcodeada arriba. Esto evita que iOS use una key vieja cacheada.
 try {
-  var NEW_IMGBB_KEY = 'c8a48ce4e5e536f0a8345161997dcfe3';
+  var _oldKeys = ['1e8ecea2fc2ea918caca74369928ef63'];
   var _clKey = localStorage.getItem('cl_imgbb_key');
-  if (_clKey && _clKey !== NEW_IMGBB_KEY) {
-    localStorage.removeItem('cl_imgbb_key');
-    console.log('🧹 Cleared old cl_imgbb_key from localStorage');
-  }
+  if (_clKey && _oldKeys.indexOf(_clKey) >= 0) localStorage.removeItem('cl_imgbb_key');
   var _svKey = localStorage.getItem('savvy_imgbb_key');
-  if (_svKey && _svKey !== NEW_IMGBB_KEY) {
-    localStorage.removeItem('savvy_imgbb_key');
-    console.log('🧹 Cleared old savvy_imgbb_key from localStorage');
-  }
+  if (_svKey && _oldKeys.indexOf(_svKey) >= 0) localStorage.removeItem('savvy_imgbb_key');
 } catch(e) {}
 
 let bulk=[],cur=null;
@@ -1266,9 +1263,47 @@ function clCompressImage(file, maxW=900, quality=0.75) {
   });
 }
 
+// ── Comprimir un dataUrl antes de subir a ImgBB si es muy grande ──
+async function _compressForImgBB(dataUrl, maxSizeKB) {
+  if (!dataUrl || !dataUrl.startsWith('data:')) return dataUrl;
+  var sizeKB = Math.ceil(dataUrl.length * 3 / 4 / 1024);
+  if (sizeKB <= (maxSizeKB || 800)) return dataUrl; // ya está OK
+
+  // Comprimir bajando calidad progresivamente
+  return new Promise(function(resolve){
+    var img = new Image();
+    img.onload = function(){
+      var canvas = document.createElement('canvas');
+      var w = img.width, h = img.height;
+      // Reducir dimensiones si son enormes
+      var maxDim = 1400;
+      if (w > maxDim || h > maxDim) {
+        var r = Math.min(maxDim/w, maxDim/h);
+        w = Math.round(w * r);
+        h = Math.round(h * r);
+      }
+      canvas.width = w;
+      canvas.height = h;
+      canvas.getContext('2d').drawImage(img, 0, 0, w, h);
+      // Bajar calidad hasta llegar al tamaño objetivo
+      var q = 0.85;
+      var out = canvas.toDataURL('image/jpeg', q);
+      while (Math.ceil(out.length * 3 / 4 / 1024) > (maxSizeKB || 800) && q > 0.3) {
+        q -= 0.1;
+        out = canvas.toDataURL('image/jpeg', q);
+      }
+      resolve(out);
+    };
+    img.onerror = function(){ resolve(dataUrl); };
+    img.src = dataUrl;
+  });
+}
+
 // ── Upload a data URL to ImgBB, return the public URL ──
 async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
   try {
+    // Comprimir antes de subir si es muy grande (previene "Internal upload error")
+    dataUrl = await _compressForImgBB(dataUrl, 800);
     const b64 = dataUrl ? dataUrl.split(',')[1] : null;
     if (!b64) { console.warn('ImgBB: no image data'); return null; }
     const fd = new FormData();
@@ -1298,6 +1333,13 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
       const errMsg = d.error?.message || JSON.stringify(d.error) || 'unknown error';
       console.error('ImgBB upload failed:', errMsg);
       if (window._psDebug) window._psDebug('❌ ImgBB: ' + errMsg);
+
+      // Si es "Internal upload error", reintentar con compresión MUY agresiva
+      if (/internal|upload/i.test(errMsg) && !slotName?.includes('retry')) {
+        if (window._psDebug) window._psDebug('🔄 Reintentando con compresión agresiva...');
+        var smaller = await _compressForImgBB(dataUrl, 300); // 300KB máximo
+        return clUploadPhotoToImgBB(smaller, key, (slotName || 'photo') + '-retry');
+      }
       return null;
     }
   } catch(e) {
