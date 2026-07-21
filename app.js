@@ -4639,161 +4639,67 @@ window.addEventListener('beforeunload', function(e) {
 let _locCallback = null;
 let _locTarget = null; // 'scanner' or 'clothing'
 
+// ── LOCATION SCANNER - SOLO TECLADO (sin cámara para evitar conflictos iOS) ──
 async function locOpen(target) {
   _locTarget = target;
-  if (window._psDebug) window._psDebug('📍 LOC: iniciando...');
+  if (window._psDebug) window._psDebug('📍 LOC: abriendo teclado...');
 
-  // Overlay full-screen estilo scanner principal (idéntico al de escanear producto)
-  var ov = document.getElementById('loc-overlay');
-  if (!ov) {
-    ov = document.createElement('div');
-    ov.id = 'loc-overlay';
-    ov.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0a0a0a;z-index:99999;flex-direction:column;padding:0';
-    ov.innerHTML =
-      // Header idéntico al de la app
-      '<div style="background:linear-gradient(135deg,#ff6d1f,#ff8c42);padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
-        '<span style="font-size:22px">📍</span>' +
-        '<div style="color:#fff;font-weight:800;font-size:16px">Scan Location (QR / Barcode)</div>' +
-      '</div>' +
-      // Área de cámara full-width con altura explícita para iOS Safari
-      '<div style="flex:1;position:relative;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:400px">' +
-        '<div id="loc-qr-video" style="width:100%;height:100%;min-height:400px;position:absolute;top:0;left:0;right:0;bottom:0"></div>' +
-        // Forzar que cualquier <video> interno llene el contenedor (Html5Qrcode lo inserta ahí)
-        '<style>#loc-qr-video video, #loc-qr-video canvas { width:100% !important; height:100% !important; object-fit:cover !important; position:absolute !important; top:0 !important; left:0 !important; }</style>' +
-        // Guías T izquierda/derecha estilo scanner principal (blancas, alineadas al centro)
-        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
-        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
-        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
-        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
-      '</div>' +
-      // Botón cancelar grande abajo
-      '<button id="loc-cancel-btn" style="padding:20px;background:#161616;color:#ff5252;border:none;border-top:1px solid #333;font-size:17px;font-weight:800;cursor:pointer;flex-shrink:0">✕ CANCEL</button>' +
-      // Botón oculto para input manual (aparece con toque en la parte de arriba)
-      '<button id="loc-manual-toggle" style="position:absolute;top:60px;right:14px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;z-index:5">⌨️ Escribir</button>' +
-      // Panel manual oculto (aparece al tocar el botón de arriba)
-      '<div id="loc-manual-panel" style="display:none;position:absolute;top:0;left:0;right:0;bottom:60px;background:rgba(10,10,10,.98);flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;z-index:10">' +
-        '<div style="color:#fff;font-weight:800;font-size:18px">⌨️ Escribir Ubicación</div>' +
-        '<input id="loc-manual-in" type="text" placeholder="Ej: K/P6" autocapitalize="characters" style="width:100%;max-width:400px;padding:16px;border-radius:10px;border:1px solid #555;background:#111;color:#fff;font-size:18px;text-align:center">' +
-        '<button id="loc-manual-ok" style="width:100%;max-width:400px;padding:16px;background:#00e676;color:#000;border:none;border-radius:10px;font-size:17px;font-weight:800">✔ USAR ESTA UBICACIÓN</button>' +
-        '<button id="loc-manual-back" style="background:none;color:#aaa;border:none;font-size:14px;padding:8px 12px">← Volver a la cámara</button>' +
-      '</div>';
-    document.body.appendChild(ov);
+  // Limpiar cualquier overlay anterior
+  ['loc-overlay','loc-manual-panel'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) { try { el.parentNode.removeChild(el); } catch(e){} }
+  });
 
-    // Botones
-    var okBtn = document.getElementById('loc-manual-ok');
-    var okFn = function(){ var inp = document.getElementById('loc-manual-in'); var v = inp ? inp.value.trim() : ''; if(v){ inp.value=''; locCapture(v); } };
-    okBtn.addEventListener('touchend', function(e){ e.preventDefault(); okFn(); });
-    okBtn.addEventListener('click', okFn);
+  // Crear overlay simple con SOLO input y botones
+  var ov = document.createElement('div');
+  ov.id = 'loc-overlay';
+  ov.style.cssText = 'position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.95);z-index:2147483647;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:16px;padding:24px';
+  ov.innerHTML =
+    '<div style="color:#fff;font-size:20px;font-weight:900;text-align:center">📍 Warehouse Location</div>' +
+    '<div style="color:#aaa;font-size:13px;text-align:center;margin-bottom:8px">Escribe la ubicación del producto</div>' +
+    '<input id="loc-input-v2" type="text" placeholder="Ej: K/P6, RN3:S3:4" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:100%;max-width:420px;padding:20px;border-radius:12px;border:2px solid #00e676;background:#111;color:#fff;font-size:22px;text-align:center;font-weight:700">' +
+    '<button id="loc-ok-v2" style="width:100%;max-width:420px;padding:20px;background:#00e676;color:#000;border:none;border-radius:12px;font-size:18px;font-weight:900;cursor:pointer">✔ GUARDAR UBICACIÓN</button>' +
+    '<button id="loc-cancel-v2" style="width:100%;max-width:420px;padding:16px;background:transparent;color:#ff5252;border:2px solid #ff5252;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">✕ CANCELAR</button>';
+  document.body.appendChild(ov);
 
-    var cnBtn = document.getElementById('loc-cancel-btn');
-    cnBtn.addEventListener('touchend', function(e){ e.preventDefault(); locClose(); });
-    cnBtn.addEventListener('click', locClose);
+  var input = document.getElementById('loc-input-v2');
+  var okBtn = document.getElementById('loc-ok-v2');
+  var cnBtn = document.getElementById('loc-cancel-v2');
 
-    // Toggle panel manual
-    var togBtn = document.getElementById('loc-manual-toggle');
-    var showManual = function(){
-      document.getElementById('loc-manual-panel').style.display = 'flex';
-      setTimeout(function(){ var i = document.getElementById('loc-manual-in'); if(i) i.focus(); }, 100);
-    };
-    togBtn.addEventListener('touchend', function(e){ e.preventDefault(); showManual(); });
-    togBtn.addEventListener('click', showManual);
+  var closeMe = function(){
+    try { ov.parentNode.removeChild(ov); } catch(e){}
+  };
 
-    var backBtn = document.getElementById('loc-manual-back');
-    var hideManual = function(){ document.getElementById('loc-manual-panel').style.display = 'none'; };
-    backBtn.addEventListener('touchend', function(e){ e.preventDefault(); hideManual(); });
-    backBtn.addEventListener('click', hideManual);
+  var saveMe = function(e){
+    if(e && e.preventDefault) e.preventDefault();
+    var v = (input.value || '').trim();
+    if (!v) { input.focus(); return; }
+    closeMe();
+    locCapture(v);
+  };
 
-    // Enter en el input
-    document.getElementById('loc-manual-in').addEventListener('keydown', function(e){ if(e.key==='Enter') okFn(); });
-  }
+  okBtn.addEventListener('touchend', saveMe);
+  okBtn.addEventListener('click', saveMe);
 
-  // Reset del panel manual cada vez que se abre el overlay
-  var mp = document.getElementById('loc-manual-panel'); if (mp) mp.style.display = 'none';
-  ov.style.pointerEvents = 'auto'; // re-habilitar tras un locClose previo
-  ov.style.display = 'flex';
-  if (window._psDebug) window._psDebug('📍 LOC: overlay abierto');
+  var cancelMe = function(e){
+    if(e && e.preventDefault) e.preventDefault();
+    closeMe();
+  };
+  cnBtn.addEventListener('touchend', cancelMe);
+  cnBtn.addEventListener('click', cancelMe);
 
-  // Esperar a que el layout se compute (crítico en iOS Safari para que el
-  // <video> arranque con dimensiones reales y no salga en negro)
-  await new Promise(function(res){ setTimeout(res, 350); });
-  if (window._psDebug) window._psDebug('📍 LOC: 350ms esperados');
+  input.addEventListener('keydown', function(e){ if(e.key==='Enter') saveMe(); });
 
-  // Forzar reflow del contenedor
-  var videoDiv = document.getElementById('loc-qr-video');
-  if (videoDiv) {
-    videoDiv.style.display = 'none';
-    void videoDiv.offsetHeight; // reflow
-    videoDiv.style.display = '';
-    if (window._psDebug) window._psDebug('📍 LOC: div encontrado ' + videoDiv.offsetWidth + 'x' + videoDiv.offsetHeight);
-  } else {
-    if (window._psDebug) window._psDebug('❌ LOC: video div NO existe');
-  }
-
-  try {
-    // Detener CUALQUIER cámara que pueda estar corriendo (evita conflictos en iOS)
-    try { savvyStopScan('qr-video'); } catch(e) {}
-    try { savvyStopScan('loc-qr-video'); } catch(e) {}
-    if (window._psDebug) window._psDebug('📍 LOC: cámaras previas detenidas');
-    // Pequeña pausa para que iOS libere completamente la cámara
-    await new Promise(function(res){ setTimeout(res, 200); });
-
-    if (window._psDebug) window._psDebug('📍 LOC: llamando savvyStartScan...');
-    var prom = savvyStartScan('loc-qr-video', async (code) => {
-      if (window._psDebug) window._psDebug('✅ LOC: QR detectado ' + code);
-      locCapture(code.trim());
-    });
-    if (prom && typeof prom.then === 'function') {
-      prom.then(function(){
-        if (window._psDebug) window._psDebug('✅ LOC: cámara arrancó OK');
-        // Verificar si el video se está renderizando
-        setTimeout(function(){
-          var v = document.querySelector('#loc-qr-video video');
-          if (v) {
-            if (window._psDebug) window._psDebug('📹 LOC: video ' + v.videoWidth + 'x' + v.videoHeight + ' ready=' + v.readyState);
-          } else {
-            if (window._psDebug) window._psDebug('❌ LOC: NO hay <video> en el div');
-          }
-        }, 1500);
-      }).catch(function(err){
-        if (window._psDebug) window._psDebug('❌ LOC: cámara falló ' + (err && err.message ? err.message : err));
-        // Si la cámara falla, mostrar el panel manual automáticamente
-        var mp2 = document.getElementById('loc-manual-panel');
-        if (mp2) {
-          mp2.style.display = 'flex';
-          setTimeout(function(){ var i = document.getElementById('loc-manual-in'); if(i) i.focus(); }, 100);
-        }
-        toast('📷 Cámara no disponible — escribe la ubicación');
-      });
-    }
-  } catch(e) {
-    if (window._psDebug) window._psDebug('❌ LOC: excepción ' + (e && e.message ? e.message : e));
-    var mp3 = document.getElementById('loc-manual-panel');
-    if (mp3) mp3.style.display = 'flex';
-  }
+  // Focus automático en el input
+  setTimeout(function(){ input.focus(); }, 100);
 }
 
 async function locClose() {
-  try { savvyStopScan('loc-qr-video'); } catch(e) {}
-  var ov = document.getElementById('loc-overlay');
-  if (ov) {
-    // ELIMINAR del DOM completamente (no solo ocultar).
-    // En iOS Safari, un position:fixed con display:none aún puede bloquear
-    // toques en algunos casos. Removerlo garantiza que no interfiere.
-    try { ov.parentNode.removeChild(ov); } catch(e) {
-      // Fallback si remove falla
-      ov.style.display = 'none';
-      ov.style.pointerEvents = 'none';
-      ov.style.zIndex = '-1';
-    }
-  }
-  // También limpiar cualquier otro overlay que pueda estar colgado
-  var mp = document.getElementById('loc-manual-panel');
-  if (mp) { try { mp.parentNode.removeChild(mp); } catch(e) {} }
-  if (window._psDebug) window._psDebug('📍 LOC: overlay eliminado del DOM');
+  var el = document.getElementById('loc-overlay');
+  if (el) { try { el.parentNode.removeChild(el); } catch(e){} }
 }
 
 function locCapture(code) {
-  // ELIMINACIÓN INMEDIATA del overlay antes de hacer NADA más.
   // Si el QR fue detectado, cerramos la cámara y quitamos el overlay YA.
   try { savvyStopScan('loc-qr-video'); } catch(e) {}
   ['loc-overlay','loc-manual-panel'].forEach(function(id){
