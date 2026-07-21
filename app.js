@@ -232,11 +232,14 @@ window.addEventListener('load', checkLogin);
 // Red de seguridad: si algún overlay quedó colgado tapando la UI, limpiar al recargar
 window.addEventListener('load', function(){
   setTimeout(function(){
-    ['loc-overlay','loc-manual-panel','login-screen'].forEach(function(id){
+    ['loc-overlay','loc-manual-panel'].forEach(function(id){
       var el = document.getElementById(id);
-      if (el && id !== 'login-screen') { // login-screen se maneja aparte
-        el.style.display = 'none';
-        el.style.pointerEvents = 'none';
+      if (el) {
+        try { el.parentNode.removeChild(el); } catch(e) {
+          el.style.display = 'none';
+          el.style.pointerEvents = 'none';
+          el.style.zIndex = '-1';
+        }
       }
     });
   }, 500);
@@ -4629,11 +4632,20 @@ async function locClose() {
   try { savvyStopScan('loc-qr-video'); } catch(e) {}
   var ov = document.getElementById('loc-overlay');
   if (ov) {
-    ov.style.display = 'none';
-    ov.style.pointerEvents = 'none';
-    var mp = document.getElementById('loc-manual-panel');
-    if (mp) mp.style.display = 'none';
+    // ELIMINAR del DOM completamente (no solo ocultar).
+    // En iOS Safari, un position:fixed con display:none aún puede bloquear
+    // toques en algunos casos. Removerlo garantiza que no interfiere.
+    try { ov.parentNode.removeChild(ov); } catch(e) {
+      // Fallback si remove falla
+      ov.style.display = 'none';
+      ov.style.pointerEvents = 'none';
+      ov.style.zIndex = '-1';
+    }
   }
+  // También limpiar cualquier otro overlay que pueda estar colgado
+  var mp = document.getElementById('loc-manual-panel');
+  if (mp) { try { mp.parentNode.removeChild(mp); } catch(e) {} }
+  if (window._psDebug) window._psDebug('📍 LOC: overlay eliminado del DOM');
 }
 
 function locCapture(code) {
