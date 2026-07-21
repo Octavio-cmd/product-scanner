@@ -268,6 +268,44 @@ setInterval(function(){
     try { mp.parentNode.removeChild(mp); } catch(e) {}
   }
 }, 2000);
+
+// ── BOTÓN FLOTANTE DE EMERGENCIA ──
+// Aparece FIJO en la parte superior, con z-index gigante para que nada lo tape.
+// Cuando se toca, llama directamente a addBulk() saltándose todos los intermediarios.
+window.addEventListener('load', function(){
+  setTimeout(function(){
+    if (document.getElementById('emergAddBtn')) return;
+    var btn = document.createElement('button');
+    btn.id = 'emergAddBtn';
+    btn.textContent = '⚡ ADD TO CSV';
+    btn.style.cssText = 'position:fixed;top:80px;right:10px;z-index:2147483647;background:#00e676;color:#000;border:3px solid #fff;border-radius:12px;padding:14px 18px;font-size:15px;font-weight:900;box-shadow:0 4px 20px rgba(0,0,0,.6);cursor:pointer;display:none';
+    var fn = function(e){
+      if(e && e.preventDefault) e.preventDefault();
+      if(e && e.stopPropagation) e.stopPropagation();
+      // Limpieza brutal antes de llamar addBulk
+      ['loc-overlay','loc-manual-panel'].forEach(function(id){
+        var el = document.getElementById(id);
+        if (el) { try { el.parentNode.removeChild(el); } catch(e){} }
+      });
+      if (window._psDebug) window._psDebug('⚡ EMERG addBulk...');
+      try {
+        addBulk();
+        if (window._psDebug) window._psDebug('⚡ EMERG addBulk OK');
+      } catch(err) {
+        if (window._psDebug) window._psDebug('⚡ EMERG error: ' + (err && err.message || err));
+      }
+    };
+    btn.addEventListener('touchstart', function(e){ e.stopPropagation(); });
+    btn.addEventListener('touchend', fn);
+    btn.addEventListener('click', fn);
+    document.body.appendChild(btn);
+    // Mostrarlo solo cuando cur exista (producto escaneado)
+    setInterval(function(){
+      var b = document.getElementById('emergAddBtn');
+      if (b) b.style.display = (typeof cur !== 'undefined' && cur) ? 'block' : 'none';
+    }, 1000);
+  }, 800);
+});
 // Initialize Zebra printer IP if not set
 if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
