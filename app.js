@@ -229,6 +229,18 @@ function doLogout() {
 
 // Check login on load
 window.addEventListener('load', checkLogin);
+// Red de seguridad: si algún overlay quedó colgado tapando la UI, limpiar al recargar
+window.addEventListener('load', function(){
+  setTimeout(function(){
+    ['loc-overlay','loc-manual-panel','login-screen'].forEach(function(id){
+      var el = document.getElementById(id);
+      if (el && id !== 'login-screen') { // login-screen se maneja aparte
+        el.style.display = 'none';
+        el.style.pointerEvents = 'none';
+      }
+    });
+  }, 500);
+});
 // Initialize Zebra printer IP if not set
 if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
@@ -4524,6 +4536,7 @@ async function locOpen(target) {
 
   // Reset del panel manual cada vez que se abre el overlay
   var mp = document.getElementById('loc-manual-panel'); if (mp) mp.style.display = 'none';
+  ov.style.pointerEvents = 'auto'; // re-habilitar tras un locClose previo
   ov.style.display = 'flex';
 
   try {
@@ -4553,7 +4566,13 @@ async function locOpen(target) {
 async function locClose() {
   try { savvyStopScan('loc-qr-video'); } catch(e) {}
   var ov = document.getElementById('loc-overlay');
-  if (ov) ov.style.display = 'none';
+  if (ov) {
+    ov.style.display = 'none';
+    ov.style.pointerEvents = 'none'; // Asegurar que no intercepta toques
+    // También ocultar el panel manual si quedó abierto
+    var mp = document.getElementById('loc-manual-panel');
+    if (mp) mp.style.display = 'none';
+  }
 }
 
 function locCapture(code) {
