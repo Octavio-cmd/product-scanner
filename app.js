@@ -3705,9 +3705,57 @@ function renderResult(r){
 
   const addB=$('addBtn');
   if(addB){
-    var addFn = function(e){
+    var addFn = async function(e){
       if(e && e.preventDefault) e.preventDefault();
-      addBulk();
+      // ── FEEDBACK VISUAL INMEDIATO ──
+      var originalText = addB.textContent;
+      var originalBg = addB.style.background;
+      addB.textContent = '⏳ Agregando...';
+      addB.style.background = '#ffa500';
+      addB.style.opacity = '0.7';
+      addB.style.pointerEvents = 'none';
+
+      // Contar bulk antes
+      var bulkBefore = (typeof bulk !== 'undefined' && Array.isArray(bulk)) ? bulk.length : 0;
+
+      try {
+        await addBulk();
+        // Contar bulk después
+        var bulkAfter = (typeof bulk !== 'undefined' && Array.isArray(bulk)) ? bulk.length : 0;
+        var added = bulkAfter - bulkBefore;
+
+        if (added > 0) {
+          // ÉXITO — feedback verde brillante
+          addB.textContent = '✅ AGREGADO (' + added + ' pack' + (added>1?'s':'') + ')';
+          addB.style.background = '#00c853';
+          addB.style.opacity = '1';
+          setTimeout(function(){
+            addB.textContent = originalText;
+            addB.style.background = originalBg;
+            addB.style.pointerEvents = '';
+          }, 2500);
+        } else {
+          // NO se agregó nada — feedback amarillo
+          addB.textContent = '⚠️ Ya estaba o requisitos faltan';
+          addB.style.background = '#ff9800';
+          addB.style.opacity = '1';
+          setTimeout(function(){
+            addB.textContent = originalText;
+            addB.style.background = originalBg;
+            addB.style.pointerEvents = '';
+          }, 3000);
+        }
+      } catch(err) {
+        // ERROR — feedback rojo
+        addB.textContent = '❌ Error: ' + (err.message || err).substring(0,40);
+        addB.style.background = '#e74c3c';
+        addB.style.opacity = '1';
+        setTimeout(function(){
+          addB.textContent = originalText;
+          addB.style.background = originalBg;
+          addB.style.pointerEvents = '';
+        }, 4000);
+      }
     };
     addB.addEventListener('touchend', addFn);
     addB.addEventListener('click', addFn);
