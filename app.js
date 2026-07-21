@@ -2611,6 +2611,23 @@ function updateFAB(){
 }
 
 async function addBulk() {
+  // Log al inicio para confirmar que el botón sí se está disparando
+  console.log('🟢 addBulk called - cur:', cur ? cur.upc : 'NULL');
+  if (window._psDebug) window._psDebug('🟢 ADD TO CSV disparado');
+  toast('🟢 Agregando al CSV...');
+
+  // Protección: si por alguna razón cur se perdió, avisar y salir
+  if (!cur) {
+    toast('❌ No hay producto activo - escanea de nuevo');
+    return;
+  }
+
+  // Limpiar cualquier overlay que pueda estar bloqueando touches
+  ['loc-overlay','loc-manual-panel'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) { el.style.display = 'none'; el.style.pointerEvents = 'none'; }
+  });
+
   var EXP_REQ = ['67169','180959','75037','51227','57041','2984','67167','105070'];
   if (EXP_REQ.includes(String(cur.category||''))) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
