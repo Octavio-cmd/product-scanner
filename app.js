@@ -2510,14 +2510,18 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
       res.title = buildSmartTitle(prod, res.packSize||1) || res.title;
     }
     // Validar categoría — si Claude pone categoría padre o default, recalcular desde título
-    const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725'];
+    const PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','31786','20725','36447','67716','11838','184630'];
     const titleBasedCat = catId(res.title || prod.name || '');
-    if (!res.category || PARENT_CATS.includes(String(res.category)) || res.category === '31786') {
+    if (!res.category || res.category === 'undefined' || PARENT_CATS.includes(String(res.category)) || res.category === '31786') {
       // Solo usar 31786 si el título realmente es skin care
       const isSkinCare = /lotion|moisturizer|sunscreen|spf|face wash|serum|toner|cleanser/i.test(res.title||'');
       if (!isSkinCare && titleBasedCat !== '31786') {
         res.category = titleBasedCat;
         res.categoryName = catNm(titleBasedCat);
+      } else if (!res.category || res.category === 'undefined') {
+        // Nunca dejar 'undefined' en pantalla
+        res.category = titleBasedCat || '31786';
+        res.categoryName = catNm(res.category);
       }
     }
 
@@ -2908,7 +2912,8 @@ async function addSplitPacksToCSV(){
   var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
 
   // ── VALIDACIÓN: los packs >1 DEBEN tener su imagen de pack generada ──
-  // Nunca se agrega un 3/6/12pk con la foto genérica del producto.
+  // Si ImgBB falló y no se pudo subir la imagen del pack, avisar claramente
+  // pero PERMITIR continuar (usará la foto del producto original).
   var missingImgs = [];
   for (var mi = 0; mi < packsToAdd.length; mi++) {
     var mp = packsToAdd[mi];
@@ -2917,8 +2922,14 @@ async function addSplitPacksToCSV(){
     }
   }
   if (missingImgs.length) {
-    toast('⚠️ Falta la imagen de pack para: ' + missingImgs.join(', ') + ' — toca 🎁 Generar Imágenes de Pack primero');
-    return false;
+    var msg = '⚠️ Faltan imágenes de pack para: ' + missingImgs.join(', ') +
+              '. ¿Continuar usando la foto del producto original?';
+    if (!confirm(msg)) {
+      toast('❌ Cancelado — toca 🎁 Generar Imágenes de Pack');
+      return false;
+    }
+    // Si acepta, se usará cur._frontImg como fallback más abajo
+    toast('⚠️ Usando foto genérica del producto para: ' + missingImgs.join(', '));
   }
 
   // Sube una imagen a ImgBB si quedó en base64; devuelve URL http o ''
@@ -4451,34 +4462,94 @@ let _locTarget = null; // 'scanner' or 'clothing'
 
 async function locOpen(target) {
   _locTarget = target;
-  // El HTML de Product Scanner NO trae el overlay — se crea aquí dinámicamente
+  // Overlay full-screen estilo scanner principal (idéntico al de escanear producto)
   var ov = document.getElementById('loc-overlay');
   if (!ov) {
     ov = document.createElement('div');
     ov.id = 'loc-overlay';
-    ov.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:rgba(0,0,0,.95);z-index:99999;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px';
+    ov.style.cssText = 'display:none;position:fixed;top:0;left:0;right:0;bottom:0;background:#0a0a0a;z-index:99999;flex-direction:column;padding:0';
     ov.innerHTML =
-      '<div style="color:#fff;font-weight:800;font-size:16px">\uD83D\uDCCD Scan Location (QR / Barcode)</div>' +
-      '<div id="loc-qr-video" style="width:100%;max-width:480px;min-height:320px;border-radius:14px;border:3px solid #00e676;background:#000;overflow:hidden"></div>' +
-      '<input id="loc-manual-in" type="text" placeholder="O escribe la ubicaci\u00f3n (ej: K/P6)" style="width:100%;max-width:480px;padding:14px;border-radius:10px;border:1px solid #555;background:#111;color:#fff;font-size:16px">' +
-      '<button id="loc-manual-ok" style="width:100%;max-width:480px;padding:14px;background:#00e676;color:#000;border:none;border-radius:10px;font-size:16px;font-weight:800">\u2714 Usar esta ubicaci\u00f3n</button>' +
-      '<button id="loc-cancel-btn" style="width:100%;max-width:480px;padding:12px;background:none;color:#aaa;border:1px solid #555;border-radius:10px;font-size:15px">\u2715 Cancelar</button>';
+      // Header idéntico al de la app
+      '<div style="background:linear-gradient(135deg,#ff6d1f,#ff8c42);padding:14px 18px;display:flex;align-items:center;gap:10px;flex-shrink:0">' +
+        '<span style="font-size:22px">📍</span>' +
+        '<div style="color:#fff;font-weight:800;font-size:16px">Scan Location (QR / Barcode)</div>' +
+      '</div>' +
+      // Área de cámara full-width
+      '<div style="flex:1;position:relative;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center">' +
+        '<div id="loc-qr-video" style="width:100%;height:100%;position:relative"></div>' +
+        // Guías T izquierda/derecha estilo scanner principal (blancas, alineadas al centro)
+        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
+        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
+        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
+        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
+      '</div>' +
+      // Botón cancelar grande abajo
+      '<button id="loc-cancel-btn" style="padding:20px;background:#161616;color:#ff5252;border:none;border-top:1px solid #333;font-size:17px;font-weight:800;cursor:pointer;flex-shrink:0">✕ CANCEL</button>' +
+      // Botón oculto para input manual (aparece con toque en la parte de arriba)
+      '<button id="loc-manual-toggle" style="position:absolute;top:60px;right:14px;background:rgba(0,0,0,.6);color:#fff;border:1px solid rgba(255,255,255,.4);border-radius:20px;padding:8px 14px;font-size:12px;font-weight:700;cursor:pointer;z-index:5">⌨️ Escribir</button>' +
+      // Panel manual oculto (aparece al tocar el botón de arriba)
+      '<div id="loc-manual-panel" style="display:none;position:absolute;top:0;left:0;right:0;bottom:60px;background:rgba(10,10,10,.98);flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:20px;z-index:10">' +
+        '<div style="color:#fff;font-weight:800;font-size:18px">⌨️ Escribir Ubicación</div>' +
+        '<input id="loc-manual-in" type="text" placeholder="Ej: K/P6" autocapitalize="characters" style="width:100%;max-width:400px;padding:16px;border-radius:10px;border:1px solid #555;background:#111;color:#fff;font-size:18px;text-align:center">' +
+        '<button id="loc-manual-ok" style="width:100%;max-width:400px;padding:16px;background:#00e676;color:#000;border:none;border-radius:10px;font-size:17px;font-weight:800">✔ USAR ESTA UBICACIÓN</button>' +
+        '<button id="loc-manual-back" style="background:none;color:#aaa;border:none;font-size:14px;padding:8px 12px">← Volver a la cámara</button>' +
+      '</div>';
     document.body.appendChild(ov);
+
+    // Botones
     var okBtn = document.getElementById('loc-manual-ok');
     var okFn = function(){ var inp = document.getElementById('loc-manual-in'); var v = inp ? inp.value.trim() : ''; if(v){ inp.value=''; locCapture(v); } };
     okBtn.addEventListener('touchend', function(e){ e.preventDefault(); okFn(); });
     okBtn.addEventListener('click', okFn);
+
     var cnBtn = document.getElementById('loc-cancel-btn');
     cnBtn.addEventListener('touchend', function(e){ e.preventDefault(); locClose(); });
     cnBtn.addEventListener('click', locClose);
+
+    // Toggle panel manual
+    var togBtn = document.getElementById('loc-manual-toggle');
+    var showManual = function(){
+      document.getElementById('loc-manual-panel').style.display = 'flex';
+      setTimeout(function(){ var i = document.getElementById('loc-manual-in'); if(i) i.focus(); }, 100);
+    };
+    togBtn.addEventListener('touchend', function(e){ e.preventDefault(); showManual(); });
+    togBtn.addEventListener('click', showManual);
+
+    var backBtn = document.getElementById('loc-manual-back');
+    var hideManual = function(){ document.getElementById('loc-manual-panel').style.display = 'none'; };
+    backBtn.addEventListener('touchend', function(e){ e.preventDefault(); hideManual(); });
+    backBtn.addEventListener('click', hideManual);
+
+    // Enter en el input
+    document.getElementById('loc-manual-in').addEventListener('keydown', function(e){ if(e.key==='Enter') okFn(); });
   }
+
+  // Reset del panel manual cada vez que se abre el overlay
+  var mp = document.getElementById('loc-manual-panel'); if (mp) mp.style.display = 'none';
   ov.style.display = 'flex';
+
   try {
     savvyStopScan('loc-qr-video');
-    savvyStartScan('loc-qr-video', async (code) => {
+    var prom = savvyStartScan('loc-qr-video', async (code) => {
       locCapture(code.trim());
     });
-  } catch(e) { console.warn('loc scanner:', e); }
+    if (prom && typeof prom.catch === 'function') {
+      prom.catch(function(err){
+        console.warn('Loc camera failed:', err);
+        // Si la cámara falla, mostrar el panel manual automáticamente
+        var mp2 = document.getElementById('loc-manual-panel');
+        if (mp2) {
+          mp2.style.display = 'flex';
+          setTimeout(function(){ var i = document.getElementById('loc-manual-in'); if(i) i.focus(); }, 100);
+        }
+        toast('📷 Cámara no disponible — escribe la ubicación');
+      });
+    }
+  } catch(e) {
+    console.warn('loc scanner:', e);
+    var mp3 = document.getElementById('loc-manual-panel');
+    if (mp3) mp3.style.display = 'flex';
+  }
 }
 
 async function locClose() {
