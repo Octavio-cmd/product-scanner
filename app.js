@@ -2704,8 +2704,25 @@ async function addBulk() {
   if (window._psDebug) window._psDebug('🟢 ADD TO CSV disparado');
   toast('🟢 Agregando al CSV...');
 
+  // TIMEOUT GLOBAL de 45 segundos — si tarda más, restaurar botón y avisar
+  var addBulkTimeout = setTimeout(function(){
+    if (window._psDebug) window._psDebug('⏰ addBulk TIMEOUT — restaurando botón');
+    var b = document.getElementById('addBtn');
+    if (b) {
+      b.textContent = '⚠️ Tardó demasiado — intenta de nuevo';
+      b.style.background = '#ff9800';
+      b.style.pointerEvents = '';
+      setTimeout(function(){
+        b.textContent = '➕ ADD TO CSV';
+        b.style.background = '';
+      }, 4000);
+    }
+    toast('⏰ Tomó demasiado tiempo — reintenta');
+  }, 45000);
+
   // Protección: si por alguna razón cur se perdió, avisar y salir
   if (!cur) {
+    clearTimeout(addBulkTimeout);
     toast('❌ No hay producto activo - escanea de nuevo');
     return;
   }
@@ -2716,6 +2733,20 @@ async function addBulk() {
     if (el) { el.style.display = 'none'; el.style.pointerEvents = 'none'; }
   });
 
+  // Wrapper para siempre limpiar el timeout al final
+  var _origResult;
+  try {
+    _origResult = await _addBulkInternal();
+    clearTimeout(addBulkTimeout);
+    return _origResult;
+  } catch(err) {
+    clearTimeout(addBulkTimeout);
+    if (window._psDebug) window._psDebug('❌ addBulk error: ' + (err && err.message || err));
+    throw err;
+  }
+}
+
+async function _addBulkInternal() {
   var EXP_REQ = ['67169','180959','75037','51227','57041','2984','67167','105070'];
   if (EXP_REQ.includes(String(cur.category||''))) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
