@@ -2912,8 +2912,9 @@ async function addSplitPacksToCSV(){
   var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
 
   // ── VALIDACIÓN: los packs >1 DEBEN tener su imagen de pack generada ──
-  // Si ImgBB falló y no se pudo subir la imagen del pack, avisar claramente
-  // pero PERMITIR continuar (usará la foto del producto original).
+  // Si ImgBB falló y no se pudo subir la imagen del pack, avisar con toast
+  // y CONTINUAR usando la foto del producto original.
+  // (Antes usábamos confirm() pero en Safari Private a veces bloquea la UI)
   var missingImgs = [];
   for (var mi = 0; mi < packsToAdd.length; mi++) {
     var mp = packsToAdd[mi];
@@ -2922,14 +2923,12 @@ async function addSplitPacksToCSV(){
     }
   }
   if (missingImgs.length) {
-    var msg = '⚠️ Faltan imágenes de pack para: ' + missingImgs.join(', ') +
-              '. ¿Continuar usando la foto del producto original?';
-    if (!confirm(msg)) {
-      toast('❌ Cancelado — toca 🎁 Generar Imágenes de Pack');
+    toast('⚠️ Sin imágenes de pack para ' + missingImgs.join(', ') + ' — usando foto genérica');
+    // Si NO hay ni siquiera la foto genérica, no hay nada que agregar → cancelar
+    if (!cur._bundleImg && !cur._imgUrl && !cur._frontImg) {
+      toast('❌ Sin fotos disponibles — toca 🎁 Generar Imágenes de Pack');
       return false;
     }
-    // Si acepta, se usará cur._frontImg como fallback más abajo
-    toast('⚠️ Usando foto genérica del producto para: ' + missingImgs.join(', '));
   }
 
   // Sube una imagen a ImgBB si quedó en base64; devuelve URL http o ''
@@ -2976,11 +2975,10 @@ async function addSplitPacksToCSV(){
       var httpParts = [];
       for (var k2 = 0; k2 < parts.length; k2++) { if (parts[k2]) httpParts.push(parts[k2]); }
       photoUrl = httpParts.join('|');
-      // Si el front del pack no se pudo subir, NO agregar este pack con foto equivocada
+      // Si el front del pack no se pudo subir (ImgBB rate limit), usar foto genérica
       if (p > 1 && !fUrl) {
-        toast('❌ ' + p + 'pk: no se pudo subir la imagen del pack — no se agregó');
-        skipped = (typeof skipped !== 'undefined') ? skipped : 0;
-        continue;
+        toast('⚠️ ' + p + 'pk: usando foto genérica del producto');
+        photoUrl = ''; // deja que el fallback de abajo la ponga
       }
     }
     if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
@@ -4559,40 +4557,59 @@ async function locClose() {
 }
 
 function locCapture(code) {
-  locClose();
-  if (_locTarget === 'scanner') {
-    if (cur) {
-      cur.location = code;
-      // Actualizar también los packs YA agregados al CSV de este mismo producto,
-      // para que la ubicación llegue al Sheet aunque se capture después de ADD TO CSV
-      for (var bi = 0; bi < bulk.length; bi++) {
-        if (bulk[bi].upc === cur.upc) bulk[bi].location = code;
+  try { locClose(); } catch(e) { console.warn('locClose:', e); }
+  try {
+    // Product Scanner usa 'product' o 'scanner'. Ambos guardan en `cur`.
+    if (_locTarget === 'scanner' || _locTarget === 'product' || (!_locTarget && typeof cur !== 'undefined' && cur)) {
+      if (typeof cur !== 'undefined' && cur) {
+        cur.location = code;
+        // Actualizar también los packs YA agregados al CSV de este mismo producto,
+        // para que la ubicación llegue al Sheet aunque se capture después de ADD TO CSV
+        if (typeof bulk !== 'undefined' && Array.isArray(bulk)) {
+          for (var bi = 0; bi < bulk.length; bi++) {
+            if (bulk[bi].upc === cur.upc) bulk[bi].location = code;
+          }
+        }
+        try { if (typeof saveBulkToStorage === 'function') saveBulkToStorage(); } catch(e) {}
+        // Actualizar el badge visible si existe
+        var badge1 = document.getElementById('loc-badge-scanner');
+        if (badge1 && typeof locBadgeHTML === 'function') {
+          try { badge1.outerHTML = locBadgeHTML(code, 'scanner'); } catch(e) {}
+        }
       }
-      try { saveBulkToStorage(); } catch(e) {}
-      // Update location badge in result screen
-      const badge = document.getElementById('loc-badge-scanner');
-      if (badge) badge.outerHTML = locBadgeHTML(code, 'scanner');
+    } else if (_locTarget === 'clothing') {
+      // Solo aplicable si el módulo de Ropa está cargado (cl existe)
+      if (typeof cl !== 'undefined' && cl) {
+        cl.location = code;
+        var badge2 = document.getElementById('loc-badge-clothing');
+        if (badge2 && typeof locBadgeHTML === 'function') {
+          try { badge2.outerHTML = locBadgeHTML(code, 'clothing'); } catch(e) {}
+        }
+      }
     }
     toast('📍 Location: ' + code);
-  } else if (_locTarget === 'clothing') {
-    cl.location = code;
-    // Update location badge in review screen
-    const badge = document.getElementById('loc-badge-clothing');
-    if (badge) badge.outerHTML = locBadgeHTML(code, 'clothing');
-    toast('📍 Location: ' + code);
+  } catch(err) {
+    console.error('locCapture error:', err);
+    toast('⚠️ Error al guardar ubicación: ' + (err.message || err));
   }
 }
 
 function locClear(target) {
-  if (target === 'scanner' && cur) {
-    cur.location = '';
-    const badge = document.getElementById('loc-badge-scanner');
-    if (badge) badge.outerHTML = locEmptyHTML('scanner');
-  } else if (target === 'clothing') {
-    cl.location = '';
-    const badge = document.getElementById('loc-badge-clothing');
-    if (badge) badge.outerHTML = locEmptyHTML('clothing');
-  }
+  try {
+    if ((target === 'scanner' || target === 'product') && typeof cur !== 'undefined' && cur) {
+      cur.location = '';
+      var badge = document.getElementById('loc-badge-scanner');
+      if (badge && typeof locEmptyHTML === 'function') {
+        try { badge.outerHTML = locEmptyHTML('scanner'); } catch(e) {}
+      }
+    } else if (target === 'clothing' && typeof cl !== 'undefined' && cl) {
+      cl.location = '';
+      var badge2 = document.getElementById('loc-badge-clothing');
+      if (badge2 && typeof locEmptyHTML === 'function') {
+        try { badge2.outerHTML = locEmptyHTML('clothing'); } catch(e) {}
+      }
+    }
+  } catch(err) { console.warn('locClear:', err); }
 }
 
 function locBadgeHTML(code, target) {
