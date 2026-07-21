@@ -3588,25 +3588,36 @@ function renderResult(r){
     h2+='</div>';
     h2+='<div id="pack-sel-display" style="font-size:12px;color:var(--mu);margin-top:4px">Selected: <strong style="color:var(--ac)">Pack of '+packs+'</strong></div>';
     h2+='<div class="extra-field"><div class="extra-label">🎨 Shade / Color (optional)</div><input class="extra-input" id="shade-input" type="text" placeholder="e.g. Cherry Red, #12 Brown..." oninput="updateShadeColor(this.value)"></div>';
-    // Categorías que requieren fecha de expiración
-    var EXP_REQUIRED_CATS = ['67169','180959','75037','51227','57041','2984','67167','105070'];
-    var needsExpDate = EXP_REQUIRED_CATS.includes(String(r.category||''));
-
-    h2+='<div class="extra-field"><div class="extra-label">📅 Expiration Date'
-      + (needsExpDate ? ' <span style="color:#e74c3c;font-weight:800">* REQUIRED</span>' : ' (optional)')
-      + '</div>';
-    if (needsExpDate) {
-      h2+='<div style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.4);border-radius:8px;padding:8px 12px;margin-bottom:6px;font-size:12px;color:#e74c3c">⚠️ Este producto requiere fecha de expiración para listarse en eBay</div>';
-    }
-    h2+='<div id="exp-toggle-btn" onclick="toggleExpDate()" style="display:inline-flex;align-items:center;gap:8px;background:var(--sf2);border:1.5px solid '+(needsExpDate?'#e74c3c':'var(--bd)')+';border-radius:10px;padding:10px 16px;cursor:pointer;margin-top:6px;font-size:13px;color:'+(needsExpDate?'#e74c3c':'var(--mu)')+'"><span>📅</span><span>'+(needsExpDate?'Ingresar fecha de expiración (REQUERIDO)':'This product has an expiration date')+'</span></div>';
-    h2+='<div id="exp-date-picker" style="display:none;margin-top:10px"><div class="extra-label">MONTH</div><div class="pack-chips" id="month-chips" style="gap:6px"></div><div class="extra-label" style="margin-top:10px">YEAR</div><div class="pack-chips" id="year-chips" style="gap:6px"></div><div class="date-result" id="date-result-display" style="text-align:left;margin-top:8px"></div><button onclick="clearExpDate()" style="background:none;border:none;color:var(--mu);font-size:12px;cursor:pointer;margin-top:4px">✕ Remove date</button></div></div>';
-    h2+='</div>';
+    // Expiration date fue movido ARRIBA (después de Location) para evitar el conflicto
+    // de memoria de cámara en iOS Safari. Este bloque queda vacío para no duplicar IDs.
     return h2;
   }());
 
   // ── 4b. BULK SPLIT CALCULATOR — reparte unidades del camión entre 1/3/6/12
   // según la demanda real de eBay (soldCount de los últimos 90 días) ──
   h+=renderSplitCalculatorHTML(ebay);
+
+  // ── LOCATION (movido ANTES de las fotos para evitar conflicto de memoria de cámara en iOS) ──
+  const locVal=r.location||'';
+  h+=`<div class="card" style="border:1px solid rgba(255,109,31,.35);background:rgba(255,109,31,.05)">
+    <div class="lbl">📍 Warehouse Location <span style="color:var(--mu);font-size:11px;font-weight:400">— escanea o escribe ANTES de las fotos</span></div>
+    <div style="margin-top:8px">${locVal?locBadgeHTML(locVal,'scanner'):locEmptyHTML('scanner')}</div>
+  </div>`;
+
+  // ── EXPIRATION DATE (movido ANTES de las fotos también) ──
+  // Duplicamos el picker aquí arriba para que Manuel lo llene antes de generar packs
+  var EXP_REQUIRED_CATS_TOP = ['67169','180959','75037','51227','57041','2984','67167','105070'];
+  var needsExpTop = EXP_REQUIRED_CATS_TOP.includes(String(r.category||''));
+  h+='<div class="card" style="border:1px solid ' + (needsExpTop?'rgba(231,76,60,.5)':'rgba(255,109,31,.35)') + ';background:' + (needsExpTop?'rgba(231,76,60,.05)':'rgba(255,109,31,.05)') + '">'
+    + '<div class="lbl">📅 Expiration Date'
+    + (needsExpTop ? ' <span style="color:#e74c3c;font-weight:800">* REQUIRED</span>' : ' <span style="color:var(--mu);font-size:11px;font-weight:400">(optional)</span>')
+    + '</div>';
+  if (needsExpTop) {
+    h+='<div style="background:rgba(231,76,60,.1);border:1px solid rgba(231,76,60,.4);border-radius:8px;padding:8px 12px;margin:8px 0;font-size:12px;color:#e74c3c">⚠️ Este producto requiere fecha de expiración para listarse en eBay</div>';
+  }
+  h+='<div id="exp-toggle-btn" onclick="toggleExpDate()" style="display:inline-flex;align-items:center;gap:8px;background:var(--sf2);border:1.5px solid '+(needsExpTop?'#e74c3c':'var(--bd)')+';border-radius:10px;padding:10px 16px;cursor:pointer;margin-top:6px;font-size:13px;color:'+(needsExpTop?'#e74c3c':'var(--mu)')+'"><span>📅</span><span>'+(needsExpTop?'Ingresar fecha de expiración (REQUERIDO)':'This product has an expiration date')+'</span></div>';
+  h+='<div id="exp-date-picker" style="display:none;margin-top:10px"><div class="extra-label">MONTH</div><div class="pack-chips" id="month-chips" style="gap:6px"></div><div class="extra-label" style="margin-top:10px">YEAR</div><div class="pack-chips" id="year-chips" style="gap:6px"></div><div class="date-result" id="date-result-display" style="text-align:left;margin-top:8px"></div><button onclick="clearExpDate()" style="background:none;border:none;color:var(--mu);font-size:12px;cursor:pointer;margin-top:4px">✕ Remove date</button></div>';
+  h+='</div>';
 
   // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
   const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
@@ -3666,12 +3677,6 @@ function renderResult(r){
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
-
-  // ── 9. LOCATION ──────────────────────────────────────────────
-  const locVal=r.location||'';
-  h+=`<div class="card"><div class="lbl">📍 Warehouse Location</div>
-    <div style="margin-top:8px">${locVal?locBadgeHTML(locVal,'scanner'):locEmptyHTML('scanner')}</div>
-  </div>`;
 
   h+=sv
     ? `<button class="add-btn" id="addBtn" ${cur && cur._bundleImg===undefined ? '' : ''}>➕ ADD TO CSV</button>`
