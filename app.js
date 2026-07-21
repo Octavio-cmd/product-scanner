@@ -261,7 +261,7 @@ function showLoadingInline(initialMsg){
 function psSafeCategory(cat, fallback){
   var c = String(cat == null ? '' : cat).trim();
   // Categorías PADRE que eBay rechaza con Error 87 — nunca usarlas
-  var PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','20725'];
+  var PARENT_CATS = ['26395','293','888','220','1281','2984','14308','20625','6000','16486','11854','20725','36447','67716','11838','184630'];
   if (!c || c === 'undefined' || c === 'null' || !/^\d+$/.test(c) || PARENT_CATS.indexOf(c) >= 0) {
     return fallback || '31786'; // 31786 = Skin Care (leaf válida, safe default)
   }
@@ -286,16 +286,17 @@ function makeSKU(brand,upc,packs,title){
 function catId(n){
   const t=(n||'').toLowerCase();
 
-  // ── MASSAGERS / MASSAGE DEVICES (leaf: 36447 = Electric Massagers) ──
-  if(/massager|deep.tissue massag|percussion massag|massage gun|theragun|hypervolt|homedics|shiatsu|foot spa|foot massag|neck massag|back massag|scalp massag/i.test(t))return'36447';
-  if(/sharper image.*(massag|deep.tissue|percussion|swappable head)/i.test(t))return'36447';
+  // ── MASSAGERS / MASSAGE DEVICES (leaf: 36449 = Body Massagers) ──
+  if(/massager|deep.tissue massag|percussion massag|massage gun|theragun|hypervolt|homedics|shiatsu|foot spa|foot massag|neck massag|back massag|scalp massag/i.test(t))return'36449';
+  if(/sharper image.*(massag|deep.tissue|percussion|swappable head)/i.test(t))return'36449';
 
-  // ── HOME HEALTH DEVICES (leaf 67716 = Home Diagnostic Tests) ──
-  if(/blood pressure monitor|pulse oximeter|thermometer digital|glucometer|glucose meter|blood glucose/i.test(t))return'67716';
-  if(/nebulizer|humidifier|vaporizer.*(vicks|cool.mist)|steam inhaler/i.test(t))return'184630';
+  // ── HOME HEALTH DEVICES (leaf 20676 = Blood Pressure Monitors) ──
+  if(/blood pressure monitor|omron|withings bp/i.test(t))return'20676';
+  if(/pulse oximeter|thermometer digital|glucometer|glucose meter|blood glucose/i.test(t))return'20676';
+  if(/nebulizer|humidifier|vaporizer.*(vicks|cool.mist)|steam inhaler/i.test(t))return'20676';
 
-  // ── HEATING PADS / HOT-COLD PACKS (leaf 11838 = Heating Pads) ──
-  if(/heating pad|electric heating|heat wrap|therabreath|hot.cold pack|therapedic|thermacare/i.test(t))return'11838';
+  // ── HEATING PADS / HOT-COLD PACKS (leaf 32835 = Heating Pads) ──
+  if(/heating pad|electric heating|heat wrap|hot.cold pack|thermacare/i.test(t))return'32835';
 
   // ── PET SUPPLIES ─────────────────────────────────────────────
   if(/dog food|cat food|pet food|kibble|pedigree|purina|iams|blue buffalo|friskies|fancy feast|whiskas|royal canin|hill.s science/i.test(t))return'1281';
