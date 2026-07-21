@@ -109,29 +109,30 @@ const DEF_EBAY='StevenGa-SavvySca-PRD-81addb012-655f2649';
 // ── Default API keys (loaded from Railway savvy-config)
 let DEFAULT_PHOTOROOM_KEY = '';
 let DEFAULT_RBG_KEY = '';
-let DEFAULT_IMGBB_KEY = '';
+// KEY NUEVA asignada DIRECTO a la variable — nadie puede sobrescribirla.
+// (El bug de todo el día: Railway savvy-config servía la key VIEJA BORRADA
+// y la línea "if (d.imgbb) DEFAULT_IMGBB_KEY = d.imgbb" la sobrescribía
+// 2 segundos después de cargar → "Invalid API v1 key" intermitente.)
+let DEFAULT_IMGBB_KEY = atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=');
 let DEFAULT_CLAUDE_KEY = '';
 let _keysLoaded = false;
-// Load keys from Railway on startup
+// Load keys from Railway on startup — EXCEPTO imgbb (queda fija arriba)
 (async function loadKeys() {
   try {
     const r = await fetch(SAVVY_CONFIG + '/config');
     if (r.ok) {
       const d = await r.json();
-      if (d.imgbb)      DEFAULT_IMGBB_KEY  = d.imgbb;
+      // ⛔ NUNCA sobrescribir DEFAULT_IMGBB_KEY desde Railway:
+      // if (d.imgbb) DEFAULT_IMGBB_KEY = d.imgbb;   ← DESACTIVADO PERMANENTE
       if (d.claude)     DEFAULT_CLAUDE_KEY = d.claude;
       if (d.sheets_url) localStorage.setItem('cl_sheets_url', d.sheets_url);
       // drive_url: NO sobrescribir — usamos URL fija hardcodeada
     }
   } catch(e) { console.warn('Could not load keys from Railway savvy-config'); }
-  // Fallback hardcoded (always applies if Railway didn't provide)
-  const _k = [
-    ['DEFAULT_IMGBB_KEY', atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=')],
-  ];
-  _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   // Drive URL fija — siempre la correcta
   localStorage.setItem('cl_drive_url', 'https://script.google.com/macros/s/AKfycbyVgEEID8dqZMymlqQMpjO7fLBMYkfj0mmcWk2ImudTy9evKGlOi4oHUc9vhcdmpFeDDQ/exec');
   _keysLoaded = true;
+  if (window._psDebug) window._psDebug('🔑 ImgBB key fija activa: ' + DEFAULT_IMGBB_KEY.substring(0,8) + '...');
 })();
 // ── Login System ──────────────────────────────────────────────
 const SAVVY_USERS = {
