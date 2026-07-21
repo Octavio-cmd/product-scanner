@@ -126,7 +126,7 @@ let _keysLoaded = false;
   } catch(e) { console.warn('Could not load keys from Railway savvy-config'); }
   // Fallback hardcoded (always applies if Railway didn't provide)
   const _k = [
-    ['DEFAULT_IMGBB_KEY', atob('MWU4ZWNlYTJmYzJlYTkxOGNhY2E3NDM2OTkyOGVmNjM=')],
+    ['DEFAULT_IMGBB_KEY', atob('YzhhNDhjZTRlNWU1MzZmMGE4MzQ1MTYxOTk3ZGNmZTM=')],
   ];
   _k.forEach(([k, v]) => { if (!window[k]) window[k] = v; });
   // Drive URL fija — siempre la correcta
@@ -263,6 +263,16 @@ setInterval(function(){
 if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
 }
+
+// Limpiar API keys viejas de ImgBB en localStorage — fuerza usar la key nueva
+// que está hardcodeada arriba. Esto evita que iOS use una key vieja cacheada.
+try {
+  var _oldKeys = ['1e8ecea2fc2ea918caca74369928ef63'];
+  var _clKey = localStorage.getItem('cl_imgbb_key');
+  if (_clKey && _oldKeys.indexOf(_clKey) >= 0) localStorage.removeItem('cl_imgbb_key');
+  var _svKey = localStorage.getItem('savvy_imgbb_key');
+  if (_svKey && _oldKeys.indexOf(_svKey) >= 0) localStorage.removeItem('savvy_imgbb_key');
+} catch(e) {}
 
 let bulk=[],cur=null;
 let _psSellbriteProducts = {};
@@ -1262,7 +1272,21 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
     fd.append('key', key);
     fd.append('image', b64);
     fd.append('name', (slotName || 'photo') + '-' + Date.now() + '.png');
-    const res = await fetch('https://api.imgbb.com/1/upload', { method:'POST', body: fd });
+
+    // TIMEOUT de 15 segundos — si ImgBB no responde, cancelar y seguir
+    var controller = null;
+    var timeoutId = null;
+    try {
+      controller = new AbortController();
+      timeoutId = setTimeout(function(){ controller.abort(); }, 15000);
+    } catch(e) {}
+
+    const fetchOpts = { method:'POST', body: fd };
+    if (controller) fetchOpts.signal = controller.signal;
+
+    const res = await fetch('https://api.imgbb.com/1/upload', fetchOpts);
+    if (timeoutId) clearTimeout(timeoutId);
+
     const d = await res.json();
     if (d.success) {
       let imgUrl = d.data.image?.url || d.data.display_url || d.data.url;
@@ -1270,12 +1294,13 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
     } else {
       const errMsg = d.error?.message || JSON.stringify(d.error) || 'unknown error';
       console.error('ImgBB upload failed:', errMsg);
-      toast('⚠️ ImgBB error: ' + errMsg);
+      if (window._psDebug) window._psDebug('❌ ImgBB: ' + errMsg);
       return null;
     }
   } catch(e) {
-    console.error('ImgBB network error:', e.message);
-    toast('⚠️ ImgBB network error: ' + e.message);
+    var msg = e.name === 'AbortError' ? 'timeout (15s)' : (e.message || e);
+    console.error('ImgBB network error:', msg);
+    if (window._psDebug) window._psDebug('❌ ImgBB network: ' + msg);
     return null;
   }
 }
