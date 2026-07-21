@@ -3684,18 +3684,40 @@ function renderResult(r){
   h+=sv
     ? `<button class="add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ ADD TO CSV</button>`
     : `<button class="ov-add-btn" id="addBtn" style="pointer-events:auto !important;position:relative;z-index:100">➕ Add anyway (DWI override)</button>`;
-  // Botón diagnóstico amarillo — dice EXACTAMENTE qué está bloqueando
-  h+=`<button id="diagBtn" style="width:100%;background:#ffcc00;color:#000;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:100">🔧 DIAGNÓSTICO — Toca aquí si ADD TO CSV no funciona</button>`;
+  // Botón ROJO de LIMPIEZA — quita cualquier overlay bloqueando la pantalla
+  h+=`<button id="cleanBtn" style="width:100%;background:#ff3b30;color:#fff;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:9999">🚨 DESBLOQUEAR PANTALLA (toca ANTES de ADD TO CSV)</button>`;
+  // Botón diagnóstico amarillo
+  h+=`<button id="diagBtn" style="width:100%;background:#ffcc00;color:#000;border:3px solid #ff9500;border-radius:10px;padding:14px;font-size:14px;font-weight:800;margin-top:10px;cursor:pointer;position:relative;z-index:9999">🔧 DIAGNÓSTICO</button>`;
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
 
+  // ── LIMPIEZA BRUTAL AUTOMÁTICA al renderizar la pantalla del producto ──
+  // Elimina cualquier overlay/elemento position:fixed que pueda estar tapando
+  setTimeout(function(){
+    var suspects = document.querySelectorAll('div[style*="position:fixed"], div[style*="position: fixed"]');
+    suspects.forEach(function(el){
+      // No tocar el header/nav, ni tostadas, ni el debug log
+      if (el.id === 'toast-container' || el.id === 'ps-debug-overlay' ||
+          el.classList.contains('toast') || el.tagName === 'HEADER') return;
+      // Si cubre buena parte de la pantalla → matarlo
+      var r = el.getBoundingClientRect();
+      if (r.width > window.innerWidth * 0.5 && r.height > window.innerHeight * 0.3) {
+        if (window._psDebug) window._psDebug('🧹 removiendo overlay colgado: ' + el.id + ' ' + el.tagName);
+        try { el.parentNode.removeChild(el); } catch(e) {
+          el.style.display = 'none';
+          el.style.pointerEvents = 'none';
+          el.style.zIndex = '-1';
+        }
+      }
+    });
+  }, 100);
+
   const addB=$('addBtn');
   if(addB){
-    // Múltiples eventos para atrapar el touch en iOS
     var addFn = function(e){
       if(e && e.preventDefault) e.preventDefault();
-      if (window._psDebug) window._psDebug('🟢 addBtn CLICKED - evento: ' + (e ? e.type : 'unknown'));
+      if (window._psDebug) window._psDebug('🟢 addBtn CLICKED - ' + (e ? e.type : 'unknown'));
       addBulk();
     };
     addB.addEventListener('touchstart', function(e){
@@ -3703,52 +3725,53 @@ function renderResult(r){
     });
     addB.addEventListener('touchend', addFn);
     addB.addEventListener('click', addFn);
-    // Log al final para confirmar bind
     if (window._psDebug) window._psDebug('✅ addBtn bindeado');
-  } else {
-    if (window._psDebug) window._psDebug('❌ addBtn NO existe en el DOM');
   }
 
-  // Botón diagnóstico
+  // Botón ROJO — limpieza brutal + intenta addBulk
+  var cleanB = document.getElementById('cleanBtn');
+  if (cleanB) {
+    var cleanFn = function(e){
+      if(e && e.preventDefault) e.preventDefault();
+      // Eliminar TODOS los overlays sospechosos
+      var count = 0;
+      document.querySelectorAll('div').forEach(function(el){
+        var st = window.getComputedStyle(el);
+        if ((st.position === 'fixed' || st.position === 'absolute') &&
+            parseInt(st.zIndex||'0') > 50 &&
+            el.id !== 'toast-container' && el.id !== 'ps-debug-overlay') {
+          var r = el.getBoundingClientRect();
+          if (r.width > 300 && r.height > 300) {
+            try { el.parentNode.removeChild(el); count++; } catch(e){}
+          }
+        }
+      });
+      if (window._psDebug) window._psDebug('🧹 ' + count + ' elementos removidos');
+      // Ahora intentar addBulk
+      try { addBulk(); if(window._psDebug) window._psDebug('✅ addBulk ejecutado'); }
+      catch(err) { if(window._psDebug) window._psDebug('❌ addBulk error: ' + err.message); }
+    };
+    cleanB.addEventListener('touchend', cleanFn);
+    cleanB.addEventListener('click', cleanFn);
+  }
+
   var diagB = document.getElementById('diagBtn');
   if (diagB) {
     var diagFn = function(e){
       if(e && e.preventDefault) e.preventDefault();
-      var log = [];
-      log.push('🔧 DIAG iniciado');
-      // 1. cur existe?
-      log.push('cur: ' + (cur ? 'OK (' + cur.upc + ')' : 'NULL'));
-      // 2. bulk existe?
-      log.push('bulk: ' + (Array.isArray(bulk) ? bulk.length + ' items' : 'NO ES ARRAY'));
-      // 3. addBtn existe?
+      if (window._psDebug) window._psDebug('🔧 DIAG - cur: ' + (cur ? cur.upc : 'NULL'));
       var b = document.getElementById('addBtn');
-      log.push('addBtn en DOM: ' + (b ? 'SÍ' : 'NO'));
       if (b) {
         var rect = b.getBoundingClientRect();
-        log.push('addBtn pos: ' + Math.round(rect.top) + ',' + Math.round(rect.left) + ' ' + Math.round(rect.width) + 'x' + Math.round(rect.height));
-        // Qué elemento está encima
-        var elAtCenter = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
-        log.push('encima del btn: ' + (elAtCenter ? elAtCenter.tagName + '#' + elAtCenter.id + '.' + elAtCenter.className : 'nada'));
+        var elAt = document.elementFromPoint(rect.left + rect.width/2, rect.top + rect.height/2);
+        if (window._psDebug) window._psDebug('⛔ encima del btn: ' + (elAt ? elAt.tagName + '#' + elAt.id : 'nada'));
       }
-      // 4. Overlays colgados?
-      var lo = document.getElementById('loc-overlay');
-      log.push('loc-overlay: ' + (lo ? 'EXISTE (display=' + lo.style.display + ')' : 'no'));
-      // 5. Intentar llamar addBulk directamente
-      log.push('llamando addBulk() directamente...');
-      if (window._psDebug) {
-        log.forEach(function(l){ window._psDebug(l); });
-      }
-      // Llamar addBulk directamente sin depender del botón
-      try {
-        addBulk();
-        if (window._psDebug) window._psDebug('✅ addBulk() ejecutó sin error');
-      } catch(err) {
-        if (window._psDebug) window._psDebug('❌ addBulk error: ' + (err.message || err));
-      }
+      try { addBulk(); } catch(err) { if(window._psDebug) window._psDebug('❌ ' + err.message); }
     };
     diagB.addEventListener('touchend', diagFn);
     diagB.addEventListener('click', diagFn);
   }
+
   const agB=$('agBtn');
   if(agB){agB.addEventListener('touchend',e=>{e.preventDefault();scanAnother();});agB.addEventListener('click',scanAnother);}
 
