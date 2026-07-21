@@ -244,6 +244,30 @@ window.addEventListener('load', function(){
     });
   }, 500);
 });
+
+// ── LIMPIADOR CONTINUO cada 2 segundos ──
+// Si por alguna razón el scanner de ubicación se cuelga y su overlay queda
+// tapando la pantalla, este vigía lo detecta y lo elimina en máximo 2 segundos.
+setInterval(function(){
+  var lo = document.getElementById('loc-overlay');
+  if (lo) {
+    // Si existe pero el scanner ya no está corriendo, es huérfano
+    var isRunning = _savvyScanners && _savvyScanners['loc-qr-video'];
+    var isVisible = lo.style.display !== 'none' && lo.offsetHeight > 0;
+    // Si NO está corriendo pero SÍ está visible/tapando → huérfano → eliminar
+    if (!isRunning && isVisible) {
+      try { lo.parentNode.removeChild(lo); } catch(e) {
+        lo.style.display = 'none';
+        lo.style.pointerEvents = 'none';
+      }
+      if (window._psDebug) window._psDebug('🧹 vigía: overlay huérfano removido');
+    }
+  }
+  var mp = document.getElementById('loc-manual-panel');
+  if (mp && mp.style.display !== 'none' && !document.getElementById('loc-overlay')) {
+    try { mp.parentNode.removeChild(mp); } catch(e) {}
+  }
+}, 2000);
 // Initialize Zebra printer IP if not set
 if (!localStorage.getItem('savvy_printer_ip')) {
   localStorage.setItem('savvy_printer_ip', '192.168.1.25');
@@ -4731,6 +4755,17 @@ async function locClose() {
 }
 
 function locCapture(code) {
+  // ELIMINACIÓN INMEDIATA del overlay antes de hacer NADA más.
+  // Si el QR fue detectado, cerramos la cámara y quitamos el overlay YA.
+  try { savvyStopScan('loc-qr-video'); } catch(e) {}
+  ['loc-overlay','loc-manual-panel'].forEach(function(id){
+    var el = document.getElementById(id);
+    if (el) {
+      try { el.parentNode.removeChild(el); }
+      catch(e) { el.style.display='none'; el.style.pointerEvents='none'; el.style.zIndex='-1'; }
+    }
+  });
+  if (window._psDebug) window._psDebug('📍 LOC: overlay eliminado (via capture)');
   try { locClose(); } catch(e) { console.warn('locClose:', e); }
   try {
     // Product Scanner usa 'product' o 'scanner'. Ambos guardan en `cur`.
