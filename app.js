@@ -450,7 +450,7 @@ function calcBundleProfit(ebay,packs){
 
 // ── Análisis de verdicts (SAVVY vs DWI)
 function evaluateBundleProfit(ebay,packs){
-  const cost=(packs*((ebay.pricing?.unitPrice||ebay.pricing?.suggestedPrice||9.99))+10+1+10));
+  const cost=(packs*((ebay.pricing?.unitPrice||ebay.pricing?.suggestedPrice||9.99))+10+1+10);
   const bundlePrice=Number((cost/0.87).toFixed(2));
   const avgPrice=bundlePrice/packs;
   const minViable=15;
@@ -1482,6 +1482,81 @@ function openBulkOverlay() {
 }
 
 // ── UPC INPUT ──────────────────────────────────────────────────────────────
+
+// ── QR BARCODE SCANNER ──────────────────────────────────────────────────────
+
+var _savvyScanners = {};
+
+const SAVVY_SCAN_CONFIG = {
+  fps: 20,
+  qrbox: { width: 280, height: 120 },  // cajita horizontal para barcodes
+  aspectRatio: 1.7,
+  disableFlip: false,
+  experimentalFeatures: {
+    useBarCodeDetectorIfSupported: true
+  },
+  formatsToSupport: [
+    Html5QrcodeSupportedFormats.EAN_13,
+    Html5QrcodeSupportedFormats.EAN_8,
+    Html5QrcodeSupportedFormats.UPC_A,
+    Html5QrcodeSupportedFormats.UPC_E,
+    Html5QrcodeSupportedFormats.CODE_128,
+    Html5QrcodeSupportedFormats.CODE_39,
+    Html5QrcodeSupportedFormats.QR_CODE,
+    Html5QrcodeSupportedFormats.DATA_MATRIX,
+  ]
+};
+
+async function savvyStartScan(videoElementId, onResult) {
+  console.log('📷 savvyStartScan starting for element:', videoElementId);
+  await savvyStopScan(videoElementId);
+  
+  const videoEl = document.getElementById(videoElementId);
+  if(!videoEl){
+    console.error('❌ Video element not found:', videoElementId);
+    toast('❌ Camera container not found');
+    return;
+  }
+  
+  console.log('✅ Video element found:', videoEl);
+  
+  var scanner = new Html5Qrcode(videoElementId, {
+    formatsToSupport: SAVVY_SCAN_CONFIG.formatsToSupport,
+    experimentalFeatures: SAVVY_SCAN_CONFIG.experimentalFeatures,
+    verbose: false
+  });
+  _savvyScanners[videoElementId] = scanner;
+  try {
+    console.log('📱 Requesting camera access...');
+    await scanner.start(
+      { facingMode: 'environment' },
+      {
+        fps: SAVVY_SCAN_CONFIG.fps,
+        qrbox: SAVVY_SCAN_CONFIG.qrbox,
+        aspectRatio: SAVVY_SCAN_CONFIG.aspectRatio,
+        disableFlip: SAVVY_SCAN_CONFIG.disableFlip,
+      },
+      (decoded) => {
+        console.log('✅ QR Code found:', decoded);
+        savvyStopScan(videoElementId);
+        onResult(decoded);
+      },
+      () => {}
+    );
+    console.log('✅ Camera started successfully');
+  } catch(e) {
+    console.error('❌ Camera error:', e.message);
+    toast('❌ No camera access: ' + e.message);
+    delete _savvyScanners[videoElementId];
+  }
+}
+
+async function savvyStopScan(videoElementId) {
+  if (_savvyScanners[videoElementId]) {
+    try { await _savvyScanners[videoElementId].stop(); } catch(e) {}
+    delete _savvyScanners[videoElementId];
+  }
+}
 
 function scanUPC() {
   var input = $('upc-input');
