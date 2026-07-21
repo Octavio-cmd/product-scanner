@@ -4484,14 +4484,16 @@ async function locOpen(target) {
         '<span style="font-size:22px">📍</span>' +
         '<div style="color:#fff;font-weight:800;font-size:16px">Scan Location (QR / Barcode)</div>' +
       '</div>' +
-      // Área de cámara full-width
-      '<div style="flex:1;position:relative;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center">' +
-        '<div id="loc-qr-video" style="width:100%;height:100%;position:relative"></div>' +
+      // Área de cámara full-width con altura explícita para iOS Safari
+      '<div style="flex:1;position:relative;background:#000;overflow:hidden;display:flex;align-items:center;justify-content:center;min-height:400px">' +
+        '<div id="loc-qr-video" style="width:100%;height:100%;min-height:400px;position:absolute;top:0;left:0;right:0;bottom:0"></div>' +
+        // Forzar que cualquier <video> interno llene el contenedor (Html5Qrcode lo inserta ahí)
+        '<style>#loc-qr-video video, #loc-qr-video canvas { width:100% !important; height:100% !important; object-fit:cover !important; position:absolute !important; top:0 !important; left:0 !important; }</style>' +
         // Guías T izquierda/derecha estilo scanner principal (blancas, alineadas al centro)
-        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
-        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
-        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
-        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none"></div>' +
+        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
+        '<div style="position:absolute;left:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
+        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:38px;height:3px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
+        '<div style="position:absolute;right:8%;top:50%;transform:translateY(-50%);width:3px;height:38px;background:#fff;border-radius:2px;box-shadow:0 0 8px rgba(0,0,0,.6);pointer-events:none;z-index:2"></div>' +
       '</div>' +
       // Botón cancelar grande abajo
       '<button id="loc-cancel-btn" style="padding:20px;background:#161616;color:#ff5252;border:none;border-top:1px solid #333;font-size:17px;font-weight:800;cursor:pointer;flex-shrink:0">✕ CANCEL</button>' +
