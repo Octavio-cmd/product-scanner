@@ -1711,33 +1711,45 @@ function updatePackGenButtonState(){
 function renderPackImagesPreview(){
   const el = $('ps-pack-images-preview');
   if(!el || !cur || !cur._packImages) return;
-  let h = '<div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px">';
+
+  // Fotos de referencia compartidas (se adjuntan a CADA listado de pack activo)
+  const anyPack = Object.keys(cur._packImages)[0];
+  const shared = anyPack ? cur._packImages[anyPack] : null;
+  const frontOrig = cur._frontImg || cur._frontImgLocal || '';
+  const backImg = shared && shared.back ? shared.back : '';
+  const extras = (shared && shared.extras) ? shared.extras : [];
+
+  let h = '';
+
+  // Por cada pack GENERADO (solo los activos), mostrar el CONJUNTO COMPLETO
+  // de fotos que se subirán a ese listado: portada del pack + referencias.
   PACK_SIZES.forEach(function(p){
     const imgs = cur._packImages[p];
     if(!imgs) return;
-    h += `<div style="background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
-      <div style="font-size:11px;font-weight:800;color:var(--ac);margin-bottom:4px">${p} Pack</div>
-      <img src="${esc(imgs.front)}" style="width:100%;border-radius:6px;margin-bottom:4px">
-      <a href="${esc(imgs.front)}" download="pack-${p}-front.jpg" style="font-size:10px;color:var(--mu);text-decoration:underline">⬇️ front</a>
+
+    // Armar la galería del listado en el mismo orden que se sube al CSV
+    var gallery = [];
+    gallery.push({ url: imgs.front, tag: (p > 1 ? p + '-Pack (portada)' : 'Portada') });
+    if (p > 1 && frontOrig && frontOrig !== imgs.front) gallery.push({ url: frontOrig, tag: 'Front' });
+    if (backImg) gallery.push({ url: backImg, tag: 'Back' });
+    extras.forEach(function(u, i){ gallery.push({ url: u, tag: 'Extra ' + (i+1) }); });
+
+    h += `<div style="background:var(--sf2);border-radius:12px;padding:12px;margin-top:12px">
+      <div style="font-size:13px;font-weight:800;color:var(--ac);margin-bottom:2px">${p} Pack</div>
+      <div style="font-size:11px;color:var(--sv);margin-bottom:8px">📸 Este listado subirá ${gallery.length} foto(s):</div>
+      <div style="display:flex;gap:6px;overflow-x:auto;padding-bottom:4px">`;
+    gallery.forEach(function(g, idx){
+      var isCover = idx === 0;
+      h += `<div style="flex:0 0 auto;text-align:center">
+        <img src="${esc(g.url)}" style="width:86px;height:86px;object-fit:contain;border-radius:8px;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px;${isCover ? 'border:2px solid var(--sv)' : 'border:1px solid var(--bd)'}">
+        <div style="font-size:9px;color:${isCover ? 'var(--sv)' : 'var(--mu)'};margin-top:3px;font-weight:${isCover ? '800' : '400'}">${esc(g.tag)}</div>
+      </div>`;
+    });
+    h += `</div>
+      <a href="${esc(imgs.front)}" download="pack-${p}-front.jpg" style="font-size:10px;color:var(--mu);text-decoration:underline;display:inline-block;margin-top:6px">⬇️ descargar portada</a>
     </div>`;
   });
-  h += '</div>';
-  const shared = cur._packImages[PACK_SIZES[0]];
-  if (shared && shared.back) {
-    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px;text-align:center">
-      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:4px">Back (compartida en los 4 packs)</div>
-      <img src="${esc(shared.back)}" style="width:50%;border-radius:6px">
-    </div>`;
-  }
-  if (shared && shared.extras && shared.extras.length){
-    h += `<div style="margin-top:10px;background:var(--sf2);border-radius:10px;padding:8px">
-      <div style="font-size:11px;font-weight:800;color:var(--mu);margin-bottom:6px;text-align:center">Fotos extra (compartidas en los 4 packs)</div>
-      <div style="display:flex;gap:6px;justify-content:center;flex-wrap:wrap">`;
-    shared.extras.forEach(function(u){
-      h += `<img src="${esc(u)}" style="width:70px;height:70px;object-fit:contain;border-radius:6px;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">`;
-    });
-    h += '</div></div>';
-  }
+
   el.innerHTML = h;
 }
 
