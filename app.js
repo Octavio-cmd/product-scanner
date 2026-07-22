@@ -4100,7 +4100,52 @@ function psSendToRegistroSheet(items) {
   }).catch(function(e) { console.warn('Error enviando a Sheet de registro:', e); });
 }
 
-function exportCSV(){
+// ── VALIDACIÓN DE CATEGORÍAS CONTRA eBay (Taxonomy API vía backend) ──
+// Le manda a eBay el TÍTULO + categoría de cada producto. eBay elige la
+// mejor categoría leaf real por título. Devuelve un mapa {categoriaOriginal: leafValida}.
+// Si el backend no responde, devuelve mapa vacío y se usa psSafeCategory de respaldo.
+async function validateCategoriesWithEbay(items) {
+  var map = {};
+  try {
+    // Armar la lista de {category, title} — un producto por SKU único
+    var payload = [];
+    var seen = {};
+    items.forEach(function(it) {
+      var cat = String(it.category || '').trim();
+      var title = String(it.title || '').trim();
+      var key = cat + '|' + title;
+      if (!seen[key] && title) {
+        seen[key] = true;
+        payload.push({ category: cat, title: title });
+      }
+    });
+    if (!payload.length) return map;
+
+    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: payload })
+    });
+    if (!r.ok) { console.warn('leaf-category HTTP', r.status); return map; }
+    var d = await r.json();
+
+    // El backend devuelve results con clave "categoria|titulo" → suggested.
+    // Armamos un mapa por título para aplicarlo con precisión a cada producto.
+    if (d && d.results) {
+      Object.keys(d.results).forEach(function(k) {
+        var res = d.results[k];
+        if (res && res.suggested) {
+          map[k] = String(res.suggested); // clave = "categoria|titulo"
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('validateCategoriesWithEbay error:', e && e.message);
+  }
+  return map;
+}
+
+async function exportCSV(){
   try {
   if(!bulk.length){toast('⚠️ No products');return;}
 
@@ -4220,6 +4265,12 @@ function exportCSV(){
   var COLOR_C     = ['20695','20694','20696','36903','37558','261068','220'];
   var BOOK_C      = ['261186','171228','377','267','2228','69'];
 
+  // ── Validar categorías contra eBay ANTES de armar el CSV ──
+  // eBay elige la mejor categoría leaf real según el título de cada producto.
+  // Esto elimina el Error 87 de raíz. Si el backend no responde, usamos psSafeCategory.
+  toast('🔎 Validando categorías con eBay...');
+  var leafMap = await validateCategoriesWithEbay(bulk);
+
   bulk.forEach(function(it) {
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
@@ -4308,10 +4359,16 @@ function exportCSV(){
       isbnVal = isbnMatch ? isbnMatch[1] : (upcStr.length >= 13 ? upcStr.substring(0,13) : '');
     }
 
+    // Categoría final: 1) la leaf que eBay validó por título (leafMap),
+    //                  2) respaldo psSafeCategory si el backend no respondió.
+    var _catKey = String(it.category || '').trim() + '|' + String(it.title || '').trim();
+    var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
+    var _finalCat = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
+
     lines.push([
       'Add',
       it.sku||'',
-      psSafeCategory(it.category, '31786'),
+      _finalCat,
       cleanTitle,
       '1000',
       descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
