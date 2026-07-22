@@ -3100,21 +3100,29 @@ async function addSplitPacksToCSV(){
     return '';
   };
 
-  // ── PASO A: back y extras son COMPARTIDOS entre todos los packs.
-  //    Subirlos UNA sola vez (no una vez por pack). En paralelo.
+  // ── PASO A: back, extras Y EL FRONT ORIGINAL (1 bote) son COMPARTIDOS entre todos los packs.
+  //    Sirven como fotos de referencia del listado. Subirlos UNA sola vez, en paralelo.
   var sharedBackUrl = '';
   var sharedExtraUrls = [];
+  var sharedFrontUrl = '';   // el FRONT normal (1 bote de frente, sin distintivo de pack)
   var _firstActive = packsToAdd.length ? (cur._packImages && cur._packImages[packsToAdd[0]]) : null;
   if (_firstActive) {
-    toast('📤 Preparando fotos compartidas...');
-    var _sharedJobs = [ ensurePackUrl(_firstActive.back, 'pack-back') ];
+    toast('📤 Preparando fotos de referencia...');
+    // El front original es la foto FRONT que se tomó (con fondo removido).
+    // Se usa como foto de referencia adjunta, ADEMÁS de la imagen del pack.
+    var _frontOrigSrc = cur._frontImg || cur._frontImgLocal || '';
+    var _sharedJobs = [
+      ensurePackUrl(_firstActive.back, 'ref-back'),
+      ensurePackUrl(_frontOrigSrc, 'ref-front')
+    ];
     var _exArr = _firstActive.extras || [];
     for (var _e = 0; _e < _exArr.length; _e++) {
-      _sharedJobs.push(ensurePackUrl(_exArr[_e], 'pack-extra-' + _e));
+      _sharedJobs.push(ensurePackUrl(_exArr[_e], 'ref-extra-' + _e));
     }
     var _sharedResults = await Promise.all(_sharedJobs);
-    sharedBackUrl = _sharedResults[0] || '';
-    sharedExtraUrls = _sharedResults.slice(1).filter(function(x){ return !!x; });
+    sharedBackUrl  = _sharedResults[0] || '';
+    sharedFrontUrl = _sharedResults[1] || '';
+    sharedExtraUrls = _sharedResults.slice(2).filter(function(x){ return !!x; });
   }
 
   // ── PASO B: subir SOLO el front de cada pack ACTIVO, todos en PARALELO.
@@ -3144,16 +3152,21 @@ async function addSplitPacksToCSV(){
     var title = rebuildTitle(baseTitle, p, shade, expDate);
     var price = calcBundlePrice(cur.ebay || {}, p);
 
-    // Armar la foto final: front del pack + back + extras (todo ya subido en paralelo arriba)
+    // Armar las fotos del listado:
+    //  1) PORTADA = imagen del pack (ej: 3-Pack con distintivo azul) → foto principal en eBay
+    //  2) Referencias = FRONT original (1 bote) + BACK + EXTRAS
+    // Todas ya subidas en paralelo arriba. eBay usa la primera como principal.
     var photoUrl = '';
     var fUrl = _frontUrlByPack[p] || '';
     if (fUrl) {
-      var parts = [fUrl];
-      if (sharedBackUrl) parts.push(sharedBackUrl);
-      for (var k2 = 0; k2 < sharedExtraUrls.length; k2++) parts.push(sharedExtraUrls[k2]);
+      var parts = [fUrl];                                  // portada: imagen del pack
+      // Para el 1pk la portada YA es 1 bote de frente → no repetir el front original.
+      if (sharedFrontUrl && p > 1 && sharedFrontUrl !== fUrl) parts.push(sharedFrontUrl);
+      if (sharedBackUrl)  parts.push(sharedBackUrl);       // referencia: back
+      for (var k2 = 0; k2 < sharedExtraUrls.length; k2++) parts.push(sharedExtraUrls[k2]); // extras
       photoUrl = parts.join('|');
     }
-    // Si el front del pack no subió (rate limit/timeout), usar foto genérica del producto
+    // Si la imagen del pack no subió (rate limit/timeout), usar foto genérica del producto
     if (!photoUrl) {
       photoUrl = _genericPhoto;
       if (p > 1) toast('⚠️ ' + p + 'pk: usando foto del producto');
