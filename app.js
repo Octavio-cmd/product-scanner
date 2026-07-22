@@ -1634,15 +1634,23 @@ async function psGenerateAllPacks(){
     const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
     console.log('ImgBB key disponible:', !!imgbbKey);
 
-    // 1) Generar TODAS las imágenes primero — esto es solo Canvas, no usa internet, es instantáneo
+    // Solo generar/subir los packs ACTIVOS (los que NO fueron excluidos con ✕).
+    // El usuario ya eligió las unidades y excluyó packs ANTES de tomar fotos,
+    // así que aquí ya sabemos exactamente cuáles necesita. Esto evita saturar ImgBB.
+    var _activeState = window._splitActive || {1:true,3:true,6:true,12:true};
+    var _activePacks = PACK_SIZES.filter(function(p){ return _activeState[p]; });
+    if (_activePacks.length === 0) _activePacks = PACK_SIZES.slice(); // por si acaso, no dejar vacío
+    console.log('🎯 Packs activos a generar:', _activePacks.join(', '));
+
+    // 1) Generar SOLO las imágenes de packs activos — esto es solo Canvas, instantáneo
     if(statusEl) statusEl.textContent = '🖼️ Dibujando imágenes...';
     const backDataUrl = psGenerateSingleImage(backImg);
     const extraDataUrls = extraImgs.map(function(img){ return psGenerateSingleImage(img); });
     const frontDataUrls = {};
-    PACK_SIZES.forEach(function(p){ frontDataUrls[p] = psGeneratePackImage(frontImg, p); });
-    console.log('✅ ' + (2 + extraDataUrls.length) + ' imágenes dibujadas en canvas (back + extras + 4 packs)');
+    _activePacks.forEach(function(p){ frontDataUrls[p] = psGeneratePackImage(frontImg, p); });
+    console.log('✅ ' + (2 + extraDataUrls.length) + ' imágenes dibujadas en canvas (back + extras + ' + _activePacks.length + ' pack activos)');
 
-    // 2) Subir todas EN PARALELO con timeout de 20s cada una — si una falla o tarda
+    // 2) Subir SOLO packs activos EN PARALELO con timeout de 20s cada una — si una falla o tarda
     // demasiado, se usa la imagen local en su lugar en vez de trabar todo el proceso.
     if(statusEl) statusEl.textContent = '📤 Subiendo imágenes (puede tardar unos segundos)...';
     function uploadWithTimeout(dataUrl, name){
@@ -1659,18 +1667,18 @@ async function psGenerateAllPacks(){
     const results = await Promise.all([
       uploadWithTimeout(backDataUrl, 'pack-back'),
       ...extraDataUrls.map(function(du, i){ return uploadWithTimeout(du, 'pack-extra-'+i); }),
-      ...PACK_SIZES.map(function(p){ return uploadWithTimeout(frontDataUrls[p], 'pack-'+p); })
+      ..._activePacks.map(function(p){ return uploadWithTimeout(frontDataUrls[p], 'pack-'+p); })
     ]);
     const backUrl = results[0];
     const extraUrls = results.slice(1, 1 + extraDataUrls.length);
     const frontResults = results.slice(1 + extraDataUrls.length);
-    PACK_SIZES.forEach(function(p, i){
+    _activePacks.forEach(function(p, i){
       cur._packImages[p] = { front: frontResults[i], back: backUrl, extras: extraUrls };
     });
     console.log('✅ Todo listo:', cur._packImages);
 
     if(statusEl) statusEl.textContent = '';
-    toast('✅ 4 paquetes generados (1, 3, 6, 12)');
+    toast('✅ ' + _activePacks.length + ' paquete(s) generado(s): ' + _activePacks.join(', '));
     renderPackImagesPreview();
   }catch(err){
     console.error('❌ psGenerateAllPacks error:', err);
@@ -2718,7 +2726,7 @@ async function addBulk() {
       }, 4000);
     }
     toast('⏰ Tomó demasiado tiempo — reintenta');
-  }, 45000);
+  }, 30000);
 
   // Protección: si por alguna razón cur se perdió, avisar y salir
   if (!cur) {
@@ -3079,10 +3087,10 @@ async function addSplitPacksToCSV(){
     }
   }
 
-  // Sube una imagen a ImgBB si quedó en base64; devuelve URL http o ''
+  // Sube una imagen a ImgBB si quedó en base64; devuelve URL http o '' (con timeout propio de clUploadPhotoToImgBB = 15s)
   var ensurePackUrl = async function(u, tag){
     if (!u) return '';
-    if (String(u).indexOf('http') === 0) return u;
+    if (String(u).indexOf('http') === 0) return u; // ya es URL, no re-subir
     if (String(u).indexOf('data:') === 0) {
       var kk = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
       if (!kk) return '';
@@ -3091,6 +3099,40 @@ async function addSplitPacksToCSV(){
     }
     return '';
   };
+
+  // ── PASO A: back y extras son COMPARTIDOS entre todos los packs.
+  //    Subirlos UNA sola vez (no una vez por pack). En paralelo.
+  var sharedBackUrl = '';
+  var sharedExtraUrls = [];
+  var _firstActive = packsToAdd.length ? (cur._packImages && cur._packImages[packsToAdd[0]]) : null;
+  if (_firstActive) {
+    toast('📤 Preparando fotos compartidas...');
+    var _sharedJobs = [ ensurePackUrl(_firstActive.back, 'pack-back') ];
+    var _exArr = _firstActive.extras || [];
+    for (var _e = 0; _e < _exArr.length; _e++) {
+      _sharedJobs.push(ensurePackUrl(_exArr[_e], 'pack-extra-' + _e));
+    }
+    var _sharedResults = await Promise.all(_sharedJobs);
+    sharedBackUrl = _sharedResults[0] || '';
+    sharedExtraUrls = _sharedResults.slice(1).filter(function(x){ return !!x; });
+  }
+
+  // ── PASO B: subir SOLO el front de cada pack ACTIVO, todos en PARALELO.
+  //    (packsToAdd ya está filtrado a los packs no excluidos con ✕)
+  var _genericPhoto = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
+  var _frontUrlByPack = {};
+  if (packsToAdd.length) {
+    toast('📤 Subiendo fotos de ' + packsToAdd.length + ' pack(s) activo(s)...');
+    var _frontJobs = packsToAdd.map(function(p){
+      var pi = (cur._packImages && cur._packImages[p]) || null;
+      var frontSrc = pi ? pi.front : '';
+      return ensurePackUrl(frontSrc, 'pack-' + p).then(function(url){
+        return { pack: p, url: url || '' };
+      });
+    });
+    var _frontResults = await Promise.all(_frontJobs);
+    _frontResults.forEach(function(r){ _frontUrlByPack[r.pack] = r.url; });
+  }
 
   for (var i = 0; i < packsToAdd.length; i++) {
     var p = packsToAdd[i];
@@ -3102,42 +3144,21 @@ async function addSplitPacksToCSV(){
     var title = rebuildTitle(baseTitle, p, shade, expDate);
     var price = calcBundlePrice(cur.ebay || {}, p);
 
-    // Foto: imagen de pack generada (front|back|extras) — se suben TODAS si faltan
+    // Armar la foto final: front del pack + back + extras (todo ya subido en paralelo arriba)
     var photoUrl = '';
-    if (cur._packImages && cur._packImages[p]) {
-      var pi = cur._packImages[p];
-      toast('📤 Verificando fotos del ' + p + 'pk...');
-      var fUrl = await ensurePackUrl(pi.front, 'pack-' + p);
-      var bUrl = await ensurePackUrl(pi.back, 'pack-back');
-      var exUrls = [];
-      var exArr = pi.extras || [];
-      for (var k = 0; k < exArr.length; k++) {
-        var eu = await ensurePackUrl(exArr[k], 'pack-extra-' + k);
-        if (eu) exUrls.push(eu);
-      }
-      // Guardar las URLs para no volver a subirlas en el siguiente pack
-      if (fUrl) pi.front = fUrl;
-      if (bUrl) pi.back = bUrl;
-      if (exUrls.length) pi.extras = exUrls;
-      var parts = [fUrl, bUrl].concat(exUrls);
-      var httpParts = [];
-      for (var k2 = 0; k2 < parts.length; k2++) { if (parts[k2]) httpParts.push(parts[k2]); }
-      photoUrl = httpParts.join('|');
-      // Si el front del pack no se pudo subir (ImgBB rate limit), usar foto genérica
-      if (p > 1 && !fUrl) {
-        toast('⚠️ ' + p + 'pk: usando foto genérica del producto');
-        photoUrl = ''; // deja que el fallback de abajo la ponga
-      }
+    var fUrl = _frontUrlByPack[p] || '';
+    if (fUrl) {
+      var parts = [fUrl];
+      if (sharedBackUrl) parts.push(sharedBackUrl);
+      for (var k2 = 0; k2 < sharedExtraUrls.length; k2++) parts.push(sharedExtraUrls[k2]);
+      photoUrl = parts.join('|');
     }
-    if (!photoUrl) photoUrl = cur._bundleImg || cur._imgUrl || cur._frontImg || '';
-    if (photoUrl && String(photoUrl).indexOf('data:') === 0) {
-      var imgbbKey2 = (localStorage.getItem('cl_imgbb_key') || DEFAULT_IMGBB_KEY);
-      if (imgbbKey2) {
-        toast('📤 Subiendo foto del ' + p + 'pk...');
-        var up2 = await clUploadPhotoToImgBB(photoUrl, imgbbKey2, 'pack-' + p);
-        photoUrl = up2 || '';
-      } else { photoUrl = ''; }
+    // Si el front del pack no subió (rate limit/timeout), usar foto genérica del producto
+    if (!photoUrl) {
+      photoUrl = _genericPhoto;
+      if (p > 1) toast('⚠️ ' + p + 'pk: usando foto del producto');
     }
+
 
     bulk.push({
       sku:         sku,
@@ -4054,53 +4075,7 @@ function psSendToRegistroSheet(items) {
   }).catch(function(e) { console.warn('Error enviando a Sheet de registro:', e); });
 }
 
-// ── VALIDACIÓN DE CATEGORÍAS CONTRA eBay (Taxonomy API vía backend) ──
-// Pregunta al backend savvy-ebay-prices por cada categoría única.
-// El backend responde si es leaf; si no, devuelve una leaf sugerida.
-// Resultado: un mapa { categoriaOriginal: categoriaLeafValida }.
-// Si el backend falla, devuelve un mapa vacío y se usa psSafeCategory como respaldo.
-async function validateCategoriesWithEbay(items) {
-  var map = {};
-  try {
-    // Recolecta categorías únicas presentes en el lote
-    var unique = {};
-    items.forEach(function(it) {
-      var c = String(it.category || '').trim();
-      if (c && /^\d+$/.test(c)) unique[c] = true;
-    });
-    var cats = Object.keys(unique);
-    if (!cats.length) return map;
-
-    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ categories: cats })
-    });
-    if (!r.ok) {
-      console.warn('leaf-category HTTP', r.status);
-      return map;
-    }
-    var d = await r.json();
-    // Formato esperado: { "1281": {"leaf": false, "suggested": "20625"}, "31786": {"leaf": true} }
-    if (d && d.results) {
-      cats.forEach(function(c) {
-        var res = d.results[c];
-        if (res && res.leaf === true) {
-          map[c] = c; // ya es leaf válida
-        } else if (res && res.suggested) {
-          map[c] = String(res.suggested);
-          console.log('🔀 Categoría ' + c + ' no es leaf → ' + res.suggested);
-        }
-        // si no hay info, se deja fuera del mapa → psSafeCategory decide
-      });
-    }
-  } catch (e) {
-    console.warn('validateCategoriesWithEbay error:', e && e.message);
-  }
-  return map;
-}
-
-async function exportCSV(){
+function exportCSV(){
   try {
   if(!bulk.length){toast('⚠️ No products');return;}
 
@@ -4220,12 +4195,6 @@ async function exportCSV(){
   var COLOR_C     = ['20695','20694','20696','36903','37558','261068','220'];
   var BOOK_C      = ['261186','171228','377','267','2228','69'];
 
-  // Validar TODAS las categorías del lote contra eBay ANTES de armar el CSV.
-  // Si eBay dice que una categoría no es leaf, se reemplaza por la leaf sugerida.
-  // Esto elimina el Error 87 de raíz. Si el backend no responde, seguimos con psSafeCategory.
-  toast('🔎 Validando categorías con eBay...');
-  var leafMap = await validateCategoriesWithEbay(bulk);
-
   bulk.forEach(function(it) {
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
@@ -4314,14 +4283,10 @@ async function exportCSV(){
       isbnVal = isbnMatch ? isbnMatch[1] : (upcStr.length >= 13 ? upcStr.substring(0,13) : '');
     }
 
-    // Categoría final: 1) lo que eBay validó como leaf (leafMap), 2) respaldo psSafeCategory
-    var _origCat = String(it.category || '').trim();
-    var _finalCat = leafMap[_origCat] || psSafeCategory(it.category, '31786');
-
     lines.push([
       'Add',
       it.sku||'',
-      _finalCat,
+      psSafeCategory(it.category, '31786'),
       cleanTitle,
       '1000',
       descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
