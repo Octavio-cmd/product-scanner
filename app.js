@@ -3224,6 +3224,14 @@ async function addSplitPacksToCSV(){
   for (var i = 0; i < packsToAdd.length; i++) {
     var p = packsToAdd[i];
     var sku = makeSKU(cur.brand, cur.upc, p, cur.title);
+    // Peso total del paquete (unidad × pack + caja) para eBay/ShipStation.
+    // getUnitWeightLb() lee las casillas lb/oz. Si no hay peso, queda 0.
+    var _unitLb = (typeof getUnitWeightLb === 'function') ? getUnitWeightLb() : 0;
+    var _pkgLb = (_unitLb > 0 && typeof packTotalWeightLb === 'function') ? packTotalWeightLb(_unitLb, p) : 0;
+    // Desglose en lb enteras + oz para el CSV de eBay (WeightMajor / WeightMinor)
+    var _wMajor = _pkgLb > 0 ? Math.floor(_pkgLb) : 0;
+    var _wMinor = _pkgLb > 0 ? Math.round((_pkgLb - _wMajor) * 16) : 0;
+    if (_wMinor === 16) { _wMajor += 1; _wMinor = 0; }
     var dup = false;
     for (var j = 0; j < bulk.length; j++) { if (bulk[j].sku === sku) { dup = true; break; } }
     if (dup) { skippedDup++; continue; }
@@ -3267,6 +3275,9 @@ async function addSplitPacksToCSV(){
       quantity:    split[p].listings,
       photo:       photoUrl,
       bundleImg:   photoUrl,
+      weightLb:    _pkgLb,        // peso total decimal (para la Sheet y referencia)
+      weightMajor: _wMajor,       // libras enteras (para eBay CSV / ShipStation)
+      weightMinor: _wMinor,       // onzas (para eBay CSV / ShipStation)
       scannedBy:   SAVVY_CURRENT_USER || 'unknown'
     });
     added++;
@@ -4151,6 +4162,7 @@ function psSendToRegistroSheet(items) {
       unidades: p * q,
       listados: q,
       precio: it.price || '',
+      peso: (it.weightLb ? Number(it.weightLb).toFixed(2) : ''),
       expDate: it.expDate || '',
       ubicacion: it.location || '',
       fotos: it.bundleImg || it.photo || '',
@@ -4256,7 +4268,8 @@ async function exportCSV(){
     'ShippingProfileName','ReturnProfileName','PaymentProfileName',
     '*C:Brand','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
-    'C:Expiration Date','C:Dosage'
+    'C:Expiration Date','C:Dosage',
+    'WeightMajor','WeightMinor'
   ];
 
   var lines = ['Info,Version=1.0.0,Template=fx_category_template_EBAY_US', HDR.join(',')];
@@ -4455,7 +4468,9 @@ async function exportCSV(){
       authorVal,
       isbnVal,
       expDateVal,
-      dosageVal
+      dosageVal,
+      (it.weightMajor != null ? String(it.weightMajor) : ''),
+      (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
   });
 
