@@ -2988,6 +2988,16 @@ function renderSplitCalculatorHTML(ebay){
       <div class="extra-label">Unidades totales en este envío</div>
       <input class="extra-input" id="split-total-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="ej. 1000" oninput="updateSplitCalc()">
     </div>
+    <div class="extra-field" style="margin-top:10px">
+      <div class="extra-label">⚖️ Peso de UNA unidad (como dice la báscula)</div>
+      <div style="display:flex;gap:8px;align-items:center">
+        <input class="extra-input" id="split-weight-lb" type="text" inputmode="decimal" placeholder="lb" oninput="updateSplitCalc()" style="flex:1;text-align:center">
+        <span style="color:var(--mu);font-size:13px;font-weight:700">lb</span>
+        <input class="extra-input" id="split-weight-oz" type="text" inputmode="decimal" placeholder="oz" oninput="updateSplitCalc()" style="flex:1;text-align:center">
+        <span style="color:var(--mu);font-size:13px;font-weight:700">oz</span>
+      </div>
+      <div style="font-size:11px;color:var(--mu);margin-top:5px">Se suma ½ lb de caja por paquete. El envío es un estimado (promedio USPS/UPS a todo EE.UU.).</div>
+    </div>
     <div style="margin-top:8px;font-size:12px;color:var(--mu)">
       Demanda detectada: <strong id="split-tier-label" style="color:var(--ac)"></strong>
       (${soldCount} vendidos en 90 días)
@@ -2995,6 +3005,52 @@ function renderSplitCalculatorHTML(ebay){
     </div>
     <div id="split-results" style="margin-top:12px"></div>
   </div>`;
+}
+
+// ── PESO Y ESTIMADO DE ENVÍO (Parte A: solo pantalla, no toca el CSV) ──
+// Constante: peso de caja/empaque que se suma a CADA paquete
+var BOX_WEIGHT_LB = 0.5;
+
+// Lee el peso de una unidad (lb + oz) de los inputs → devuelve libras decimales
+function getUnitWeightLb(){
+  var lb = parseFloat(String(($('split-weight-lb') || {}).value || '').replace(/[^0-9.]/g,'')) || 0;
+  var oz = parseFloat(String(($('split-weight-oz') || {}).value || '').replace(/[^0-9.]/g,'')) || 0;
+  return lb + (oz / 16);
+}
+
+// Peso total de un paquete = (peso unidad × cantidad) + caja
+function packTotalWeightLb(unitLb, packSize){
+  if (unitLb <= 0) return 0;
+  return (unitLb * packSize) + BOX_WEIGHT_LB;
+}
+
+// Estimado de costo de envío por peso — promedio USPS Ground Advantage / UPS Ground
+// a zona media de EE.UU. Son APROXIMADOS para decidir si el pack conviene.
+// Fáciles de ajustar: solo cambia los números de la tabla.
+function estimateShippingCost(totalLb){
+  if (totalLb <= 0) return 0;
+  var t = totalLb;
+  if (t <= 1)  return 6;
+  if (t <= 2)  return 8;
+  if (t <= 3)  return 10;
+  if (t <= 5)  return 13;
+  if (t <= 7)  return 16;
+  if (t <= 10) return 20;
+  if (t <= 15) return 26;
+  if (t <= 20) return 32;
+  // más de 20 lb: ~$1.5 por libra adicional sobre la base de 20
+  return Math.round(32 + (t - 20) * 1.5);
+}
+
+// Formatea libras a "X lb Y oz" para mostrar bonito
+function fmtWeight(totalLb){
+  if (totalLb <= 0) return '—';
+  var lb = Math.floor(totalLb);
+  var oz = Math.round((totalLb - lb) * 16);
+  if (oz === 16) { lb += 1; oz = 0; }
+  if (lb === 0) return oz + ' oz';
+  if (oz === 0) return lb + ' lb';
+  return lb + ' lb ' + oz + ' oz';
 }
 
 function updateSplitCalc(){
@@ -3018,18 +3074,29 @@ function updateSplitCalc(){
   if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
   const active = window._splitActive;
   const split = computeSplit(total, tierKey, active);
+  const unitLb = getUnitWeightLb();  // peso de una unidad (0 si no lo han puesto)
   let rows = '';
   [1,3,6,12].forEach(function(p){
     const d = split[p];
     const isOn = !!active[p];
     const inSb = !!(window._psSbExisting && window._psSbExisting[p]);
+    // Peso y envío estimado de este pack (solo si hay peso de unidad)
+    let shipTag = '';
+    if (unitLb > 0) {
+      const wLb = packTotalWeightLb(unitLb, p);
+      const ship = estimateShippingCost(wLb);
+      shipTag = `<div style="font-size:11px;color:var(--mu);margin-top:2px">⚖️ ${fmtWeight(wLb)} · 📦 envío ~$${ship}</div>`;
+    }
     if (isOn) {
       const sbTag = inSb ? '<span style="font-size:10px;color:#ffb300;border:1px solid rgba(255,179,0,.45);border-radius:6px;padding:2px 6px;margin-left:6px;white-space:nowrap">✅ En Sellbrite</span>' : '';
-      rows += `<div style="display:flex;justify-content:space-between;align-items:center;padding:9px 0;border-bottom:1px solid var(--bd)">
-        <div style="font-weight:800">${p}pk${sbTag}</div>
-        <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
-        <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
-        <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
+      rows += `<div style="padding:9px 0;border-bottom:1px solid var(--bd)">
+        <div style="display:flex;justify-content:space-between;align-items:center">
+          <div style="font-weight:800">${p}pk${sbTag}</div>
+          <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
+          <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
+          <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
+        </div>
+        ${shipTag}
       </div>`;
     } else {
       const exTxt = inSb ? '<span style="color:var(--sv);font-weight:700">✅ Ya en Sellbrite</span>' : 'excluido';
