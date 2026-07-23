@@ -143,6 +143,7 @@ const SAVVY_USERS = {
   "danny":   "a79938ab5392c8024dff98a44cf776f4cbbb47be9ff78e4997a4920ec262b320",
   "angelo":  "5f20cd035f6330b88fdd8abd1455cf80493be4640912c35a00905c9d610cee9d",
   "ernesto": "881b476539c517af8fbbaddb0d754fb50de8d43cf554d85bfb7e79c0e4bad8c3",
+  "nancy":   "9a7b416aa4edea520092d8c8fcbe82cd10c58b7df8f4ed414bcc251c1ae52669",
 };
 
 let SAVVY_CURRENT_USER = null;
@@ -4268,7 +4269,7 @@ async function exportCSV(){
     'ShippingProfileName','ReturnProfileName','PaymentProfileName',
     '*C:Brand','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
-    'C:Expiration Date','C:Dosage',
+    'C:Expiration Date','C:Dosage','C:Shade',
     'WeightMajor','WeightMinor'
   ];
 
@@ -4469,6 +4470,7 @@ async function exportCSV(){
       isbnVal,
       expDateVal,
       dosageVal,
+      (it.shade || ''),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
