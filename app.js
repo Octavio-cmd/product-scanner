@@ -420,6 +420,8 @@ function catId(n){
   if(/usb.c cable|lightning cable|iphone cable|android charger|phone charger|wireless charger|power bank|charging pad/i.test(t))return'44867';
   if(/earphone|earbuds|airpod|galaxy bud|wireless earphone|in.ear headphone/i.test(t))return'112529';
   if(/headphone|over.ear|on.ear|noise cancelling headphone/i.test(t))return'112529';
+  if(/bitty boomer|bittyboomers/i.test(t))return'14969';
+  if(/mini speaker|pocket speaker|character speaker|collectible speaker/i.test(t))return'14969';
   if(/bluetooth speaker|portable speaker|wireless speaker|jbl|bose speaker/i.test(t))return'14969';
   if(/phone case|iphone case|samsung case|screen protector|tempered glass|tablet case|ipad case/i.test(t))return'9394';
   if(/led bulb|smart bulb|light bulb|cfl bulb|light strip|led strip/i.test(t))return'48619';
@@ -4535,14 +4537,16 @@ async function exportCSV(){
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
-    if (/bluetooth/i.test(_tl))       connectivityVal = 'Bluetooth';
-    else if (/wireless/i.test(_tl))   connectivityVal = 'Wireless';
-    else if (/wi-fi|wifi/i.test(_tl)) connectivityVal = 'Wi-Fi';
-    else if (/usb-c|usb c/i.test(_tl))connectivityVal = 'USB-C';
-    else if (/\busb\b/i.test(_tl))    connectivityVal = 'USB';
-    else if (/wired/i.test(_tl))      connectivityVal = 'Wired';
-    else if (/nfc/i.test(_tl))        connectivityVal = 'NFC';
-    else if (/aux|3\.5mm/i.test(_tl)) connectivityVal = '3.5mm Audio Jack';
+    if (/bitty boomer|bittyboomers/i.test(_tl))        connectivityVal = 'Bluetooth';
+    else if (/mini speaker|pocket speaker|character speaker|collectible speaker/i.test(_tl)) connectivityVal = 'Bluetooth';
+    else if (/bluetooth/i.test(_tl))       connectivityVal = 'Bluetooth';
+    else if (/wireless/i.test(_tl))        connectivityVal = 'Wireless';
+    else if (/wi-fi|wifi/i.test(_tl))      connectivityVal = 'Wi-Fi';
+    else if (/usb-c|usb c/i.test(_tl))     connectivityVal = 'USB-C';
+    else if (/\busb\b/i.test(_tl))         connectivityVal = 'USB';
+    else if (/wired/i.test(_tl))           connectivityVal = 'Wired';
+    else if (/nfc/i.test(_tl))             connectivityVal = 'NFC';
+    else if (/aux|3\.5mm/i.test(_tl))      connectivityVal = '3.5mm Audio Jack';
 
     // Extract dosage from title for health products
     var EXP_CATS_D = ['67169','180959','75037','51227','57041','2984','67167','105070'];
