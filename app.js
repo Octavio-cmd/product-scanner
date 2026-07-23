@@ -1251,11 +1251,21 @@ function clCompressImage(file, maxW=900, quality=0.75) {
     reader.onload = e => {
       const img = new Image();
       img.onload = () => {
-        const ratio = Math.min(maxW/img.width, maxW/img.height, 1);
-        const canvas = document.createElement('canvas');
-        canvas.width = Math.round(img.width * ratio);
-        canvas.height = Math.round(img.height * ratio);
-        canvas.getContext('2d').drawImage(img, 0, 0, canvas.width, canvas.height);
+        // Calcular las dimensiones manteniendo proporciones correctas.
+        // maxW aplica al lado MÁS LARGO (no solo al ancho), para que
+        // fotos verticales del iPhone no queden reducidas de más.
+        var w = img.width;
+        var h = img.height;
+        var longest = Math.max(w, h);
+        var ratio = longest > maxW ? maxW / longest : 1;
+        var canvas = document.createElement('canvas');
+        canvas.width  = Math.round(w * ratio);
+        canvas.height = Math.round(h * ratio);
+        var ctx = canvas.getContext('2d');
+        // imageSmoothingQuality 'high' mejora la nitidez al reducir
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
         resolve(canvas.toDataURL('image/jpeg', quality));
       };
       img.src = e.target.result;
@@ -1384,10 +1394,15 @@ async function psRemoveBackgroundPipeline(file, onStatus){
 }
 
 async function psCapturePhoto(slotId){
+  // CRÍTICO para Safari iPhone: el input.click() debe dispararse INMEDIATAMENTE
+  // desde el evento del usuario — cualquier await previo rompe la conexión y
+  // Safari bloquea la apertura del menú de cámara/carrete/archivo.
   var input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
-  // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto
+  // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto / Archivo
+  // (las tres opciones que necesitamos)
+
   input.onchange = async function(e){
     var file = e.target.files[0];
     if(!file) return;
@@ -1413,10 +1428,36 @@ async function psCapturePhoto(slotId){
       toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
     }catch(err){
       console.error('psCapturePhoto error:', err);
-      toast('❌ Error: ' + err.message);
-      if(slot) slot.innerHTML = '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+      // ── FALLBACK ROBUSTO: si rembg o ImgBB fallan, usar la foto original
+      // comprimida sin fondo removido. El proceso NO se detiene.
+      toast('⚠️ rembg falló — usando foto original (sin fondo removido)');
+      try {
+        var fallbackUrl = await clCompressImage(file, 1600, 0.92);
+        // Intentar subir a ImgBB la foto original
+        var imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+        var uploadedFallback = fallbackUrl;
+        if (imgbbKey) {
+          try {
+            var up = await clUploadPhotoToImgBB(fallbackUrl, imgbbKey, 'photo-fallback');
+            if (up) uploadedFallback = up;
+          } catch(e2) { /* si ImgBB también falla, usamos el dataUrl local */ }
+        }
+        if (cur) {
+          if (slotId === 'front') { cur._frontImg = uploadedFallback; cur._frontImgLocal = fallbackUrl; }
+          else { cur._backImg = uploadedFallback; cur._backImgLocal = fallbackUrl; }
+        }
+        if (slot) {
+          slot.innerHTML = '<img src="' + uploadedFallback + '" style="width:100%;height:100%;object-fit:contain;border-radius:8px"><div style="font-size:9px;color:#ff9800;text-align:center;margin-top:2px">⚠️ sin rembg</div>';
+        }
+        updatePackGenButtonState();
+      } catch(err2) {
+        // Si todo falla, dejar el slot clickeable para intentar de nuevo
+        if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div style="font-size:24px">📷</div><div style="font-size:10px;color:#ff5252">Error — toca para reintentar</div></div>';
+      }
     }
   };
+
+  // PRIMERO el click — luego nada más. Safari requiere que el click sea inmediato.
   input.click();
 }
 
@@ -1454,9 +1495,21 @@ function psAddExtraPhoto(){
       toast('✅ Foto extra ' + (idx+1) + ' lista');
     }catch(err){
       console.error('psAddExtraPhoto error:', err);
-      toast('❌ Error: ' + err.message);
-      cur._extraImgs.splice(idx, 1); // quitar el slot fallido
-      renderExtraPhotosUI();
+      // FALLBACK: usar foto original sin fondo removido
+      toast('⚠️ rembg falló — usando foto original');
+      try {
+        var fallbackUrl = await clCompressImage(file, 1600, 0.92);
+        var imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+        var uploadedFb = fallbackUrl;
+        if (imgbbKey) {
+          try { var up = await clUploadPhotoToImgBB(fallbackUrl, imgbbKey, 'extra-fallback'); if(up) uploadedFb = up; } catch(e2){}
+        }
+        cur._extraImgs[idx] = { img: uploadedFb, local: fallbackUrl, loading: false };
+        renderExtraPhotosUI();
+      } catch(err2) {
+        cur._extraImgs.splice(idx, 1); // solo quitar si todo falló
+        renderExtraPhotosUI();
+      }
     }
   };
   input.click();
@@ -1484,7 +1537,7 @@ function renderExtraPhotosUI(){
     }
   });
   if(extras.length < MAX_EXTRA_PHOTOS){
-    h += '<div onclick="psAddExtraPhoto()" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:28px;color:var(--mu)">+</div>';
+    h += '<div onclick="psAddExtraPhoto()" ontouchend="event.preventDefault();psAddExtraPhoto()" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;font-size:28px;color:var(--mu)">+</div>';
   }
   h += '</div>';
   h += '<div style="font-size:10px;color:var(--mu);margin-top:4px">'+extras.length+'/'+MAX_EXTRA_PHOTOS+' fotos extra (opcional) — mismo proceso que BACK</div>';
@@ -3872,11 +3925,17 @@ function renderResult(r){
     <div style="display:flex;gap:10px">
       <div style="flex:1">
         <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">FRONT${r._frontImg?' ✅':''}</div>
-        <div id="ps-slot-front" onclick="psCapturePhoto('front')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${frontThumb}</div>
+        <div id="ps-slot-front" 
+          onclick="psCapturePhoto('front')" 
+          ontouchend="event.preventDefault();psCapturePhoto('front')" 
+          style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${frontThumb}</div>
       </div>
       <div style="flex:1">
         <div style="font-size:11px;color:var(--mu);text-align:center;margin-bottom:4px">BACK${r._backImg?' ✅':''}</div>
-        <div id="ps-slot-back" onclick="psCapturePhoto('back')" style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
+        <div id="ps-slot-back" 
+          onclick="psCapturePhoto('back')" 
+          ontouchend="event.preventDefault();psCapturePhoto('back')" 
+          style="aspect-ratio:1;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;cursor:pointer;overflow:hidden">${backThumb}</div>
       </div>
     </div>
     <div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">
