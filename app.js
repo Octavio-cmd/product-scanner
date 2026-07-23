@@ -4422,7 +4422,7 @@ async function exportCSV(){
     'ShippingProfileName','ReturnProfileName','PaymentProfileName',
     '*C:Brand','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
-    'C:Expiration Date','C:Dosage','C:Shade',
+    'C:Expiration Date','C:Dosage','C:Shade','C:Connectivity',
     'WeightMajor','WeightMinor'
   ];
 
@@ -4531,6 +4531,19 @@ async function exportCSV(){
     var isbnVal    = '';
     var expDateVal = it.expDate || '';
     var dosageVal  = '';
+    var connectivityVal = '';
+
+    // Detectar Connectivity del título automáticamente
+    var _tl = (it.title || '').toLowerCase();
+    if (/bluetooth/i.test(_tl))       connectivityVal = 'Bluetooth';
+    else if (/wireless/i.test(_tl))   connectivityVal = 'Wireless';
+    else if (/wi-fi|wifi/i.test(_tl)) connectivityVal = 'Wi-Fi';
+    else if (/usb-c|usb c/i.test(_tl))connectivityVal = 'USB-C';
+    else if (/\busb\b/i.test(_tl))    connectivityVal = 'USB';
+    else if (/wired/i.test(_tl))      connectivityVal = 'Wired';
+    else if (/nfc/i.test(_tl))        connectivityVal = 'NFC';
+    else if (/aux|3\.5mm/i.test(_tl)) connectivityVal = '3.5mm Audio Jack';
+
     // Extract dosage from title for health products
     var EXP_CATS_D = ['67169','180959','75037','51227','57041','2984','67167','105070'];
     if (EXP_CATS_D.includes(String(it.category))) {
@@ -4560,6 +4573,15 @@ async function exportCSV(){
     if (APPLIANCE_C.includes(String(it.category))) {
       var titleWords = (it.title||'').split(/,/)[0].trim();
       modelVal = brandFix ? titleWords.replace(new RegExp('^'+brandFix+'\\s*','i'),'').trim().substring(0,65) : titleWords.substring(0,65);
+    }
+
+    // Model — también requerido para electrónicos (cualquier producto con Connectivity)
+    if (!modelVal && connectivityVal) {
+      var titleParts = (it.title || '').split(/[,\-|]/)[0].trim();
+      modelVal = brandFix
+        ? titleParts.replace(new RegExp('^' + brandFix + '\\s*', 'i'), '').trim().substring(0, 65)
+        : titleParts.substring(0, 65);
+      if (!modelVal) modelVal = 'See product description';
     }
 
     // Color — required for mugs, kitchenware
@@ -4624,6 +4646,7 @@ async function exportCSV(){
       expDateVal,
       dosageVal,
       (it.shade || ''),
+      connectivityVal,
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
