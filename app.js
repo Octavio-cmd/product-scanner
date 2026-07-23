@@ -3118,6 +3118,64 @@ function fmtWeight(totalLb){
   return lb + ' lb ' + oz + ' oz';
 }
 
+// ── Control manual de listados por pack ───────────────────────────────
+// Guarda cuántos listados quiere el usuario para cada pack.
+// null = usar el sugerido por el sistema automático.
+if (!window._splitManual) window._splitManual = {};
+
+function updateManualListings(p, val) {
+  var n = parseInt(String(val).replace(/\D/g,''), 10);
+  if (isNaN(n) || n < 0) n = 0;
+  window._splitManual[p] = n;
+  // Recalcular el footer en tiempo real sin re-renderizar toda la tabla
+  refreshSplitFooter();
+}
+
+function getSplitListings(split, p) {
+  // Si hay valor manual para este pack, usarlo; si no, usar el sugerido
+  var m = window._splitManual[p];
+  if (m != null) return m;
+  return (split[p] && split[p].listings) || 0;
+}
+
+function refreshSplitFooter() {
+  var inp = $('split-total-input');
+  var total = parseInt(String((inp && inp.value) || '0').replace(/\D/g,''), 10) || 0;
+  var active = window._splitActive || {};
+  var card = $('split-calc-card');
+  var tierKey = (card && (card.dataset.tier || card.dataset.autoTier)) || 'media';
+  var split = computeSplit(total, tierKey, active);
+
+  var usedUnits = 0;
+  var activeCnt = 0;
+  PACK_SIZES.forEach(function(p) {
+    if (!active[p]) return;
+    var listings = getSplitListings(split, p);
+    usedUnits += listings * p;
+    if (listings > 0) activeCnt++;
+    // Actualizar también el display de unidades en la fila
+    var unitsEl = document.getElementById('split-units-' + p);
+    if (unitsEl) unitsEl.textContent = (listings * p) + ' unidades';
+  });
+
+  var diff = usedUnits - total;
+  var footerEl = document.getElementById('split-footer');
+  if (footerEl) {
+    var color = diff === 0 ? 'var(--sv)' : '#e74c3c';
+    var msg = '';
+    if (diff === 0)      msg = '✅ Total: ' + usedUnits + '/' + total + ' unidades — ¡Cuadra perfecto!';
+    else if (diff > 0)   msg = '⚠️ Total: ' + usedUnits + '/' + total + ' unidades — Sobran ' + diff;
+    else                 msg = '⚠️ Total: ' + usedUnits + '/' + total + ' unidades — Falta ' + Math.abs(diff);
+    footerEl.innerHTML = '<div style="font-size:12px;color:' + color + ';margin-top:8px;font-weight:700">' + msg + '</div>';
+  }
+  var noteEl = document.getElementById('split-note');
+  if (noteEl) {
+    noteEl.innerHTML = activeCnt > 0
+      ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCnt + ' pack(s) activos con sus fotos</div>'
+      : '';
+  }
+}
+
 function updateSplitCalc(){
   const inp = $('split-total-input');
   const card = $('split-calc-card');
@@ -3154,12 +3212,22 @@ function updateSplitCalc(){
     }
     if (isOn) {
       const sbTag = inSb ? '<span style="font-size:10px;color:#ffb300;border:1px solid rgba(255,179,0,.45);border-radius:6px;padding:2px 6px;margin-left:6px;white-space:nowrap">✅ En Sellbrite</span>' : '';
+      const listings = getSplitListings(split, p);
       rows += `<div style="padding:9px 0;border-bottom:1px solid var(--bd)">
-        <div style="display:flex;justify-content:space-between;align-items:center">
-          <div style="font-weight:800">${p}pk${sbTag}</div>
-          <div style="color:var(--mu);font-size:13px">${d.units} unidades</div>
-          <div style="color:var(--ac);font-weight:800">${d.listings} listados</div>
-          <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer;margin-left:8px">✕</button>
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:8px">
+          <div style="font-weight:800;min-width:36px">${p}pk${sbTag}</div>
+          <div id="split-units-${p}" style="color:var(--mu);font-size:13px;min-width:80px">${listings * p} unidades</div>
+          <div style="display:flex;align-items:center;gap:4px">
+            <input
+              id="split-manual-${p}"
+              type="text" inputmode="numeric"
+              value="${listings}"
+              oninput="updateManualListings(${p}, this.value)"
+              style="width:52px;padding:6px 4px;text-align:center;background:var(--sf2);border:2px solid var(--ac);border-radius:8px;color:#fff;font-size:16px;font-weight:900"
+            >
+            <span style="font-size:11px;color:var(--mu)">listados</span>
+          </div>
+          <button onclick="toggleSplitPack(${p})" ontouchend="event.preventDefault();toggleSplitPack(${p})" style="background:rgba(231,76,60,.15);border:1px solid rgba(231,76,60,.5);border-radius:8px;padding:5px 10px;color:#e74c3c;font-size:13px;font-weight:800;cursor:pointer">✕</button>
         </div>
         ${shipTag}
       </div>`;
@@ -3172,15 +3240,27 @@ function updateSplitCalc(){
       </div>`;
     }
   });
+  // Footer dinámico con IDs para actualización en tiempo real
   const assigned = total - (split.leftover || 0);
-  let footer = `<div style="font-size:11px;color:var(--mu);margin-top:8px">✅ Total repartido: ${assigned} unidades`;
-  if (split.leftover > 0) footer += ` — <span style="color:#e74c3c">⚠️ ${split.leftover} sin asignar (incluye el 1pk para usarlas)</span>`;
-  footer += `</div>`;
-  // Nota: los packs activos se agregan con el botón "ADD TO CSV" de abajo
-  var activeCnt = PACK_SIZES.filter(function(p){ return active[p] && split[p].listings > 0; }).length;
-  var note = activeCnt > 0
-    ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCnt + ' pack(s) activos con sus fotos</div>'
+  var usedUnits = 0;
+  var activeCntFinal = 0;
+  PACK_SIZES.forEach(function(p) {
+    if (!active[p]) return;
+    var listings = getSplitListings(split, p);
+    usedUnits += listings * p;
+    if (listings > 0) activeCntFinal++;
+  });
+  var diff = usedUnits - total;
+  var footerColor = diff === 0 ? 'var(--sv)' : (total === 0 ? 'var(--mu)' : '#e74c3c');
+  var footerMsg = total === 0 ? 'Ingresa las unidades totales arriba'
+    : diff === 0 ? '✅ Total: ' + usedUnits + '/' + total + ' unidades — ¡Cuadra perfecto!'
+    : diff > 0   ? '⚠️ Total: ' + usedUnits + '/' + total + ' unidades — Sobran ' + diff
+    :              '⚠️ Total: ' + usedUnits + '/' + total + ' unidades — Falta ' + Math.abs(diff);
+  let footer = `<div id="split-footer"><div style="font-size:12px;color:${footerColor};margin-top:8px;font-weight:700">${footerMsg}</div></div>`;
+  var noteHtml = activeCntFinal > 0
+    ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCntFinal + ' pack(s) activos con sus fotos</div>'
     : '';
+  let note = `<div id="split-note">${noteHtml}</div>`;
   out.innerHTML = rows + footer + note;
 }
 
@@ -3188,6 +3268,8 @@ function updateSplitCalc(){
 function toggleSplitPack(p){
   if (!window._splitActive) window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
   window._splitActive[p] = !window._splitActive[p];
+  // Limpiar ajuste manual del pack que se excluyó
+  if (!window._splitActive[p] && window._splitManual) delete window._splitManual[p];
   updateSplitCalc();
 }
 
@@ -3209,7 +3291,7 @@ async function addSplitPacksToCSV(){
   var baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
 
   var added = 0, skippedDup = 0;
-  var packsToAdd = PACK_SIZES.filter(function(p){ return active[p] && split[p].listings > 0; });
+  var packsToAdd = PACK_SIZES.filter(function(p){ return active[p] && getSplitListings(split, p) > 0; });
 
   // ── VALIDACIÓN: los packs >1 DEBEN tener su imagen de pack generada ──
   // Si ImgBB falló y no se pudo subir la imagen del pack, avisar con toast
@@ -3337,7 +3419,7 @@ async function addSplitPacksToCSV(){
       description: descToEbayHTML(descForPack(cur._description || cur.description, p)) || '',
       location:    location,
       packs:       p,
-      quantity:    split[p].listings,
+      quantity:    getSplitListings(split, p),
       photo:       photoUrl,
       bundleImg:   photoUrl,
       weightLb:    _pkgLb,        // peso total decimal (para la Sheet y referencia)
@@ -4070,6 +4152,7 @@ function renderResult(r){
     var si=document.getElementById('shade-input');
     if(si&&cur&&cur._shade) si.value=cur._shade;
     window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
+    window._splitManual = {}; // limpiar ajustes manuales del producto anterior
     // Respetar packs ya detectados en Sellbrite (auto-excluidos)
     var _sbEx = window._psSbExisting || {};
     PACK_SIZES.forEach(function(pn){ if (_sbEx[pn]) window._splitActive[pn] = false; });
@@ -4959,7 +5042,19 @@ async function locOpen(target) {
 
   ov.innerHTML =
     '<div style="color:#fff;font-size:20px;font-weight:900;text-align:center">📍 Warehouse Location</div>' +
-    '<div style="color:#aaa;font-size:13px;text-align:center;margin-bottom:8px">Escribe la ubicación del producto</div>' +
+    '<div style="color:#aaa;font-size:13px;text-align:center;margin-bottom:4px">Escanea el código o escribe la ubicación</div>' +
+
+    // ── CÁMARA QR/BARCODE (oculta por defecto, se muestra al tocar el botón) ──
+    '<div id="loc-cam-wrap" style="display:none;width:100%;max-width:420px">' +
+      '<div id="loc-qr-video" style="width:100%;border-radius:12px;overflow:hidden;background:#111;min-height:180px"></div>' +
+      '<button id="loc-cam-stop" style="width:100%;max-width:420px;padding:12px;background:transparent;color:#ff9800;border:2px solid #ff9800;border-radius:12px;font-size:14px;font-weight:700;cursor:pointer;margin-top:8px">✕ Cerrar cámara</button>' +
+    '</div>' +
+
+    // ── BOTÓN ESCANEAR ──
+    '<button id="loc-scan-btn" style="width:100%;max-width:420px;padding:16px;background:#1565c0;color:#fff;border:none;border-radius:12px;font-size:16px;font-weight:900;cursor:pointer">📷 ESCANEAR CÓDIGO DE BARRAS</button>' +
+
+    // ── INPUT MANUAL ──
+    '<div style="width:100%;max-width:420px;text-align:center;color:#555;font-size:12px">— o escribe manualmente —</div>' +
     '<input id="loc-input-v2" type="text" placeholder="Ej: K/P6, RN3:S3:4" autocapitalize="characters" autocomplete="off" spellcheck="false" style="width:100%;max-width:420px;padding:20px;border-radius:12px;border:2px solid #00e676;background:#111;color:#fff;font-size:22px;text-align:center;font-weight:700">' +
     '<button id="loc-ok-v2" style="width:100%;max-width:420px;padding:20px;background:#00e676;color:#000;border:none;border-radius:12px;font-size:18px;font-weight:900;cursor:pointer">✔ GUARDAR UBICACIÓN</button>' +
     '<button id="loc-cancel-v2" style="width:100%;max-width:420px;padding:16px;background:transparent;color:#ff5252;border:2px solid #ff5252;border-radius:12px;font-size:15px;font-weight:700;cursor:pointer">✕ CANCELAR</button>';
@@ -4998,6 +5093,65 @@ async function locOpen(target) {
   };
   cnBtn.addEventListener('touchend', cancelMe);
   cnBtn.addEventListener('click', cancelMe);
+
+  // ── BOTÓN ESCANEAR: abre la cámara con html5-qrcode ──
+  var scanBtn = document.getElementById('loc-scan-btn');
+  var camWrap = document.getElementById('loc-cam-wrap');
+  var camStop = document.getElementById('loc-cam-stop');
+  var _locScannerActive = false;
+
+  var startLocScan = function(e){
+    if(e && e.preventDefault) e.preventDefault();
+    var age = Date.now() - parseInt(ov.dataset.openedAt || '0', 10);
+    if (age < 500) return;
+    if (_locScannerActive) return;
+    _locScannerActive = true;
+    camWrap.style.display = 'block';
+    scanBtn.style.display = 'none';
+    if (window._psDebug) window._psDebug('📷 LOC: iniciando cámara...');
+    // Usar el mismo savvyStartScan que usa el scanner de UPC
+    if (typeof savvyStartScan === 'function') {
+      savvyStartScan('loc-qr-video', function(decoded){
+        if (window._psDebug) window._psDebug('📍 LOC: código leído: ' + decoded);
+        // Código leído: mostrar en el input y guardar automático
+        var v = String(decoded || '').trim();
+        if (v) {
+          // Detener cámara
+          if (typeof savvyStopScan === 'function') savvyStopScan('loc-qr-video');
+          _locScannerActive = false;
+          camWrap.style.display = 'none';
+          scanBtn.style.display = 'block';
+          // Poner el valor en el input para que el usuario lo vea
+          var inp = document.getElementById('loc-input-v2');
+          if (inp) inp.value = v;
+          // Guardar directamente
+          closeMe();
+          locCapture(v);
+        }
+      });
+    } else {
+      // Si savvyStartScan no está disponible, usar input[type=file] como fallback
+      if (window._psDebug) window._psDebug('⚠️ LOC: savvyStartScan no disponible, usando input');
+      camWrap.style.display = 'none';
+      scanBtn.style.display = 'block';
+      _locScannerActive = false;
+      toast('⚠️ Scanner no disponible — usa el input manual');
+    }
+  };
+
+  scanBtn.addEventListener('touchend', startLocScan);
+  scanBtn.addEventListener('click', startLocScan);
+
+  // Botón para cerrar la cámara sin escanear
+  var stopLocScan = function(e){
+    if(e && e.preventDefault) e.preventDefault();
+    if (typeof savvyStopScan === 'function') savvyStopScan('loc-qr-video');
+    _locScannerActive = false;
+    camWrap.style.display = 'none';
+    scanBtn.style.display = 'block';
+  };
+  camStop.addEventListener('touchend', stopLocScan);
+  camStop.addEventListener('click', stopLocScan);
 
   input.addEventListener('keydown', function(e){ if(e.key==='Enter') saveMe(); });
 
