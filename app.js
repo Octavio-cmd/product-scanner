@@ -1422,7 +1422,7 @@ async function psCapturePhoto(slotId){
       }
 
       if (slot) {
-        slot.innerHTML = '<img src="' + finalUrl + '" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">';
+        slot.innerHTML = '<img src="' + finalUrl + '" style="width:100%;height:100%;object-fit:contain;background:#ffffff">';
       }
       updatePackGenButtonState();
       toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
@@ -1531,7 +1531,7 @@ function renderExtraPhotosUI(){
       h += '<div id="ps-extra-slot-'+i+'" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center"></div>';
     } else {
       h += '<div id="ps-extra-slot-'+i+'" style="position:relative;width:72px;height:72px;background:var(--sf2);border:2px solid var(--bd);border-radius:10px;overflow:hidden">'
-        + '<img src="'+esc(e.img)+'" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px">'
+        + '<img src="'+esc(e.img)+'" style="width:100%;height:100%;object-fit:contain;background:#ffffff">'
         + '<button onclick="psRemoveExtraPhoto('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.7);color:#fff;border:none;border-radius:50%;font-size:12px;cursor:pointer;line-height:1">✕</button>'
         + '</div>';
     }
@@ -1660,7 +1660,7 @@ async function psGenerateAllPacks(){
   }
   const btn = $('ps-gen-packs-btn');
   const statusEl = $('ps-pack-gen-status');
-  const resetBtn = () => { if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1/3/6/12)'; } };
+  const resetBtn = () => { if(btn){ btn.disabled=false; btn.textContent='🎁 Generar Imágenes de Pack (1-12)'; } };
 
   try{
     if(btn){ btn.disabled=true; btn.textContent='⏳ Generando...'; }
@@ -1691,7 +1691,7 @@ async function psGenerateAllPacks(){
     // Solo generar/subir los packs ACTIVOS (los que NO fueron excluidos con ✕).
     // El usuario ya eligió las unidades y excluyó packs ANTES de tomar fotos,
     // así que aquí ya sabemos exactamente cuáles necesita. Esto evita saturar ImgBB.
-    var _activeState = window._splitActive || {1:true,3:true,6:true,12:true};
+    var _activeState = window._splitActive || {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
     var _activePacks = PACK_SIZES.filter(function(p){ return _activeState[p]; });
     if (_activePacks.length === 0) _activePacks = PACK_SIZES.slice(); // por si acaso, no dejar vacío
     console.log('🎯 Packs activos a generar:', _activePacks.join(', '));
@@ -1757,7 +1757,7 @@ function updatePackGenButtonState(){
   const hint = $('ps-pack-gen-hint');
   if(hint){
     hint.textContent = hasPhotos
-      ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
+      ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en todos los paquetes.'
       : '⚠️ Primero toma las fotos FRONT y BACK de arriba.';
   }
 }
@@ -1795,7 +1795,7 @@ function renderPackImagesPreview(){
     gallery.forEach(function(g, idx){
       var isCover = idx === 0;
       h += `<div style="flex:0 0 auto;text-align:center">
-        <img src="${esc(g.url)}" style="width:86px;height:86px;object-fit:contain;border-radius:8px;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/12px 12px;${isCover ? 'border:2px solid var(--sv)' : 'border:1px solid var(--bd)'}">
+        <img src="${esc(g.url)}" style="width:86px;height:86px;object-fit:contain;border-radius:8px;background:#ffffff;${isCover ? 'border:2px solid var(--sv)' : 'border:1px solid var(--bd)'}">
         <div style="font-size:9px;color:${isCover ? 'var(--sv)' : 'var(--mu)'};margin-top:3px;font-weight:${isCover ? '800' : '400'}">${esc(g.tag)}</div>
       </div>`;
     });
@@ -2092,7 +2092,7 @@ function rebuildAndApplyTitle(n) {
 }
 
 // ── PACK SIZE WHEEL ──────────────────────────────────────────
-const PACK_SIZES = [1, 3, 6, 12];
+const PACK_SIZES = [1,2,3,4,5,6,7,8,9,10,11,12];
 
 // Rebuild title with correct format: Brand Product Count Pack of N New
 // Convierte "May 2027" → "Exp 05/27" (compacto para el título)
@@ -2982,9 +2982,9 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
 // ── BULK SPLIT CALCULATOR — reparte el inventario de un embarque entre los
 // tamaños de paquete 1/3/6/12 según la demanda real de eBay (soldCount 90 días) ──
 const DEMAND_TIERS = {
-  alta:  { label:'🔥 Alta demanda',              min:20, weights:{1:0.60,3:0.20,6:0.12,12:0.08} },
-  media: { label:'📊 Demanda media',              min:5,  weights:{1:0.35,3:0.30,6:0.20,12:0.15} },
-  baja:  { label:'🐢 Demanda baja / mov. lento',  min:0,  weights:{1:0.15,3:0.20,6:0.30,12:0.35} }
+  alta:  { label:'🔥 Alta demanda',              min:20, weights:{1:0.60,2:0,3:0.20,4:0,5:0,6:0.12,7:0,8:0,9:0,10:0,11:0,12:0.08} },
+  media: { label:'📊 Demanda media',              min:5,  weights:{1:0.35,2:0,3:0.30,4:0,5:0,6:0.20,7:0,8:0,9:0,10:0,11:0,12:0.15} },
+  baja:  { label:'🐢 Demanda baja / mov. lento',  min:0,  weights:{1:0.15,2:0,3:0.20,4:0,5:0,6:0.30,7:0,8:0,9:0,10:0,11:0,12:0.35} }
 };
 const DEMAND_TIER_ORDER = ['alta','media','baja'];
 
@@ -3000,17 +3000,28 @@ function getDemandTier(soldCount){
 function computeSplit(totalUnits, tierKey, activePacks){
   const baseWeights = (DEMAND_TIERS[tierKey] || DEMAND_TIERS.media).weights;
   // Packs activos (los que NO fueron excluidos con ✕)
-  const active = activePacks || {1:true,3:true,6:true,12:true};
-  const activeList = [1,3,6,12].filter(function(p){ return active[p]; });
-  const result = {1:{listings:0,units:0},3:{listings:0,units:0},6:{listings:0,units:0},12:{listings:0,units:0}};
+  const active = activePacks || {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
+  const activeList = PACK_SIZES.filter(function(p){ return active[p]; });
+  const result = {};
+  PACK_SIZES.forEach(function(p){ result[p] = {listings:0, units:0}; });
   result.leftover = 0;
   if (!activeList.length || totalUnits <= 0) { result.leftover = totalUnits; return result; }
 
-  // Re-normalizar pesos solo entre los packs activos
+  // Re-normalizar pesos solo entre los packs activos.
+  // Si un pack está activo pero tiene peso 0 (como 2,4,5,7,8,9,10,11),
+  // le asignamos un peso mínimo para que reciba unidades.
   var wSum = 0;
-  activeList.forEach(function(p){ wSum += baseWeights[p]; });
+  activeList.forEach(function(p){ wSum += (baseWeights[p] || 0); });
+  // Si todos los activos tienen peso 0 (caso raro), dar peso igual a todos
+  const equalW = 1 / (activeList.length || 1);
   const weights = {};
-  activeList.forEach(function(p){ weights[p] = baseWeights[p] / wSum; });
+  activeList.forEach(function(p){
+    var w = baseWeights[p] || 0;
+    weights[p] = wSum > 0 ? (w > 0 ? w / wSum : 0.01) : equalW;
+  });
+  // Re-normalizar por si los pesos mínimos cambiaron la suma
+  var wSum2 = 0; activeList.forEach(function(p){ wSum2 += weights[p]; });
+  activeList.forEach(function(p){ weights[p] = weights[p] / wSum2; });
 
   // Repartir de mayor a menor; el pack activo más chico absorbe el resto
   const desc = activeList.slice().sort(function(a,b){ return b-a; });
@@ -3037,7 +3048,7 @@ function renderSplitCalculatorHTML(ebay){
   const autoTier = getDemandTier(soldCount);
   return `<div class="card" id="split-calc-card" data-auto-tier="${autoTier}" data-sold-count="${soldCount}">
     <div class="lbl">🚛 Reparto de Inventario (Bulk Split)</div>
-    <div style="font-size:12px;color:var(--mu);margin-bottom:10px">¿Cuántas unidades llegaron de este producto? Sugerimos cómo repartirlas entre 1pk / 3pk / 6pk / 12pk según la demanda real en eBay.</div>
+    <div style="font-size:12px;color:var(--mu);margin-bottom:10px">¿Cuántas unidades llegaron de este producto? Sugerimos cómo repartirlas entre packs del 1 al 12 según la demanda real en eBay.</div>
     <div class="extra-field">
       <div class="extra-label">Unidades totales en este envío</div>
       <input class="extra-input" id="split-total-input" type="text" inputmode="numeric" pattern="[0-9]*" placeholder="ej. 1000" oninput="updateSplitCalc()">
@@ -3125,12 +3136,12 @@ function updateSplitCalc(){
     return;
   }
 
-  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+  if (!window._splitActive) window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
   const active = window._splitActive;
   const split = computeSplit(total, tierKey, active);
   const unitLb = getUnitWeightLb();  // peso de una unidad (0 si no lo han puesto)
   let rows = '';
-  [1,3,6,12].forEach(function(p){
+  PACK_SIZES.forEach(function(p){
     const d = split[p];
     const isOn = !!active[p];
     const inSb = !!(window._psSbExisting && window._psSbExisting[p]);
@@ -3166,7 +3177,7 @@ function updateSplitCalc(){
   if (split.leftover > 0) footer += ` — <span style="color:#e74c3c">⚠️ ${split.leftover} sin asignar (incluye el 1pk para usarlas)</span>`;
   footer += `</div>`;
   // Nota: los packs activos se agregan con el botón "ADD TO CSV" de abajo
-  var activeCnt = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; }).length;
+  var activeCnt = PACK_SIZES.filter(function(p){ return active[p] && split[p].listings > 0; }).length;
   var note = activeCnt > 0
     ? '<div style="margin-top:10px;padding:10px;background:rgba(0,230,118,.08);border:1px solid rgba(0,230,118,.3);border-radius:8px;font-size:12px;color:var(--sv);text-align:center">👇 Al tocar <strong>ADD TO CSV</strong> abajo se agregarán los ' + activeCnt + ' pack(s) activos con sus fotos</div>'
     : '';
@@ -3175,7 +3186,7 @@ function updateSplitCalc(){
 
 // ── Excluir / incluir un pack del reparto ──────────────────────────────
 function toggleSplitPack(p){
-  if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+  if (!window._splitActive) window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
   window._splitActive[p] = !window._splitActive[p];
   updateSplitCalc();
 }
@@ -3190,7 +3201,7 @@ async function addSplitPacksToCSV(){
   if (total <= 0) { return false; }
 
   var tierKey = card.dataset.tier || card.dataset.autoTier || 'media';
-  var active = window._splitActive || {1:true,3:true,6:true,12:true};
+  var active = window._splitActive || {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
   var split = computeSplit(total, tierKey, active);
   var shade = (cur._shade || '').trim();
   var expDate = cur._expDate || '';
@@ -3198,7 +3209,7 @@ async function addSplitPacksToCSV(){
   var baseTitle = (window._packState && window._packState.baseTitle) || cur.title || '';
 
   var added = 0, skippedDup = 0;
-  var packsToAdd = [1,3,6,12].filter(function(p){ return active[p] && split[p].listings > 0; });
+  var packsToAdd = PACK_SIZES.filter(function(p){ return active[p] && split[p].listings > 0; });
 
   // ── VALIDACIÓN: los packs >1 DEBEN tener su imagen de pack generada ──
   // Si ImgBB falló y no se pudo subir la imagen del pack, avisar con toast
@@ -3389,9 +3400,9 @@ async function psCheckSellbrite(upc){
       }
     });
     window._psSbExisting = sbExisting;
-    if (!window._splitActive) window._splitActive = {1:true,3:true,6:true,12:true};
+    if (!window._splitActive) window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
     var autoExcluded = [];
-    [1,3,6,12].forEach(function(pn){
+    PACK_SIZES.forEach(function(pn){
       if (sbExisting[pn] && window._splitActive[pn]) {
         window._splitActive[pn] = false;
         autoExcluded.push(pn + 'pk');
@@ -3917,8 +3928,8 @@ function renderResult(r){
   h+='</div>';
 
   // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
-  const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
-  const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:repeating-conic-gradient(#3a3a3a 0% 25%, #2a2a2a 0% 50%) 50%/16px 16px">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+  const frontThumb = r._frontImg ? `<img src="${esc(r._frontImg)}" style="width:100%;height:100%;object-fit:contain;background:#ffffff">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
+  const backThumb  = r._backImg  ? `<img src="${esc(r._backImg)}" style="width:100%;height:100%;object-fit:contain;background:#ffffff">` : '<div style="text-align:center;color:var(--mu);font-size:24px">📷</div>';
   h+=`<div class="bundle-photo-card">
     <div class="lbl">📸 Front &amp; Back Photos (background removed)</div>
     <div style="font-size:11px;color:var(--mu);margin:4px 0 10px">Paso 1: toma las dos fotos <strong>obligatorias</strong> del producto. Se les quita el fondo automáticamente.</div>
@@ -3947,17 +3958,17 @@ function renderResult(r){
   // ── 3b. PACK IMAGE GENERATOR — Paso 2: 1/3/6/12 con distintivo ──
   const hasPhotos = !!(r._frontImg && r._backImg);
   h+=`<div class="bundle-photo-card">
-    <div class="lbl">🎁 Generar Imágenes de Pack (1/3/6/12)</div>
+    <div class="lbl">🎁 Generar Imágenes de Pack (1-12)</div>
     <div id="ps-pack-gen-hint" style="font-size:11px;color:var(--mu);margin:4px 0 10px">
       ${hasPhotos
-        ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en los 4 paquetes.'
+        ? 'FRONT se multiplica según el paquete + distintivo azul (excepto pack de 1). BACK queda igual, compartida en todos los paquetes.'
         : '⚠️ Primero toma las fotos FRONT y BACK de arriba.'}
     </div>
     <button id="ps-gen-packs-btn"
       onclick="window._psDebug('onclick disparado');psGenerateAllPacks()"
       ontouchend="event.preventDefault();window._psDebug('ontouchend disparado');psGenerateAllPacks()"
       style="width:100%;background:linear-gradient(135deg,#0F97DB,#0a6ea3);border:none;border-radius:10px;padding:13px;color:#fff;font-size:14px;font-weight:800;cursor:pointer">
-      🎁 Generar Imágenes de Pack (1/3/6/12)
+      🎁 Generar Imágenes de Pack (1-12)
     </button>
     <div id="ps-pack-gen-status" style="font-size:11px;color:var(--mu);margin-top:6px;text-align:center"></div>
     <div id="ps-pack-images-preview"></div>
@@ -4058,10 +4069,10 @@ function renderResult(r){
        display:document.getElementById('pack-sel-display')});
     var si=document.getElementById('shade-input');
     if(si&&cur&&cur._shade) si.value=cur._shade;
-    window._splitActive = {1:true,3:true,6:true,12:true};
+    window._splitActive = {1:true,2:false,3:true,4:false,5:false,6:true,7:false,8:false,9:false,10:false,11:false,12:true};
     // Respetar packs ya detectados en Sellbrite (auto-excluidos)
     var _sbEx = window._psSbExisting || {};
-    [1,3,6,12].forEach(function(pn){ if (_sbEx[pn]) window._splitActive[pn] = false; });
+    PACK_SIZES.forEach(function(pn){ if (_sbEx[pn]) window._splitActive[pn] = false; });
     updateSplitCalc();
     if(cur && cur._packImages) renderPackImagesPreview();
     renderExtraPhotosUI();
