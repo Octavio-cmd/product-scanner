@@ -2429,9 +2429,70 @@ function fallback(upc,prod,ebay){
 }
 
 // Main
+// ── NÚMERO DE CAMIÓN ─────────────────────────────────────────────────
+// Se pregunta una vez al inicio de cada escaneo.
+// Se guarda en window._truckNumber para toda la sesión.
+// El usuario puede cambiarlo en cualquier momento desde el prompt.
+window._truckNumber = window._truckNumber || '';
+
+function askTruckNumber(onConfirm) {
+  // Si ya hay número de camión guardado, preguntar si quiere usarlo o cambiarlo
+  var ov = document.createElement('div');
+  ov.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.88);z-index:99999;display:flex;align-items:center;justify-content:center;padding:24px';
+  var current = window._truckNumber ? '(' + window._truckNumber + ')' : '';
+  ov.innerHTML = `
+    <div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:380px">
+      <div style="font-size:18px;font-weight:900;color:var(--ac);margin-bottom:6px">🚛 Número de Camión</div>
+      <div style="font-size:12px;color:var(--mu);margin-bottom:14px">¿De qué camión viene esta mercancía?${window._truckNumber ? ' Actual: <strong style="color:#fff">'+window._truckNumber+'</strong>' : ''}</div>
+      <input id="truck-input" type="text" inputmode="numeric" placeholder="Ej: 1042, T-5, C3..."
+        value="${window._truckNumber}"
+        style="width:100%;padding:16px;border-radius:10px;border:2px solid var(--ac);background:#111;color:#fff;font-size:20px;text-align:center;font-weight:900;margin-bottom:12px">
+      <button id="truck-ok" style="width:100%;padding:14px;background:var(--ac);color:#000;border:none;border-radius:10px;font-weight:900;font-size:16px;cursor:pointer;margin-bottom:8px">✔ CONFIRMAR</button>
+      ${window._truckNumber ? '<button id="truck-keep" style="width:100%;padding:12px;background:transparent;color:var(--mu);border:1px solid var(--bd);border-radius:10px;font-size:14px;cursor:pointer">↩ Usar el mismo: '+window._truckNumber+'</button>' : ''}
+    </div>
+  `;
+  document.body.appendChild(ov);
+
+  var input = ov.querySelector('#truck-input');
+  var okBtn = ov.querySelector('#truck-ok');
+  var keepBtn = ov.querySelector('#truck-keep');
+
+  var confirm = function() {
+    var val = (input.value || '').trim();
+    if (!val) { input.focus(); toast('⚠️ Ingresa el número de camión'); return; }
+    window._truckNumber = val;
+    try { ov.parentNode.removeChild(ov); } catch(e){}
+    onConfirm();
+  };
+
+  var keep = function() {
+    try { ov.parentNode.removeChild(ov); } catch(e){}
+    onConfirm();
+  };
+
+  okBtn.addEventListener('touchend', function(e){ e.preventDefault(); confirm(); });
+  okBtn.addEventListener('click', confirm);
+  if (keepBtn) {
+    keepBtn.addEventListener('touchend', function(e){ e.preventDefault(); keep(); });
+    keepBtn.addEventListener('click', keep);
+  }
+
+  input.addEventListener('keydown', function(e){ if(e.key==='Enter') confirm(); });
+  setTimeout(function(){ if(input) input.focus(); }, 400);
+}
+
 async function analyze(upc){
   upc=String(upc||'').replace(/\D/g,'');
   if(upc.length<8){toast('❌ Invalid UPC — minimum 8 digits');return;}
+
+  // ── Preguntar número de camión antes de analizar ──
+  // Se pregunta siempre al inicio de cada escaneo.
+  askTruckNumber(function(){
+    _doAnalyze(upc);
+  });
+}
+
+async function _doAnalyze(upc){
   showLoadingInline('UPC: '+upc);
 
   let step='init';
@@ -3424,9 +3485,10 @@ async function addSplitPacksToCSV(){
       quantity:    getSplitListings(split, p),
       photo:       photoUrl,
       bundleImg:   photoUrl,
-      weightLb:    _pkgLb,        // peso total decimal (para la Sheet y referencia)
-      weightMajor: _wMajor,       // libras enteras (para eBay CSV / ShipStation)
-      weightMinor: _wMinor,       // onzas (para eBay CSV / ShipStation)
+      weightLb:    _pkgLb,
+      weightMajor: _wMajor,
+      weightMinor: _wMinor,
+      truck:       window._truckNumber || '',
       scannedBy:   SAVVY_CURRENT_USER || 'unknown'
     });
     added++;
@@ -4401,23 +4463,27 @@ function psSendToRegistroSheet(items) {
     var q = Number(it.quantity) || 1;
     var cat = it.category;
     if (!cat || cat === 'undefined' || cat === 'null') cat = '';
+    // UPC como texto con apóstrofe para que Google Sheets no borre el cero inicial
+    var upcText = "'" + (it.upc || '');
     return {
-      tipo: 'product',
-      upc: it.upc || '',
-      fecha: new Date().toISOString().slice(0,19).replace('T',' '),
-      marca: it.brand || '',
-      categoria: cat,
-      titulo: it.title || '',
-      paquete: p + 'pk',
-      unidades: p * q,
-      listados: q,
-      precio: it.price || '',
-      peso: (it.weightLb ? Number(it.weightLb).toFixed(2) : ''),
-      expDate: it.expDate || '',
-      ubicacion: it.location || '',
-      fotos: it.bundleImg || it.photo || '',
-      descripcion: descToText(it.description),
-      escaneadoPor: it.scannedBy || 'unknown'
+      tipo:        'product',
+      date:        new Date().toISOString().slice(0,19).replace('T',' '),
+      sku:         it.sku || '',
+      upc:         upcText,
+      brand:       it.brand || '',
+      title:       it.title || '',
+      description: descToText(it.description),
+      category:    cat,
+      package:     p + 'pk',
+      units:       p * q,
+      listings:    q,
+      price:       it.price || '',
+      weight:      (it.weightLb ? Number(it.weightLb).toFixed(2) : ''),
+      exp_date:    it.expDate || '',
+      location:    it.location || '',
+      photo_url:   it.bundleImg || it.photo || '',
+      scanned_by:  it.scannedBy || 'unknown',
+      load_number: it.truck || ''
     };
   });
 
