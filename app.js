@@ -4501,7 +4501,49 @@ async function exportCSV(){
   var COLOR_C     = ['20695','20694','20696','36903','37558','261068','220'];
   var BOOK_C      = ['261186','171228','377','267','2228','69'];
 
-  // ── Validar categorías contra eBay ANTES de armar el CSV ──
+  // ── VERIFICAR DUPLICADOS EN eBay ANTES DE EXPORTAR ──────────────────
+  // Le pregunta al backend si algún SKU ya tiene listado activo en eBay.
+  // Si hay duplicados, avisa al usuario y le da la opción de continuar o cancelar.
+  // Si el backend falla (sin token, sin red), sigue normal sin bloquear.
+  toast('🔍 Verificando SKUs en eBay...');
+  var _skusToCheck = bulk.map(function(it){ return it.sku || ''; }).filter(Boolean);
+  var _existingSkus = {};
+  try {
+    var _skuRes = await fetch('https://savvy-ebay-prices-production.up.railway.app/check-skus', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ skus: _skusToCheck })
+    });
+    if (_skuRes.ok) {
+      var _skuData = await _skuRes.json();
+      _existingSkus = _skuData.existing || {};
+    }
+  } catch(e) {
+    console.warn('check-skus no disponible — continuando sin verificar:', e.message);
+  }
+
+  // Si hay duplicados, mostrar aviso y pedir confirmación
+  var _dupSkus = Object.keys(_existingSkus);
+  if (_dupSkus.length > 0) {
+    var _dupMsg = '⚠️ DUPLICADOS EN eBay\n\nEstos SKUs ya tienen listado activo:\n\n'
+      + _dupSkus.join('\n')
+      + '\n\n¿Continuar y exportar de todas formas?\n(eBay los va a rechazar)';
+    if (!confirm(_dupMsg)) {
+      // Usuario canceló — quitar el candado y restaurar el botón
+      window._exportLock = false;
+      if (expBtnEl) {
+        expBtnEl.innerHTML = expBtnOldHTML;
+        expBtnEl.style.opacity = '';
+        expBtnEl.style.pointerEvents = '';
+      }
+      toast('❌ Export cancelado — elimina los duplicados del CSV primero');
+      return;
+    }
+    // Si el usuario decide continuar, avisar cuántos van a fallar
+    toast('⚠️ ' + _dupSkus.length + ' SKU(s) duplicado(s) — eBay los rechazará');
+  }
+
+  // Validar categorías contra eBay ANTES de armar el CSV.
   // eBay elige la mejor categoría leaf real según el título de cada producto.
   // Esto elimina el Error 87 de raíz. Si el backend no responde, usamos psSafeCategory.
   toast('🔎 Validando categorías con eBay...');
