@@ -3498,6 +3498,58 @@ async function addSplitPacksToCSV(){
   updateFAB();
   if (added > 0) {
     toast('✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : ''));
+
+    // ── SYNC CON SHIPSTATION en segundo plano ──────────────────────────
+    // Para cada pack agregado: si no existe en ShipStation, lo crea con
+    // SKU, título y localización. Si ya existe, no hace nada.
+    // Se hace en segundo plano (no bloquea el flujo principal).
+    var _addedItems = bulk.slice(bulk.length - added);
+    setTimeout(async function() {
+      for (var _si = 0; _si < _addedItems.length; _si++) {
+        var _it = _addedItems[_si];
+        if (!_it || !_it.sku) continue;
+        try {
+          // 1) Verificar si ya existe en ShipStation
+          var _checkRes = await fetch(
+            'https://savvy-ebay-prices-production.up.railway.app/ss/location?sku=' +
+            encodeURIComponent(_it.sku)
+          );
+          if (!_checkRes.ok) continue;
+          var _checkData = await _checkRes.json();
+
+          if (_checkData.exists) {
+            console.log('✅ ShipStation: ' + _it.sku + ' ya existe');
+            continue; // ya está, no duplicar
+          }
+
+          // 2) No existe → crear en ShipStation
+          console.log('🆕 ShipStation: creando ' + _it.sku);
+          var _createRes = await fetch(
+            'https://savvy-ebay-prices-production.up.railway.app/ss/create-product',
+            {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({
+                sku: _it.sku,
+                name: (_it.title || _it.sku).substring(0, 100),
+                warehouse_location: _it.location || '',
+                upc: _it.upc || ''
+              })
+            }
+          );
+          var _createData = await _createRes.json();
+          if (_createData.status === 'success' || _createData.action) {
+            console.log('✅ ShipStation creado: ' + _it.sku);
+            if (window._psDebug) window._psDebug('🚢 ShipStation: creado ' + _it.sku + ' @ ' + (_it.location || 'sin ubicación'));
+          } else {
+            console.warn('⚠️ ShipStation create warn:', _createData);
+          }
+        } catch(_se) {
+          console.warn('⚠️ ShipStation sync error:', _se && _se.message);
+        }
+      }
+    }, 1500); // espera 1.5s para no competir con el toast y el guardado
+
     return true;
   } else if (skippedDup > 0) {
     toast('⚠️ Esos packs ya están en el CSV');
