@@ -2444,7 +2444,7 @@ function askTruckNumber(onConfirm) {
     <div style="background:var(--sf);border-radius:16px;padding:24px;width:100%;max-width:380px">
       <div style="font-size:18px;font-weight:900;color:var(--ac);margin-bottom:6px">🚛 Número de Camión</div>
       <div style="font-size:12px;color:var(--mu);margin-bottom:14px">¿De qué camión viene esta mercancía?${window._truckNumber ? ' Actual: <strong style="color:#fff">'+window._truckNumber+'</strong>' : ''}</div>
-      <input id="truck-input" type="text" inputmode="numeric" placeholder="Ej: 1042, T-5, C3..."
+      <input id="truck-input" type="text" inputmode="text" autocapitalize="characters" placeholder="Ej: 1042, T-5, C3..."
         value="${window._truckNumber}"
         style="width:100%;padding:16px;border-radius:10px;border:2px solid var(--ac);background:#111;color:#fff;font-size:20px;text-align:center;font-weight:900;margin-bottom:12px">
       <button id="truck-ok" style="width:100%;padding:14px;background:var(--ac);color:#000;border:none;border-radius:10px;font-weight:900;font-size:16px;cursor:pointer;margin-bottom:8px">✔ CONFIRMAR</button>
