@@ -3521,10 +3521,10 @@ async function addSplitPacksToCSV(){
             continue; // ya está, no duplicar
           }
 
-          // 2) No existe → crear en ShipStation
-          console.log('🆕 ShipStation: creando ' + _it.sku);
+          // 2) No existe → crear en ShipStation via orden ficticia (workaround oficial)
+          console.log('🆕 ShipStation: creando ' + _it.sku + ' via ensure-product');
           var _createRes = await fetch(
-            'https://savvy-ebay-prices-production.up.railway.app/ss/create-product',
+            'https://savvy-ebay-prices-production.up.railway.app/ss/ensure-product',
             {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
