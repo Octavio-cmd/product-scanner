@@ -4426,7 +4426,7 @@ function renderBulk(){
 // CSV Export
 // ── ENVIAR A HOJA DE REGISTRO (pestaña "Product Scanner") ──────────────
 // Misma hoja de cálculo que Ropa, pestaña separada. tipo:"product" enruta al tab correcto.
-var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxk-2g2ax8BS5MCgjaTPWpNjk_9kspb5glco3zpWOb24VrQcmOsiuiHp5XtWnMtCnhLxA/exec';
+var PS_SHEET_URL = 'https://script.google.com/macros/s/AKfycbxNTFzs4hGWzahc3c4X0SidYaXTDOzJhGu-v_FdG3pVHzT8mbKigq8In8l1nqoO3UhpKw/exec';
 
 // ── Ajustar la descripción al pack correspondiente (1pk/3pk/6pk/12pk) ──────
 // Cada listado debe decir SU cantidad correcta en intro y Package Contents.
