@@ -3509,11 +3509,10 @@ async function addSplitPacksToCSV(){
         var _it = _addedItems[_si];
         if (!_it || !_it.sku) continue;
         try {
-          // 1) Verificar si ya existe en ShipStation
-          var _checkRes = await fetch(
-            'https://savvy-ebay-prices-production.up.railway.app/ss/location?sku=' +
-            encodeURIComponent(_it.sku)
-          );
+          // 1) Verificar si ya existe en ShipStation por UPC o SKU
+          var _checkUrl = 'https://savvy-ebay-prices-production.up.railway.app/ss/location?upc=' +
+            encodeURIComponent(_it.upc || '') + '&sku=' + encodeURIComponent(_it.sku || '');
+          var _checkRes = await fetch(_checkUrl);
           if (!_checkRes.ok) continue;
           var _checkData = await _checkRes.json();
 
@@ -3583,7 +3582,29 @@ async function psCheckSellbrite(upc){
     const data = await res.json();
 
     if(res.status === 404 || data.status === 'not_found' || !data.products || !data.products.length){
-      statusEl.innerHTML = '🆕 <strong style="color:#ff9800">No existe en Sellbrite todavía</strong>';
+      // No está en Sellbrite — consultar ShipStation por UPC de todas formas
+      statusEl.innerHTML = '🆕 <strong style="color:#ff9800">No existe en Sellbrite todavía</strong><br><span id="ps-ss-upc-status" style="font-size:12px;color:var(--mu)">🔍 Consultando ShipStation...</span>';
+      try {
+        const ssRes = await fetch(RAILWAY_SB + '/ss/location?upc=' + encodeURIComponent(upcClean));
+        const ssData = await ssRes.json();
+        const ssEl = $('ps-ss-upc-status');
+        if (ssEl) {
+          if (ssData.exists) {
+            var loc = ssData.warehouse_location || '';
+            ssEl.innerHTML = loc
+              ? '🚢 <strong style="color:#00e676">En ShipStation</strong> — 📍 ' + esc(loc)
+              : '🚢 <strong style="color:#ffab00">En ShipStation</strong> — sin ubicación asignada';
+            // Guardar el productId para actualizar la ubicación después si es necesario
+            window._psSsProductId = ssData.product_id || null;
+          } else {
+            ssEl.innerHTML = '⚠️ <span style="color:#ff9800">No está en ShipStation — se creará al agregar al CSV</span>';
+            window._psSsProductId = null;
+          }
+        }
+      } catch(ssErr) {
+        const ssEl = $('ps-ss-upc-status');
+        if (ssEl) ssEl.innerHTML = '📍 <span style="color:var(--mu)">No se pudo consultar ShipStation</span>';
+      }
       return;
     }
 
