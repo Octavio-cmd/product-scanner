@@ -4264,6 +4264,68 @@ function renderResult(r){
 // ── ENVIAR A SHOPIFY (1pk) ────────────────────────────────────────────
 // Crea el producto como ACTIVE en Savvy Deal Shopify con toda la info:
 // título, descripción, precio mínimo de eBay, SKU del 1pk, y fotos.
+// ── SHOPIFY: Convertir imagen a cuadrado 1:1 con fondo blanco ─────────
+// Shopify requiere fotos cuadradas con fondo blanco.
+// Carga la imagen (PNG transparente), la centra en un canvas blanco
+// cuadrado y devuelve un dataURL JPEG listo para subir.
+function psImageToWhiteSquare(url, size) {
+  size = size || 1200; // 1200x1200 px — estándar Shopify
+  return new Promise(function(resolve, reject) {
+    var img = new Image();
+    img.crossOrigin = 'anonymous';
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      canvas.width = size;
+      canvas.height = size;
+      var ctx = canvas.getContext('2d');
+      // Fondo blanco
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
+      // Centrar la imagen manteniendo proporciones, con padding del 5%
+      var pad = size * 0.05;
+      var maxW = size - pad * 2;
+      var maxH = size - pad * 2;
+      var ratio = Math.min(maxW / img.width, maxH / img.height);
+      var w = Math.round(img.width * ratio);
+      var h = Math.round(img.height * ratio);
+      var x = Math.round((size - w) / 2);
+      var y = Math.round((size - h) / 2);
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
+      ctx.drawImage(img, x, y, w, h);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = function() { reject(new Error('No se pudo cargar la imagen: ' + url)); };
+    img.src = url;
+  });
+}
+
+// Convierte una lista de URLs a imágenes cuadradas blancas y las sube a ImgBB
+// Devuelve la lista de URLs nuevas de ImgBB (con fondo blanco, cuadradas)
+async function psPreparShopifyImages(imageUrls) {
+  var result = [];
+  var imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
+  for (var i = 0; i < imageUrls.length; i++) {
+    var url = imageUrls[i];
+    if (!url || !url.startsWith('http')) continue;
+    try {
+      // Convertir a cuadrado blanco
+      var dataUrl = await psImageToWhiteSquare(url, 1200);
+      // Subir a ImgBB
+      var uploaded = await clUploadPhotoToImgBB(dataUrl, imgbbKey, 'shopify-' + Date.now() + '-' + i);
+      if (uploaded) {
+        result.push(uploaded);
+      } else {
+        result.push(url); // fallback a la original si falla ImgBB
+      }
+    } catch(e) {
+      console.warn('psPreparShopifyImages error img ' + i + ':', e.message);
+      result.push(url); // fallback a la original
+    }
+  }
+  return result;
+}
+
 async function psSendToShopify() {
   if (!cur) { toast('⚠️ No hay producto escaneado'); return; }
 
@@ -4289,20 +4351,25 @@ async function psSendToShopify() {
     // Descripción en HTML
     var description = descToEbayHTML(cur._description || cur.description || '');
 
-    // Fotos: front + back + extras (las que ya se subieron a ImgBB)
-    var images = [];
-    if (cur._frontImg && String(cur._frontImg).startsWith('http')) images.push(cur._frontImg);
-    if (cur._backImg  && String(cur._backImg).startsWith('http'))  images.push(cur._backImg);
+    // Fotos: front + back + extras
+    var rawImages = [];
+    if (cur._frontImg && String(cur._frontImg).startsWith('http')) rawImages.push(cur._frontImg);
+    if (cur._backImg  && String(cur._backImg).startsWith('http'))  rawImages.push(cur._backImg);
     if (cur._extraImgs) {
       cur._extraImgs.forEach(function(ex) {
-        if (ex && ex.img && String(ex.img).startsWith('http')) images.push(ex.img);
+        if (ex && ex.img && String(ex.img).startsWith('http')) rawImages.push(ex.img);
       });
     }
+
+    // Convertir fotos a cuadrado 1200x1200 con fondo blanco — estándar Shopify
+    if (btn) btn.textContent = '🖼️ Preparando fotos...';
+    var images = await psPreparShopifyImages(rawImages);
 
     // Vendor (marca)
     var vendor = cur.brand || 'Generic';
 
-    if (window._psDebug) window._psDebug('🛍️ Enviando a Shopify: ' + title + ' @ $' + price);
+    if (window._psDebug) window._psDebug('🛍️ Enviando a Shopify: ' + title + ' @ $' + price + ' — ' + images.length + ' foto(s)');
+    if (btn) btn.textContent = '⏳ Enviando a Shopify...';
 
     var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/shopify-create-product', {
       method: 'POST',
@@ -4323,8 +4390,7 @@ async function psSendToShopify() {
 
     if (d.success) {
       if (btn) { btn.textContent = '✅ ¡En Shopify!'; btn.style.background = '#00e676'; btn.style.color = '#000'; }
-      toast('✅ Producto creado en Shopify');
-      // Mostrar link al producto en Shopify admin
+      toast('✅ Producto creado en Shopify con fotos cuadradas');
       if (d.admin_url) {
         setTimeout(function() {
           var linkEl = document.createElement('div');
