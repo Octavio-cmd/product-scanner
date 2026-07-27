@@ -4875,9 +4875,16 @@ async function exportCSV(){
     else if (/aux|3\.5mm/i.test(_tl))      connectivityVal = '3.5mm Audio Jack';
 
     // Extract dosage from title for health products
-    var EXP_CATS_D = ['67169','180959','75037','51227','57041','2984','67167','105070'];
-    if (EXP_CATS_D.includes(String(it.category))) {
-      var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving))/i);
+    // Dosage — requerido para vitaminas, suplementos, productos de salud
+    // Lista ampliada de categorías que requieren Dosage en eBay
+    var EXP_CATS_D = [
+      '67169','180959','75037','51227','57041','2984','67167','105070',
+      '11776','109130','31387','3457','177762','177763','67272','3516'
+    ];
+    // También detectar por palabras clave en el título
+    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin/i.test(it.title||'');
+    if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
+      var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
       dosageVal = doseMatch ? doseMatch[0] : 'See product label';
     }
 
