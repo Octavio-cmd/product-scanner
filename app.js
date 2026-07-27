@@ -4295,7 +4295,7 @@ function renderResult(r){
 // Usa destination-over para que el fondo blanco tape cualquier fondo
 // negro o transparente. Funciona sin importar cómo vino el PNG.
 function psImageToWhiteSquare(url, size) {
-  size = size || 1200;
+  size = size || 2048;
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.crossOrigin = 'anonymous';
@@ -4396,7 +4396,7 @@ async function psSendToShopify() {
 
     // Convertir fotos a cuadrado 1200x1200 con fondo blanco — estándar Shopify
     if (btn) btn.textContent = '🖼️ Preparando fotos...';
-    var images = await psPreparShopifyImages(rawImages);
+    var images = await psPreparShopifyImages(rawImages, 2048);
 
     // Vendor (marca)
     var vendor = cur.brand || 'Generic';
