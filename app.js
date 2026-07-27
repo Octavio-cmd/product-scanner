@@ -4265,37 +4265,88 @@ function renderResult(r){
 // Crea el producto como ACTIVE en Savvy Deal Shopify con toda la info:
 // título, descripción, precio mínimo de eBay, SKU del 1pk, y fotos.
 // ── SHOPIFY: Convertir imagen a cuadrado 1:1 con fondo blanco ─────────
-// Shopify requiere fotos cuadradas con fondo blanco.
-// Carga la imagen (PNG transparente), la centra en un canvas blanco
-// cuadrado y devuelve un dataURL JPEG listo para subir.
+// Limpia los píxeles oscuros semitransparentes del borde (halo negro de rembg),
+// recorta el área visible, y centra el producto en canvas 1200x1200 blanco.
 function psImageToWhiteSquare(url, size) {
-  size = size || 1200; // 1200x1200 px — estándar Shopify
+  size = size || 1200;
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = function() {
+      // Paso 1: dibujar la imagen original en canvas temporal
+      var tmp = document.createElement('canvas');
+      tmp.width = img.width;
+      tmp.height = img.height;
+      var tctx = tmp.getContext('2d');
+      tctx.drawImage(img, 0, 0);
+
+      // Paso 2: limpiar píxeles semitransparentes oscuros (el halo negro de rembg)
+      // Cualquier píxel con alpha < 200 O que sea muy oscuro con alpha < 255 → transparente
+      var imgData = tctx.getImageData(0, 0, tmp.width, tmp.height);
+      var d = imgData.data;
+      for (var i = 0; i < d.length; i += 4) {
+        var r = d[i], g = d[i+1], b = d[i+2], a = d[i+3];
+        // Si el píxel es semitransparente (alpha < 230) → hacerlo completamente transparente
+        if (a < 230) {
+          d[i+3] = 0;
+          continue;
+        }
+        // Si el píxel es muy oscuro y tiene algo de transparencia → limpiarlo
+        var brightness = (r + g + b) / 3;
+        if (a < 255 && brightness < 50) {
+          d[i+3] = 0;
+        }
+      }
+      tctx.putImageData(imgData, 0, 0);
+
+      // Paso 3: detectar el bounding box del área visible limpia
+      var pixels = imgData.data;
+      var minX = tmp.width, maxX = 0, minY = tmp.height, maxY = 0;
+      for (var y = 0; y < tmp.height; y++) {
+        for (var x = 0; x < tmp.width; x++) {
+          var alpha = pixels[(y * tmp.width + x) * 4 + 3];
+          if (alpha > 10) {
+            if (x < minX) minX = x;
+            if (x > maxX) maxX = x;
+            if (y < minY) minY = y;
+            if (y > maxY) maxY = y;
+          }
+        }
+      }
+
+      // Fallback si no encontró nada visible
+      if (maxX <= minX || maxY <= minY) {
+        minX = 0; minY = 0; maxX = tmp.width - 1; maxY = tmp.height - 1;
+      }
+
+      var cropW = maxX - minX + 1;
+      var cropH = maxY - minY + 1;
+
+      // Paso 4: canvas final 1200x1200 fondo blanco
       var canvas = document.createElement('canvas');
       canvas.width = size;
       canvas.height = size;
       var ctx = canvas.getContext('2d');
-      // Fondo blanco
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, size, size);
-      // Centrar la imagen manteniendo proporciones, con padding del 5%
-      var pad = size * 0.05;
+
+      // Centrar el producto con 8% de padding
+      var pad = size * 0.08;
       var maxW = size - pad * 2;
       var maxH = size - pad * 2;
-      var ratio = Math.min(maxW / img.width, maxH / img.height);
-      var w = Math.round(img.width * ratio);
-      var h = Math.round(img.height * ratio);
-      var x = Math.round((size - w) / 2);
-      var y = Math.round((size - h) / 2);
+      var ratio = Math.min(maxW / cropW, maxH / cropH);
+      var drawW = Math.round(cropW * ratio);
+      var drawH = Math.round(cropH * ratio);
+      var drawX = Math.round((size - drawW) / 2);
+      var drawY = Math.round((size - drawH) / 2);
+
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(img, x, y, w, h);
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
+      ctx.drawImage(tmp, minX, minY, cropW, cropH, drawX, drawY, drawW, drawH);
+
+      resolve(canvas.toDataURL('image/jpeg', 0.93));
     };
-    img.onerror = function() { reject(new Error('No se pudo cargar la imagen: ' + url)); };
+    img.onerror = function() { reject(new Error('No se pudo cargar: ' + url)); };
     img.src = url;
   });
 }
