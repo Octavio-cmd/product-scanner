@@ -4882,7 +4882,8 @@ async function exportCSV(){
       '11776','109130','31387','3457','177762','177763','67272','3516'
     ];
     // También detectar por palabras clave en el título
-    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin/i.test(it.title||'');
+    // Incluye vitaminas, suplementos Y productos de salud/analgésicos
+    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain relief|pain killer|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze/i.test(it.title||'');
     if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
       var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
       dosageVal = doseMatch ? doseMatch[0] : 'See product label';
