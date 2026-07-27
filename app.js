@@ -1366,8 +1366,10 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
 // ── Pipeline compartido: comprimir → quitar fondo (Railway rembg) → subir a ImgBB ──
 // Usado por FRONT, BACK, y las fotos extra opcionales — mismo proceso para todas.
 async function psRemoveBackgroundPipeline(file, onStatus){
+  // Mandamos la imagen a rembg con la MAYOR calidad posible (0.98, 2000px)
+  // para que el modelo tenga más detalle y haga un mejor recorte.
   if(onStatus) onStatus('Comprimiendo...');
-  var dataUrl = await clCompressImage(file, 1600, 0.92);
+  var dataUrl = await clCompressImage(file, 2000, 0.98);
 
   if(onStatus) onStatus('🚂 Quitando fondo...');
   const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
@@ -1383,9 +1385,7 @@ async function psRemoveBackgroundPipeline(file, onStatus){
 
   const pngUrl = 'data:image/png;base64,' + rbgData.image;
 
-  // ── Aplicar fondo blanco antes de subir a ImgBB ──
-  // Usa destination-over para que el blanco quede detrás del producto,
-  // sin importar si rembg devolvió fondo negro o transparente.
+  // ── Aplicar fondo blanco con máxima calidad ──
   if(onStatus) onStatus('🖼️ Procesando fondo...');
   const cleanUrl = await new Promise(function(resolve) {
     var img = new Image();
@@ -1394,15 +1394,19 @@ async function psRemoveBackgroundPipeline(file, onStatus){
       canvas.width = img.width;
       canvas.height = img.height;
       var ctx = canvas.getContext('2d');
+      // Alta calidad de suavizado
+      ctx.imageSmoothingEnabled = true;
+      ctx.imageSmoothingQuality = 'high';
       // Dibujar imagen primero
       ctx.drawImage(img, 0, 0);
-      // Poner fondo blanco DETRÁS con destination-over
+      // Fondo blanco DETRÁS con destination-over
       ctx.globalCompositeOperation = 'destination-over';
       ctx.fillStyle = '#ffffff';
       ctx.fillRect(0, 0, canvas.width, canvas.height);
-      resolve(canvas.toDataURL('image/jpeg', 0.92));
+      // Calidad JPEG alta (0.95) — buen balance calidad/tamaño para ImgBB
+      resolve(canvas.toDataURL('image/jpeg', 0.95));
     };
-    img.onerror = function() { resolve(pngUrl); }; // fallback si falla
+    img.onerror = function() { resolve(pngUrl); };
     img.src = pngUrl;
   });
 
