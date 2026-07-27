@@ -1286,8 +1286,10 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
     img.onload = function(){
       var canvas = document.createElement('canvas');
       var w = img.width, h = img.height;
-      // Reducir dimensiones si son enormes
-      var maxDim = 1400;
+      // Reducir dimensiones si son enormes.
+      // 2048 es el tamano al que se generan las imagenes de pack — bajarlo
+      // aqui destruia resolucion en silencio en cada subida a ImgBB.
+      var maxDim = 2048;
       if (w > maxDim || h > maxDim) {
         var r = Math.min(maxDim/w, maxDim/h);
         w = Math.round(w * r);
@@ -1313,8 +1315,10 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
 // ── Upload a data URL to ImgBB, return the public URL ──
 async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
   try {
-    // Comprimir antes de subir si es muy grande (previene "Internal upload error")
-    dataUrl = await _compressForImgBB(dataUrl, 800);
+    // Comprimir antes de subir solo si es MUY grande. Si ImgBB devuelve
+    // "Internal upload error" el bloque de abajo reintenta a 300KB, asi que
+    // no hace falta castigar la calidad de entrada.
+    dataUrl = await _compressForImgBB(dataUrl, 1500);
     const b64 = dataUrl ? dataUrl.split(',')[1] : null;
     if (!b64) { console.warn('ImgBB: no image data'); return null; }
     const fd = new FormData();
@@ -1366,10 +1370,12 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
 // ── Pipeline compartido: comprimir → quitar fondo (Railway rembg) → subir a ImgBB ──
 // Usado por FRONT, BACK, y las fotos extra opcionales — mismo proceso para todas.
 async function psRemoveBackgroundPipeline(file, onStatus){
-  // Mandamos la imagen a rembg con la MAYOR calidad posible (0.98, 2000px)
-  // para que el modelo tenga más detalle y haga un mejor recorte.
+  // El servidor reduce la entrada a 1600px de todas formas (rembg calcula la
+  // mascara a 320x320 internamente), asi que mandar mas es puro peso de red
+  // sin ninguna mejora en el recorte. 1600 @ 0.90 baja la subida de ~3 MB a
+  // unos 500 KB por foto.
   if(onStatus) onStatus('Comprimiendo...');
-  var dataUrl = await clCompressImage(file, 2000, 0.98);
+  var dataUrl = await clCompressImage(file, 1600, 0.90);
 
   if(onStatus) onStatus('🚂 Quitando fondo...');
   const RAILWAY_RBG = 'https://savvy-rembg-production.up.railway.app/remove-bg';
@@ -1377,38 +1383,52 @@ async function psRemoveBackgroundPipeline(file, onStatus){
   const rbgRes = await fetch(RAILWAY_RBG, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ image: b64 })
+    // format 'jpeg' → el servidor pone el fondo blanco y devuelve JPEG.
+    // Antes bajaba un PNG con transparencia de 4-8 MB que este mismo codigo
+    // aplastaba contra fondo blanco tres lineas despues. Mismo resultado
+    // final, una decima parte del peso.
+    body: JSON.stringify({ image: b64, format: 'jpeg', quality: 92 })
   });
   if(!rbgRes.ok) throw new Error('Railway rembg error ' + rbgRes.status);
   const rbgData = await rbgRes.json();
   if(!rbgData.success || !rbgData.image) throw new Error('rembg no devolvió imagen');
 
-  const pngUrl = 'data:image/png;base64,' + rbgData.image;
+  const isJpeg = (rbgData.mime === 'image/jpeg') || (rbgData.format === 'jpeg');
+  const pngUrl = 'data:' + (isJpeg ? 'image/jpeg' : 'image/png') + ';base64,' + rbgData.image;
 
-  // ── Aplicar fondo blanco con máxima calidad ──
-  if(onStatus) onStatus('🖼️ Procesando fondo...');
-  const cleanUrl = await new Promise(function(resolve) {
-    var img = new Image();
-    img.onload = function() {
-      var canvas = document.createElement('canvas');
-      canvas.width = img.width;
-      canvas.height = img.height;
-      var ctx = canvas.getContext('2d');
-      // Alta calidad de suavizado
-      ctx.imageSmoothingEnabled = true;
-      ctx.imageSmoothingQuality = 'high';
-      // Dibujar imagen primero
-      ctx.drawImage(img, 0, 0);
-      // Fondo blanco DETRÁS con destination-over
-      ctx.globalCompositeOperation = 'destination-over';
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
-      // Calidad JPEG alta (0.95) — buen balance calidad/tamaño para ImgBB
-      resolve(canvas.toDataURL('image/jpeg', 0.95));
-    };
-    img.onerror = function() { resolve(pngUrl); };
-    img.src = pngUrl;
-  });
+  // ── Fondo blanco ──
+  // Si el servidor ya lo devolvio en JPEG, el fondo blanco ya viene puesto:
+  // volver a pasarlo por canvas solo agregaria otra recompresion JPEG.
+  // Si vino PNG (servidor viejo o fallback), se procesa como siempre.
+  let cleanUrl;
+  if (isJpeg) {
+    if(onStatus) onStatus('🖼️ Listo...');
+    cleanUrl = pngUrl;
+  } else {
+    if(onStatus) onStatus('🖼️ Procesando fondo...');
+    cleanUrl = await new Promise(function(resolve) {
+      var img = new Image();
+      img.onload = function() {
+        var canvas = document.createElement('canvas');
+        canvas.width = img.width;
+        canvas.height = img.height;
+        var ctx = canvas.getContext('2d');
+        // Alta calidad de suavizado
+        ctx.imageSmoothingEnabled = true;
+        ctx.imageSmoothingQuality = 'high';
+        // Dibujar imagen primero
+        ctx.drawImage(img, 0, 0);
+        // Fondo blanco DETRÁS con destination-over
+        ctx.globalCompositeOperation = 'destination-over';
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
+        // Calidad JPEG alta (0.95) — buen balance calidad/tamaño para ImgBB
+        resolve(canvas.toDataURL('image/jpeg', 0.95));
+      };
+      img.onerror = function() { resolve(pngUrl); };
+      img.src = pngUrl;
+    });
+  }
 
   if(onStatus) onStatus('📤 Subiendo...');
   const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
@@ -5070,6 +5090,17 @@ function savvyShowExportOptions(csv, fname, count) {
 // Init
 document.addEventListener('DOMContentLoaded',()=>{
   if(!localStorage.getItem('savvy_ebay_id'))localStorage.setItem('savvy_ebay_id',DEF_EBAY);
+
+  // ── WARM-UP: wake the background-removal service on app start ──
+  // Fire-and-forget. If Railway put the container to sleep, this makes it
+  // boot while the user is still typing the UPC, so the first photo does
+  // not have to wait for the model to load. Any failure is ignored.
+  try {
+    fetch('https://savvy-rembg-production.up.railway.app/health', { method: 'GET' })
+      .then(function(r){ return r.json(); })
+      .then(function(d){ console.log('rembg warm-up:', d && d.model_loaded ? 'ready' : 'not ready'); })
+      .catch(function(){ /* offline or asleep - not a problem */ });
+  } catch(e) {}
 
   // ── FAB + panel de export (PRIMERO — a prueba de errores posteriores) ──
   function ensureBulkOverlay(){
