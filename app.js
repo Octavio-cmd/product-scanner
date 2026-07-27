@@ -1383,14 +1383,37 @@ async function psRemoveBackgroundPipeline(file, onStatus){
 
   const pngUrl = 'data:image/png;base64,' + rbgData.image;
 
+  // ── Aplicar fondo blanco antes de subir a ImgBB ──
+  // Usa destination-over para que el blanco quede detrás del producto,
+  // sin importar si rembg devolvió fondo negro o transparente.
+  if(onStatus) onStatus('🖼️ Procesando fondo...');
+  const cleanUrl = await new Promise(function(resolve) {
+    var img = new Image();
+    img.onload = function() {
+      var canvas = document.createElement('canvas');
+      canvas.width = img.width;
+      canvas.height = img.height;
+      var ctx = canvas.getContext('2d');
+      // Dibujar imagen primero
+      ctx.drawImage(img, 0, 0);
+      // Poner fondo blanco DETRÁS con destination-over
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      resolve(canvas.toDataURL('image/jpeg', 0.92));
+    };
+    img.onerror = function() { resolve(pngUrl); }; // fallback si falla
+    img.src = pngUrl;
+  });
+
   if(onStatus) onStatus('📤 Subiendo...');
   const imgbbKey = localStorage.getItem('savvy_imgbb_key') || DEFAULT_IMGBB_KEY;
-  let finalUrl = pngUrl;
+  let finalUrl = cleanUrl;
   if (imgbbKey) {
-    const uploaded = await clUploadPhotoToImgBB(pngUrl, imgbbKey, 'photo');
+    const uploaded = await clUploadPhotoToImgBB(cleanUrl, imgbbKey, 'photo');
     if (uploaded) finalUrl = uploaded;
   }
-  return { finalUrl, localUrl: pngUrl };
+  return { finalUrl, localUrl: cleanUrl };
 }
 
 async function psCapturePhoto(slotId){
@@ -4265,84 +4288,39 @@ function renderResult(r){
 // Crea el producto como ACTIVE en Savvy Deal Shopify con toda la info:
 // título, descripción, precio mínimo de eBay, SKU del 1pk, y fotos.
 // ── SHOPIFY: Convertir imagen a cuadrado 1:1 con fondo blanco ─────────
-// Limpia los píxeles oscuros semitransparentes del borde (halo negro de rembg),
-// recorta el área visible, y centra el producto en canvas 1200x1200 blanco.
+// Usa destination-over para que el fondo blanco tape cualquier fondo
+// negro o transparente. Funciona sin importar cómo vino el PNG.
 function psImageToWhiteSquare(url, size) {
   size = size || 1200;
   return new Promise(function(resolve, reject) {
     var img = new Image();
     img.crossOrigin = 'anonymous';
     img.onload = function() {
-      // Paso 1: dibujar la imagen original en canvas temporal
-      var tmp = document.createElement('canvas');
-      tmp.width = img.width;
-      tmp.height = img.height;
-      var tctx = tmp.getContext('2d');
-      tctx.drawImage(img, 0, 0);
-
-      // Paso 2: limpiar píxeles semitransparentes oscuros (el halo negro de rembg)
-      // Cualquier píxel con alpha < 200 O que sea muy oscuro con alpha < 255 → transparente
-      var imgData = tctx.getImageData(0, 0, tmp.width, tmp.height);
-      var d = imgData.data;
-      for (var i = 0; i < d.length; i += 4) {
-        var r = d[i], g = d[i+1], b = d[i+2], a = d[i+3];
-        // Si el píxel es semitransparente (alpha < 230) → hacerlo completamente transparente
-        if (a < 230) {
-          d[i+3] = 0;
-          continue;
-        }
-        // Si el píxel es muy oscuro y tiene algo de transparencia → limpiarlo
-        var brightness = (r + g + b) / 3;
-        if (a < 255 && brightness < 50) {
-          d[i+3] = 0;
-        }
-      }
-      tctx.putImageData(imgData, 0, 0);
-
-      // Paso 3: detectar el bounding box del área visible limpia
-      var pixels = imgData.data;
-      var minX = tmp.width, maxX = 0, minY = tmp.height, maxY = 0;
-      for (var y = 0; y < tmp.height; y++) {
-        for (var x = 0; x < tmp.width; x++) {
-          var alpha = pixels[(y * tmp.width + x) * 4 + 3];
-          if (alpha > 10) {
-            if (x < minX) minX = x;
-            if (x > maxX) maxX = x;
-            if (y < minY) minY = y;
-            if (y > maxY) maxY = y;
-          }
-        }
-      }
-
-      // Fallback si no encontró nada visible
-      if (maxX <= minX || maxY <= minY) {
-        minX = 0; minY = 0; maxX = tmp.width - 1; maxY = tmp.height - 1;
-      }
-
-      var cropW = maxX - minX + 1;
-      var cropH = maxY - minY + 1;
-
-      // Paso 4: canvas final 1200x1200 fondo blanco
       var canvas = document.createElement('canvas');
       canvas.width = size;
       canvas.height = size;
       var ctx = canvas.getContext('2d');
-      ctx.fillStyle = '#ffffff';
-      ctx.fillRect(0, 0, size, size);
 
-      // Centrar el producto con 8% de padding
+      // Paso 1: centrar la imagen manteniendo proporciones con 8% padding
       var pad = size * 0.08;
       var maxW = size - pad * 2;
       var maxH = size - pad * 2;
-      var ratio = Math.min(maxW / cropW, maxH / cropH);
-      var drawW = Math.round(cropW * ratio);
-      var drawH = Math.round(cropH * ratio);
+      var ratio = Math.min(maxW / img.width, maxH / img.height);
+      var drawW = Math.round(img.width * ratio);
+      var drawH = Math.round(img.height * ratio);
       var drawX = Math.round((size - drawW) / 2);
       var drawY = Math.round((size - drawH) / 2);
 
+      // Paso 2: dibujar la imagen primero
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = 'high';
-      ctx.drawImage(tmp, minX, minY, cropW, cropH, drawX, drawY, drawW, drawH);
+      ctx.drawImage(img, drawX, drawY, drawW, drawH);
+
+      // Paso 3: poner el fondo blanco DETRÁS de la imagen
+      // destination-over dibuja el fondo detrás de lo que ya está en el canvas
+      ctx.globalCompositeOperation = 'destination-over';
+      ctx.fillStyle = '#ffffff';
+      ctx.fillRect(0, 0, size, size);
 
       resolve(canvas.toDataURL('image/jpeg', 0.93));
     };
