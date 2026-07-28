@@ -1286,10 +1286,12 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
     img.onload = function(){
       var canvas = document.createElement('canvas');
       var w = img.width, h = img.height;
-      // Reducir dimensiones si son enormes.
-      // 2048 es el tamano al que se generan las imagenes de pack — bajarlo
-      // aqui destruia resolucion en silencio en cada subida a ImgBB.
-      var maxDim = 2048;
+      // NO SUBIR DE 1400 SIN MEDIR MEMORIA PRIMERO.
+      // Un canvas de 2048x2048 ocupa 16.7 MB en RAM; a 1400 son 7.8 MB.
+      // Como las subidas corren en paralelo (Promise.all), a 2048 con 5 packs
+      // se rebasan los ~300 MB y Safari de iPhone mata la pestana (pantalla
+      // negra). 1400 es el valor probado y estable.
+      var maxDim = 1400;
       if (w > maxDim || h > maxDim) {
         var r = Math.min(maxDim/w, maxDim/h);
         w = Math.round(w * r);
@@ -1315,10 +1317,10 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
 // ── Upload a data URL to ImgBB, return the public URL ──
 async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
   try {
-    // Comprimir antes de subir solo si es MUY grande. Si ImgBB devuelve
-    // "Internal upload error" el bloque de abajo reintenta a 300KB, asi que
-    // no hace falta castigar la calidad de entrada.
-    dataUrl = await _compressForImgBB(dataUrl, 1500);
+    // Comprimir antes de subir si es muy grande (previene "Internal upload
+    // error" y evita saturar memoria/ancho de banda con subidas en paralelo).
+    // NO subir este valor sin probar con 5+ packs en un iPhone real.
+    dataUrl = await _compressForImgBB(dataUrl, 800);
     const b64 = dataUrl ? dataUrl.split(',')[1] : null;
     if (!b64) { console.warn('ImgBB: no image data'); return null; }
     const fd = new FormData();
