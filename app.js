@@ -1314,8 +1314,76 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
   });
 }
 
-// ── Upload a data URL to ImgBB, return the public URL ──
+// ── RAILWAY BUCKET (almacenamiento propio) ───────────────────────────
+// Sustituye a ImgBB como destino principal de las fotos. ImgBB tiene un
+// limite de subidas por hora que se comparte entre TODOS los usuarios y
+// tumbaba la bodega a media jornada. El bucket no tiene ese limite.
+var SAVVY_BUCKET_UPLOAD = 'https://savvy-ebay-prices-production.up.railway.app/img-upload';
+
+// Sube una data URL al bucket. Devuelve la URL publica permanente, o null
+// si algo falla (para que el llamador caiga a ImgBB).
+async function _uploadToBucket(dataUrl, slotName) {
+  try {
+    if (!dataUrl) return null;
+
+    // Mismo pretratamiento que ya se usaba: no mandar archivos enormes.
+    dataUrl = await _compressForImgBB(dataUrl, 800);
+    var b64 = dataUrl ? dataUrl.split(',')[1] : null;
+    if (!b64) return null;
+
+    // Timeout de 20s con AbortController (AbortSignal.timeout no existe
+    // en Safari de iOS).
+    var controller = null, timeoutId = null;
+    try {
+      controller = new AbortController();
+      timeoutId = setTimeout(function(){ controller.abort(); }, 20000);
+    } catch(e) {}
+
+    var opts = {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        image: b64,
+        name: slotName || 'photo',
+        ext: 'jpg'
+      })
+    };
+    if (controller) opts.signal = controller.signal;
+
+    var res = await fetch(SAVVY_BUCKET_UPLOAD, opts);
+    if (timeoutId) clearTimeout(timeoutId);
+
+    if (!res.ok) {
+      if (window._psDebug) window._psDebug('⚠️ Bucket HTTP ' + res.status + ' — usando ImgBB');
+      return null;
+    }
+
+    var d = await res.json();
+    if (d && d.success && d.url) {
+      return d.url;
+    }
+
+    if (window._psDebug) window._psDebug('⚠️ Bucket: ' + ((d && d.error) || 'sin URL') + ' — usando ImgBB');
+    return null;
+
+  } catch(e) {
+    var msg = e.name === 'AbortError' ? 'timeout (20s)' : (e.message || e);
+    if (window._psDebug) window._psDebug('⚠️ Bucket falló (' + msg + ') — usando ImgBB');
+    return null;
+  }
+}
+
+// ── Punto de entrada unico para subir fotos ──────────────────────────
+// Conserva el nombre original para que los ~10 lugares que la llaman NO
+// tengan que cambiar. Intenta el bucket primero; si falla, ImgBB.
 async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
+  var viaBucket = await _uploadToBucket(dataUrl, slotName);
+  if (viaBucket) return viaBucket;
+  return await _uploadToImgBB(dataUrl, key, slotName);
+}
+
+// ── Upload a data URL to ImgBB, return the public URL (RESPALDO) ──
+async function _uploadToImgBB(dataUrl, key, slotName) {
   try {
     // Comprimir antes de subir si es muy grande (previene "Internal upload
     // error" y evita saturar memoria/ancho de banda con subidas en paralelo).
@@ -1355,7 +1423,7 @@ async function clUploadPhotoToImgBB(dataUrl, key, slotName) {
       if (/internal|upload/i.test(errMsg) && !slotName?.includes('retry')) {
         if (window._psDebug) window._psDebug('🔄 Reintentando con compresión agresiva...');
         var smaller = await _compressForImgBB(dataUrl, 300); // 300KB máximo
-        return clUploadPhotoToImgBB(smaller, key, (slotName || 'photo') + '-retry');
+        return _uploadToImgBB(smaller, key, (slotName || 'photo') + '-retry');
       }
       return null;
     }
