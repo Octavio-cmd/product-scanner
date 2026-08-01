@@ -2158,12 +2158,22 @@ function rebuildAndApplyTitle(n) {
   // actualizamos el número de "Pack of N" para que refleje el pack elegido,
   // conservando todo el texto que el usuario escribió.
   if (cur && cur._titleManual && cur._selectedTitle) {
-    if (/\bpack of \d+\b/i.test(cur._selectedTitle)) {
-      title = cur._selectedTitle.replace(/\bpack of \d+\b/i, 'Pack of ' + newPack);
+    var manualT = cur._selectedTitle;
+    if (Number(newPack) >= 2) {
+      // Pack de 2+: si ya tiene "Pack of N", actualiza el número;
+      // si no lo tiene, lo inserta antes de "New" (o al final).
+      if (/\bpack of \d+\b/i.test(manualT)) {
+        manualT = manualT.replace(/\bpack of \d+\b/i, 'Pack of ' + newPack);
+      } else if (/\bnew\b\s*$/i.test(manualT)) {
+        manualT = manualT.replace(/\s*\bnew\b\s*$/i, ' Pack of ' + newPack + ' New');
+      } else {
+        manualT = manualT.trim() + ' Pack of ' + newPack;
+      }
     } else {
-      title = cur._selectedTitle; // no tiene "Pack of N"; se respeta tal cual
+      // Pack de 1: quitar cualquier "Pack of N" del título (1 pieza no es pack)
+      manualT = manualT.replace(/\s*\bpack of \d+\b/i, '').replace(/\s{2,}/g, ' ').trim();
     }
-    title = title.substring(0, 80);
+    title = manualT.substring(0, 80);
   } else {
     title = rebuildTitle(state.baseTitle, newPack, shade, expDate);
   }
@@ -2320,7 +2330,7 @@ function formatExpForTitle(expDate) {
 function rebuildTitle(base, n, shade, expDate) {
   shade   = shade   || '';
   expDate = expDate || '';
-  if (!base) return (shade?shade+' ':'') + 'Pack of ' + n + ' New';
+  if (!base) return (shade?shade+' ':'') + (Number(n) >= 2 ? 'Pack of ' + n + ' ' : '') + 'New';
   // Strip existing pack / new / exp references
   var t = base
     .replace(/\bexp\s+\d{2}\/\d{2}\b/gi, '')
@@ -2332,10 +2342,13 @@ function rebuildTitle(base, n, shade, expDate) {
   var expStr = formatExpForTitle(expDate);
   // El sufijo (shade + Exp + Pack of N New) SIEMPRE va completo dentro de los 80 chars de eBay.
   // Si el título es muy largo, se recorta el NOMBRE del producto, nunca el "Pack of N".
+  // NOTA: "Pack of 1" NO se muestra en el título (1 pieza no es un "pack" y
+  // desperdicia caracteres). Solo se muestra "Pack of N" para 2 o más.
   var suffix = '';
   if (shade)  suffix += ' ' + shade;
   if (expStr) suffix += ' ' + expStr;
-  suffix += ' Pack of ' + n + ' New';
+  if (Number(n) >= 2) suffix += ' Pack of ' + n;
+  suffix += ' New';
   var maxBase = 80 - suffix.length;
   if (maxBase < 0) maxBase = 0;
   if (t.length > maxBase) {
@@ -2568,7 +2581,12 @@ acercarte lo más posible a 80. NUNCA entregues un título de menos de 70 chars
 si el producto permite llenarlo. Es un PISO, no solo un techo.
 
 FÓRMULA (en este orden): [Marca] [Línea/Modelo] [Nombre Producto] [Tamaño/Count]
-[Atributos clave: scent, SPF, formulación, variante] [Pack of N] New
+[Atributos clave: scent, SPF, formulación, variante] [Pack of N si N≥2] New
+
+IMPORTANTE SOBRE EL PACK: si es 1 sola pieza (Pack of 1), NO escribas "Pack of 1"
+en el título — una sola pieza no es un "pack" y desperdicia caracteres. Termina
+solo en "New". Usa esos caracteres extra para más keywords SEO. Solo escribe
+"Pack of N" cuando N sea 2 o más.
 
 CÓMO LLENAR HASTA 80 (usa keywords que la gente REALMENTE busca):
 - Tamaño y conteo: "6oz", "24ct", "2.5 fl oz", "72 Batteries" (calcula total si es pack)
