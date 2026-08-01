@@ -4166,8 +4166,10 @@ Rules:
 - Do NOT invent medical claims; use safe marketing language ("supports", "helps promote")
 - Do NOT mention UPC or barcodes
 - NEVER use the words "assembled", "assembly", or anything implying WE manufacture the product — we only bundle factory-sealed retail products together
+- CRITICAL — the "intro" and "benefits" must describe the PRODUCT ITSELF only. Do NOT mention any quantity, count of units, "pack of N", "bundle of N", or how many bottles/boxes/items are included. Those numbers change per listing, so keep intro/benefits quantity-free.
+- ONLY "package_contents" states the quantity, and it must say exactly: ${packs} unit(s) of the product
 - In package_contents, reinforce trust: items are brand new, factory-sealed, from the original manufacturer
-- benefits: 4 to 6 bullets, each under 12 words
+- benefits: 4 to 6 bullets, each under 12 words, NO quantities
 - package_contents must clearly state the quantity: ${packs} unit(s)`;
 
   try{
@@ -4766,15 +4768,26 @@ function descForPack(desc, packs) {
   if (!desc) return desc;
   var unitWord = packs > 1 ? 'units' : 'unit';
   var qtyLine = 'This listing includes ' + packs + ' ' + unitWord + ', brand new and factory-sealed.';
+  // Palabras contables que suelen llevar un número de cantidad delante.
+  var COUNT_WORDS = 'units?|bottles?|boxes|box|packs?|pieces?|pcs?|items?|containers?|jars?|tubes?|cans?|bags?|pouches?|packets?|sets?|count|ct';
   function fixQty(text) {
     if (!text) return text;
-    return String(text)
-      // "3 brand new, factory-sealed units" / "1 unit" → cantidad del pack
-      .replace(/\b\d+((?:\s+[A-Za-z,\-]+){0,4})\s+units?\b/gi, function(m, mid){
-        return packs + (mid || '') + ' ' + unitWord;
-      })
-      // "3 packs of..." → cantidad del pack (no toca "15-count pack" ni "pack of 15 chews")
-      .replace(/\b\d+\s+packs?\b/gi, packs + ' ' + (packs > 1 ? 'packs' : 'pack'));
+    var s = String(text);
+    // "bundle of 3" / "pack of 3" / "set of 3" / "case of 3" → cantidad correcta
+    s = s.replace(/\b(bundle|pack|set|case|lot)\s+of\s+\d+\b/gi, function(m, w){
+      return w.toLowerCase() + ' of ' + packs;
+    });
+    // "includes 3 ..." / "contains 3 ..." antes de una palabra contable
+    s = s.replace(new RegExp('\\b(includes?|contains?|comes with|features?)\\s+\\d+((?:\\s+[A-Za-z,\\-]+){0,4}?)\\s+(' + COUNT_WORDS + ')\\b', 'gi'),
+      function(m, verb, mid, unit){
+        return verb + ' ' + packs + (mid || '') + ' ' + (packs > 1 ? unit.replace(/\b(bottle|box|pack|piece|pc|item|container|jar|tube|can|bag|pouch|packet|set|unit)\b/i, '$1s').replace(/boxs/i,'boxes') : unit);
+      });
+    // "3 units" / "3 bottles" / "3 boxes" genérico (número + palabra contable)
+    s = s.replace(new RegExp('\\b\\d+((?:\\s+[A-Za-z,\\-]+){0,3}?)\\s+(' + COUNT_WORDS + ')\\b', 'gi'),
+      function(m, mid, unit){
+        return packs + (mid || '') + ' ' + unit;
+      });
+    return s;
   }
   if (typeof desc === 'string') {
     var s = fixQty(desc);
@@ -4786,7 +4799,7 @@ function descForPack(desc, packs) {
   else if (!/\bunits?\b/i.test(pc)) pc = qtyLine + ' ' + pc;
   return {
     intro: fixQty(desc.intro || ''),
-    benefits: (desc.benefits || []).slice(),
+    benefits: (desc.benefits || []).map(fixQty),
     package_contents: pc,
     disclaimer: desc.disclaimer || ''
   };
