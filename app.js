@@ -2756,10 +2756,12 @@ async function _doAnalyze(upc){
 
       // Prefer real eBay total, fall back to Amazon/Walmart/suggested price
       const total = rwData.ebay_total || rwData.amazon_price || rwData.walmart_price || rwData.suggested_price || 0;
+      // Promedio real de item+envío si el backend lo manda; si no, usar el total
+      const avgTotal = rwData.ebay_avg || total;
       if (total > 0) {
         ebayFull.found = true;
-        ebayFull.prices = { low: total, avg: total };
-        ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: total } };
+        ebayFull.prices = { low: total, avg: avgTotal };
+        ebayFull.pricing = { sold: { avg: 0, count: 0 }, active: { low: total, avg: avgTotal } };
         ebayFull.topTitles = [prod.name];
         ebayFull.activeListings = rwData.sellers_count || 0;
       }
