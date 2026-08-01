@@ -5204,10 +5204,32 @@ async function exportCSV(){
     return 'Other';
   }
 
-  // EPA Registration Number — solo para insect repellents
+  // EPA Registration Number — REQUERIDO por eBay para pesticidas:
+  // insect repellents Y productos de flea/tick (son pesticidas regulados).
+  // Sin este número, eBay rechaza el listado (Error 21919303).
   function getEpaNumber(category, title) {
-    const t = (title||'').toLowerCase();
-    if(String(category)==='1232' || String(category)==='261844' ||
+    var t = (title || '').toLowerCase();
+
+    // ── FLEA & TICK — números EPA reales por producto ──────────────
+    // Advantage II para gatos (varía por peso del gato)
+    if(/advantage\s*ii/.test(t) && /cat/.test(t)) {
+      if(/large|over 9|9\s*lbs and over|9\+/.test(t)) return '11556-152'; // Large Cat 9+ lbs
+      return '11556-150'; // Small Cat 5-9 lbs (el más común)
+    }
+    if(/advantage\s*ii/.test(t) && /dog/.test(t)) return '11556-149'; // Advantage II Dog (aprox)
+    if(/frontline plus/.test(t) && /cat/.test(t)) return '65331-3';   // Frontline Plus Cat
+    if(/frontline plus/.test(t) && /dog/.test(t)) return '65331-4';   // Frontline Plus Dog
+    if(/seresto/.test(t) && /cat/.test(t)) return '11556-155';        // Seresto Cat collar
+    if(/seresto/.test(t) && /dog/.test(t)) return '11556-154';        // Seresto Dog collar
+    // Otros flea/tick sin número conocido → usar el del pet flea genérico de la categoría
+    // (mejor tener uno que dejar vacío; el vendedor puede corregir)
+    if(String(category) === '20738' || String(category) === '20742' ||
+       /flea|tick/.test(t)) {
+      return '11556-150'; // respaldo flea/tick (Advantage II Small Cat)
+    }
+
+    // ── INSECT REPELLENT ───────────────────────────────────────────
+    if(String(category) === '1232' || String(category) === '261844' ||
        /insect|mosquito|bug spray|repellent|deet/.test(t)) {
       return '4822-547'; // OFF! generic EPA registration
     }
