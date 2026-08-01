@@ -2152,16 +2152,32 @@ function rebuildAndApplyTitle(n) {
   if (!state) return;
   var shade   = state.shade   || '';
   var expDate = state.expDate || '';
-  var title   = rebuildTitle(state.baseTitle, n || state.curPack, shade, expDate);
+  var newPack = n || state.curPack;
+  var title;
+  // Si el usuario editó el título A MANO, NO lo reconstruimos: solo
+  // actualizamos el número de "Pack of N" para que refleje el pack elegido,
+  // conservando todo el texto que el usuario escribió.
+  if (cur && cur._titleManual && cur._selectedTitle) {
+    if (/\bpack of \d+\b/i.test(cur._selectedTitle)) {
+      title = cur._selectedTitle.replace(/\bpack of \d+\b/i, 'Pack of ' + newPack);
+    } else {
+      title = cur._selectedTitle; // no tiene "Pack of N"; se respeta tal cual
+    }
+    title = title.substring(0, 80);
+  } else {
+    title = rebuildTitle(state.baseTitle, newPack, shade, expDate);
+  }
   var titleEl = document.getElementById('pack-title-display');
   if (titleEl) { titleEl.textContent = title; titleEl.dataset.val = title; }
   if (cur) cur._selectedTitle = title;
+  // Mantener el contador de caracteres sincronizado
+  var _cnt = document.getElementById('title-char-count');
+  if (_cnt) { _cnt.textContent = title.length + '/80 chars'; _cnt.style.color = 'var(--mu)'; }
   // Actualizar botón y regenerar si ya hay imagen
   var genBtn = document.getElementById('bundle-gen-btn');
   if (genBtn) genBtn.textContent = '📷 Take Product Photo → Generate Pack of ' + (n || state.curPack);
   // Si ya hay imagen guardada, regenerar con nuevo pack
   if (cur && cur._singleProductImg) {
-    var newPack = n || state.curPack;
     var genDiv  = document.getElementById('bundle-generating');
     var preDiv  = document.getElementById('bundle-preview');
     if (genDiv) { genDiv.style.display = 'block'; genDiv.textContent = '⚙️ Generating Pack of ' + newPack + '...'; }
@@ -2207,6 +2223,83 @@ function rebuildAndApplyTitle(n) {
   }
   return title;
 }
+
+// ── EDICIÓN MANUAL DEL TÍTULO ────────────────────────────────
+// El usuario puede corregir/afinar el título a mano en cualquier momento.
+// Respeta el límite de 80 chars de eBay y actualiza el contador en vivo.
+function startTitleEdit() {
+  var disp    = document.getElementById('pack-title-display');
+  var input   = document.getElementById('pack-title-input');
+  var actions = document.getElementById('title-edit-actions');
+  var editBtn = document.getElementById('title-edit-btn');
+  if (!disp || !input) return;
+  // Cargar el título actual (el que está mostrándose) al textarea
+  input.value = (disp.dataset.val || disp.textContent || '').substring(0, 80);
+  disp.style.display    = 'none';
+  input.style.display   = 'block';
+  if (actions) actions.style.display = 'flex';
+  if (editBtn) editBtn.style.display = 'none';
+  updateTitleCharCount();
+  // Contador en vivo mientras escribe
+  input.oninput = updateTitleCharCount;
+  input.focus();
+}
+
+function updateTitleCharCount() {
+  var input = document.getElementById('pack-title-input');
+  var cnt   = document.getElementById('title-char-count');
+  if (!input || !cnt) return;
+  var len = input.value.length;
+  var color = len >= 70 && len <= 80 ? 'var(--sv,#00e676)'
+            : (len < 70 ? '#e0a800' : '#e74c3c');
+  cnt.textContent = len + '/80 chars' + (len < 70 ? ' — puedes llenar más (meta 70-80)' : (len >= 70 ? ' ✓ buen largo' : ''));
+  cnt.style.color = color;
+}
+
+function saveTitleEdit() {
+  var disp    = document.getElementById('pack-title-display');
+  var input   = document.getElementById('pack-title-input');
+  var actions = document.getElementById('title-edit-actions');
+  var editBtn = document.getElementById('title-edit-btn');
+  var cnt     = document.getElementById('title-char-count');
+  if (!disp || !input) return;
+  // Limpiar: sin saltos de línea, sin espacios dobles, recortar a 80
+  var newTitle = input.value.replace(/[\r\n]+/g, ' ').replace(/\s{2,}/g, ' ').trim().substring(0, 80);
+  if (!newTitle) { toast('⚠️ El título no puede quedar vacío'); return; }
+  // Guardar en pantalla y en el estado del producto
+  disp.textContent   = newTitle;
+  disp.dataset.val   = newTitle;
+  if (cur) {
+    cur._selectedTitle = newTitle;
+    cur._titleManual   = true;   // marca que fue editado a mano
+  }
+  // Volver a modo lectura
+  disp.style.display    = 'block';
+  input.style.display   = 'none';
+  if (actions) actions.style.display = 'none';
+  if (editBtn) editBtn.style.display = 'inline-block';
+  if (cnt) { cnt.textContent = newTitle.length + '/80 chars'; cnt.style.color = 'var(--mu)'; }
+  toast('✅ Título actualizado');
+}
+
+function cancelTitleEdit() {
+  var disp    = document.getElementById('pack-title-display');
+  var input   = document.getElementById('pack-title-input');
+  var actions = document.getElementById('title-edit-actions');
+  var editBtn = document.getElementById('title-edit-btn');
+  var cnt     = document.getElementById('title-char-count');
+  if (disp)    disp.style.display    = 'block';
+  if (input)   input.style.display   = 'none';
+  if (actions) actions.style.display = 'none';
+  if (editBtn) editBtn.style.display = 'inline-block';
+  if (cnt && disp) { cnt.textContent = (disp.dataset.val||'').length + '/80 chars'; cnt.style.color = 'var(--mu)'; }
+}
+
+// Exponer como globales para que los onclick funcionen en iOS Safari
+window.startTitleEdit   = startTitleEdit;
+window.saveTitleEdit    = saveTitleEdit;
+window.cancelTitleEdit  = cancelTitleEdit;
+window.updateTitleCharCount = updateTitleCharCount;
 
 // ── PACK SIZE WHEEL ──────────────────────────────────────────
 const PACK_SIZES = [1,2,3,4,5,6,7,8,9,10,11,12];
@@ -2464,25 +2557,48 @@ REGLAS DE DECISIÓN SAVVY vs DWI (aplica EN ESTE ORDEN):
 PACK SIZE RECOMENDADO: ${optimalPack} unidades a $${bundlePrice} precio total
 (Este es el pack mínimo para ser rentable. Puedes sugerir un pack mayor si tiene muchas ventas)
 
-INSTRUCCIONES PARA EL TÍTULO (LO MÁS IMPORTANTE):
-FÓRMULA: [Marca] [Nombre Producto] [Tamaño/Count] [Atributo Clave] [Pack de N] New
+INSTRUCCIONES PARA EL TÍTULO (LO MÁS IMPORTANTE — ESTO DEFINE LAS VENTAS):
+El título es el factor #1 de búsqueda en eBay Y en Google Shopping. Un título
+corto DESPERDICIA ventas. Tienes 80 caracteres y DEBES aprovecharlos casi todos.
 
-EJEMPLOS DE TÍTULOS PERFECTOS:
-• "Neutrogena Makeup Remover Cleansing Towelettes 25ct Fragrance Free Pack of 2 New"
-• "Centrum Adults Multivitamin Multimineral Supplement 200ct Pack of 2 New"
-• "Colgate Total Whitening Toothpaste Fresh Mint Gel 4.8oz Pack of 2 New Sealed"
+META OBLIGATORIA DE LONGITUD: el título DEBE tener entre 70 y 80 caracteres.
+Si tu título quedó en menos de 70 caracteres, NO has terminado: agrega más
+keywords reales de búsqueda (atributos, scent, variante, sinónimos, uso) hasta
+acercarte lo más posible a 80. NUNCA entregues un título de menos de 70 chars
+si el producto permite llenarlo. Es un PISO, no solo un techo.
+
+FÓRMULA (en este orden): [Marca] [Línea/Modelo] [Nombre Producto] [Tamaño/Count]
+[Atributos clave: scent, SPF, formulación, variante] [Pack of N] New
+
+CÓMO LLENAR HASTA 80 (usa keywords que la gente REALMENTE busca):
+- Tamaño y conteo: "6oz", "24ct", "2.5 fl oz", "72 Batteries" (calcula total si es pack)
+- Aroma/variante: "Fresh Linen", "Citron Scent", "Lavender"
+- Atributo técnico: "SPF 50", "Broad Spectrum", "Water Resistant", "Overnight"
+- Formulación: "Spray", "Gel", "Roll-On", "Pump", "Foaming"
+- Público/uso: "Sport", "Sensitive Skin", "All Skin Types", "Unscented"
+- Sinónimos que la gente busca: para bloqueador incluye "Sunblock"; para toallas
+  incluye "Pads with Wings"; para desodorante incluye "Antiperspirant"
+
+EJEMPLOS DE TÍTULOS PERFECTOS (fíjate cuántos caracteres usan, ~75-80):
+• "Banana Boat Sport Ultra Clear Sunscreen Spray SPF 50 6oz Sunblock Pack of 6 New" (78)
+• "Always Infinity FlexFoam Pads Size 4 Overnight Wings 26ct Unscented Pack of 2 New" (80)
+• "Air Wick Scented Oil Refills Fresh Linen 2.69oz Plug-In Air Freshener Pack of 4 New" (80)
+• "Absorbine PRO Pain Relieving Roll-On Menthol 2.5oz Fast Acting Pack of 6 New" (75)
 
 REGLAS CRÍTICAS DEL TÍTULO:
-1. Máximo 80 caracteres EXACTOS
-2. SIEMPRE empieza con la BRAND
-3. El pack size va ANTES de New, al final
+1. Longitud objetivo: 70-80 caracteres (NUNCA pasar de 80, NUNCA quedar bajo 70 si se puede llenar)
+2. SIEMPRE empieza con la BRAND (marca) con Mayúscula Inicial en cada palabra clave (Title Case)
+3. El "Pack of N" va SIEMPRE al final, justo ANTES de "New"
 4. NUNCA empieces con "2X", "2-Pack", "Bundle" o números
-5. Incluir count/tamaño del producto (oz, ct, ml, lb)
-6. Terminar con "New" o "New Sealed"
-7. NO usar emojis, signos especiales, ni mayúsculas excesivas
+5. SIEMPRE incluir tamaño/count del producto (oz, ct, ml, lb, fl oz)
+6. Terminar con "New" (o "New Sealed" si aplica)
+7. NO usar emojis ni signos especiales (nada de !, *, |, ✓)
+8. NO REPETIR la misma palabra dos veces (no "Sunscreen ... Sunscreen")
+9. Cada palabra en Title Case (Primera Letra Mayúscula), NUNCA TODO EN MAYÚSCULAS
+10. Solo palabras REALES del producto — nunca inventes atributos que no tenga
 
 Responde ÚNICAMENTE con este JSON (sin markdown, sin explicación):
-{"verdict":"SAVVY o DWI","reason":"1 oración en español explicando el veredicto con el dato clave de eBay","title":"título eBay MAX 80 chars","price":${bundlePrice||'NUMERO_precio'},"packSize":${optimalPack},"category":"ID_categoria_ebay","categoryName":"nombre categoría","description":"Bundle of [N] [product name]. [key benefit/use]. Brand new, factory sealed. Fast shipping from North Carolina.","brand":"marca exacta"}
+{"verdict":"SAVVY o DWI","reason":"1 oración en español explicando el veredicto con el dato clave de eBay","title":"título eBay 70-80 chars, Title Case, lleno de keywords SEO reales","price":${bundlePrice||'NUMERO_precio'},"packSize":${optimalPack},"category":"ID_categoria_ebay","categoryName":"nombre categoría","description":"Bundle of [N] [product name]. [key benefit/use]. Brand new, factory sealed. Fast shipping from North Carolina.","brand":"marca exacta"}
 
 CRITERIO SAVVY vs DWI:
 - SAVVY: producto conocido con demanda real, precio eBay > $5 unidad, categoría con rotación
@@ -2884,6 +3000,7 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     cur=res;
     cur._singleProductImg=null; // limpiar foto anterior al escanear nuevo producto
     cur._bundleImg=null;
+    cur._titleManual=false; // el producto nuevo NO hereda edición manual del anterior
     _lastBundleUrl = '';
     try {
       renderResult(res);
@@ -4143,9 +4260,17 @@ function renderResult(r){
 
   // ── 1. TITLE ─────────────────────────────────────────────────
   h+=`<div class="card" style="border-left:3px solid var(--ac)">
-    <div class="lbl" style="color:var(--ac)">📝 eBay SEO Title</div>
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:8px">
+      <div class="lbl" style="color:var(--ac)">📝 eBay SEO Title</div>
+      <button id="title-edit-btn" onclick="startTitleEdit()" ontouchend="event.preventDefault();startTitleEdit()" style="background:var(--sf2);border:1.5px solid var(--bd);border-radius:8px;padding:5px 12px;color:var(--ac);font-size:12px;font-weight:800;cursor:pointer">✏️ Editar</button>
+    </div>
     <div id="pack-title-display" class="val" style="font-size:15px;font-weight:700;line-height:1.5" data-val="${esc(r.title||'')}">${esc(r.title||'')}</div>
-    <div style="font-size:11px;color:var(--mu);margin-top:4px">${(r.title||'').length}/80 chars</div>
+    <textarea id="pack-title-input" maxlength="80" rows="3" style="display:none;width:100%;box-sizing:border-box;font-size:15px;font-weight:700;line-height:1.5;background:var(--sf2);color:var(--tx);border:2px solid var(--ac);border-radius:10px;padding:10px;margin-top:4px;resize:vertical;font-family:inherit"></textarea>
+    <div id="title-char-count" style="font-size:11px;color:var(--mu);margin-top:4px">${(r.title||'').length}/80 chars</div>
+    <div id="title-edit-actions" style="display:none;gap:8px;margin-top:8px">
+      <button onclick="saveTitleEdit()" ontouchend="event.preventDefault();saveTitleEdit()" style="flex:1;background:var(--sv,#00e676);border:none;border-radius:10px;padding:11px;color:#00110a;font-size:14px;font-weight:800;cursor:pointer">✓ Guardar</button>
+      <button onclick="cancelTitleEdit()" ontouchend="event.preventDefault();cancelTitleEdit()" style="flex:1;background:var(--sf2);border:1.5px solid var(--bd);border-radius:10px;padding:11px;color:var(--mu);font-size:14px;font-weight:800;cursor:pointer">✕ Cancelar</button>
+    </div>
   </div>`;
 
   // ── 2. SKU ───────────────────────────────────────────────────
