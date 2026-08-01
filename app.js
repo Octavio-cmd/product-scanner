@@ -531,7 +531,7 @@ function catId(n){
   // ── FIRST AID ────────────────────────────────────────────────
   if(/band.aid|bandage|adhesive bandage|gauze|medical tape|wound care|neosporin|bacitracin|triple antibiotic/i.test(t))return'51227';
   if(/hydrogen peroxide|rubbing alcohol|isopropyl alcohol|antiseptic|betadine/i.test(t))return'51227';
-  if(/thermometer|blood pressure monitor|glucometer|glucose meter|pulse oximeter|heating pad|ice pack|hot pack/i.test(t))return'51227';
+  if(/thermometer|blood pressure monitor|glucometer|glucose meter|pulse oximeter|heating pad|\bice pack\b|\bhot pack\b/i.test(t))return'51227';
   if(/first aid|bandage|wound/i.test(t))return'51227';
 
   // ── FEMININE CARE ────────────────────────────────────────────
@@ -5107,7 +5107,7 @@ async function exportCSV(){
     if(/neosporin|bacitracin|antibiotic ointment|wound care/.test(t)) return 'First Aid';
     if(/hydrogen peroxide|rubbing alcohol|antiseptic|betadine/.test(t)) return 'Antiseptic';
     if(/thermometer|blood pressure|glucose meter|pulse oximeter/.test(t)) return 'Medical Device';
-    if(/heating pad|ice pack|hot pack/.test(t)) return 'Therapy';
+    if(/heating pad|\bice pack\b|\bhot pack\b|cold pack/.test(t)) return 'Therapy';
     if(/brace|compression sleeve|compression sock|support wrap|arthritis glove/.test(t)) return 'Brace';
 
     // ── LIMPIEZA / HOGAR ───────────────────────────────────────────
