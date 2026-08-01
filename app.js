@@ -4933,57 +4933,243 @@ async function exportCSV(){
   var skipped = 0;
 
   // Category → required Type value
+  // ── MAPA CATEGORÍA → Type (respaldo por categoría) ──────────────────
+  // Solo categorías donde el Type es INEQUÍVOCO por la categoría misma.
+  // NO incluimos 31786 (Skin Care) aquí porque es el default general y
+  // asignar "Lotion" a todo lo que cae ahí causaba errores (toallas, roll-ons).
+  // El Type real se decide PRIMERO por título en detectType().
   var CAT_TYPE = {
-    '36870': 'Lip Balm',
     '36870': 'Lip Balm',
     '11838': 'Deodorant',
     '11840': 'Body Wash',
     '26683': 'Razor',
     '67167': 'Pads',
-    '105070': 'Underwear',
+    '105070': 'Adult Diaper',
     '36478': 'Nail Polish',
-    '60496': 'Foundation',
-    '180345': 'Perfume',
     '57041': 'Eye Drops',
     '11854': 'Shampoo',
+    '131689': 'Shampoo',
+    '31085': 'Hair Color',
+    '45258': 'Hair Styling',
+    '67602': 'Toothpaste',
     '1232':  'Insect Repellent',
     '261844':'Insect Repellent',
     '19264': 'Brace',
-    '51227': 'Bandage',
+    '181':   'Brace',
+    '51227': 'First Aid',
     '67169': 'Pain Reliever',
     '180959':'Vitamin',
-    '31786': 'Lotion',
-    '11840': 'Body Wash',
+    '48619': 'Battery',
+    '44867': 'Cable',
+    '112529':'Headphones',
+    '14969': 'Speaker',
+    '9394':  'Case',
+    '6000':  'Automotive',
+    '16486': 'Office Supply',
+    '261186':'Book',
+    '20695': 'Mug',
+    '177005':'Knife',
+    '20654': 'Cookware',
+    '168763':'Appliance',
+    '20650': 'Dinnerware',
+    '26677': 'Grill Tool',
+    '20725': 'Grill',
+    '19006': 'Building Set',
+    '31788': 'Body Lotion',
+    '32062': 'Face Cream',
+    '2984':  'Baby Care',
+    '1281':  'Pet Supply',
+    '14308': 'Food',
+    '888':   'Fitness Equipment',
+    '75655': 'Fitness Equipment',
+    '220':   'Toy',
+    '261068':'Toy',
   };
 
-  // Detectar tipo desde título
+  // ── Detectar el Type — TÍTULO PRIMERO (más confiable), luego categoría ──
+  // El título describe el producto exacto; la categoría a veces cae al
+  // default (Skin Care) y no refleja lo que realmente es. Por eso revisamos
+  // el título primero, en orden de más específico a más general.
   function detectType(category, title) {
-    const mapped = CAT_TYPE[String(category)];
-    if (mapped) return mapped;
-    const t = (title||'').toLowerCase();
-    if(/lip balm|chapstick|lip butter/.test(t)) return 'Lip Balm';
-    if(/body wash|shower gel/.test(t)) return 'Body Wash';
-    if(/lotion|moisturizer/.test(t)) return 'Lotion';
+    var t = (title || '').toLowerCase();
+
+    // ── HEALTH & BEAUTY — específicos primero ──────────────────────
+    // Roll-ons y analgésicos tópicos (Absorbine, Bengay, Icy Hot, Biofreeze)
+    if(/roll.?on|absorbine|bengay|icy hot|biofreeze|aspercreme|salonpas|tiger balm|pain reliev/.test(t)) return 'Pain Relief';
+    // Toallas / productos femeninos
+    if(/sanitary|maxi pad|panty liner|pantiliner|feminine pad|menstrual|always infinity|always pad|tampon|tampax|kotex|stayfree|playtex/.test(t)) return 'Pads';
+    if(/incontinence|adult diaper|depend|poise|tena|bladder/.test(t)) return 'Adult Diaper';
+    // Air fresheners / aromatizantes / repuestos
+    if(/air freshener|air wick|febreze|glade|scented oil|plug.?in refill|room spray|odor eliminat|wax melt|scentsy|renuzit/.test(t)) return 'Air Freshener';
+    if(/candle|yankee candle|wax warmer/.test(t)) return 'Candle';
+    // Cuidado de piel
+    if(/lip balm|chapstick|lip butter|carmex|blistex/.test(t)) return 'Lip Balm';
+    if(/body wash|shower gel|bath gel|body cleanser/.test(t)) return 'Body Wash';
+    if(/bar soap|hand soap|liquid soap|antibacterial soap|castile soap/.test(t)) return 'Soap';
+    if(/sunscreen|sunblock|\bspf\b|sun protection|after sun/.test(t)) return 'Sunscreen';
+    if(/face cream|facial cream|face moisturizer|facial moisturizer|anti.aging|wrinkle cream|night cream|day cream|eye cream/.test(t)) return 'Face Cream';
+    if(/body lotion|hand lotion|body cream|hand cream|body butter|moisturizing lotion|daily moisturizer/.test(t)) return 'Body Lotion';
+    if(/face wash|facial cleanser|face scrub|cleanser/.test(t)) return 'Face Wash';
+    if(/serum|toner|retinol serum|hyaluronic|niacinamide/.test(t)) return 'Serum';
+    if(/\blotion|moisturizer|moisturis/.test(t)) return 'Lotion';
+    // Cabello
     if(/shampoo/.test(t)) return 'Shampoo';
     if(/conditioner/.test(t)) return 'Conditioner';
-    if(/hair color|hair dye/.test(t)) return 'Hair Color';
-    if(/mascara/.test(t)) return 'Mascara';
-    if(/foundation|concealer/.test(t)) return 'Foundation';
-    if(/lipstick|lip gloss/.test(t)) return 'Lipstick';
-    if(/eyeshadow/.test(t)) return 'Eye Shadow';
+    if(/hair color|hair dye|hair bleach/.test(t)) return 'Hair Color';
+    if(/hair spray|hairspray|hair gel|hair mousse|pomade|hair wax/.test(t)) return 'Hair Styling';
+    if(/hair oil|hair mask|hair treatment|hair serum/.test(t)) return 'Hair Treatment';
+    // Dental
+    if(/toothpaste/.test(t)) return 'Toothpaste';
+    if(/toothbrush/.test(t)) return 'Toothbrush';
+    if(/mouthwash|mouth rinse|oral rinse/.test(t)) return 'Mouthwash';
+    if(/dental floss|floss pick|flosser|interdental/.test(t)) return 'Floss';
+    if(/whitening strip|whitening kit|teeth whiten/.test(t)) return 'Whitening';
+    // Afeitado
+    if(/shaving cream|shave gel|shave foam|aftershave|after shave/.test(t)) return 'Shaving Cream';
+    if(/razor|blade refill|cartridge razor/.test(t)) return 'Razor';
+    // Desodorante
     if(/deodorant|antiperspirant/.test(t)) return 'Deodorant';
-    if(/razor/.test(t)) return 'Razor';
-    if(/shaving cream|shave gel/.test(t)) return 'Shaving Cream';
-    if(/nail polish|nail color/.test(t)) return 'Nail Polish';
-    if(/perfume|cologne|eau de/.test(t)) return 'Perfume';
+    // Fragancia
+    if(/perfume|cologne|eau de toilette|eau de parfum|body mist|body spray|fragrance/.test(t)) return 'Fragrance';
+    // Maquillaje
+    if(/mascara/.test(t)) return 'Mascara';
+    if(/foundation|bb cream|cc cream/.test(t)) return 'Foundation';
+    if(/concealer/.test(t)) return 'Concealer';
+    if(/lipstick|lip gloss|lip liner|lip stain|lip tint/.test(t)) return 'Lipstick';
+    if(/eyeshadow|eye shadow/.test(t)) return 'Eye Shadow';
+    if(/eyeliner|eye liner/.test(t)) return 'Eyeliner';
+    if(/blush|bronzer|contour|highlighter makeup/.test(t)) return 'Makeup';
+    if(/makeup remover|micellar|makeup wipe/.test(t)) return 'Makeup Remover';
+    // Uñas
+    if(/nail polish|nail lacquer|nail color|nail gel/.test(t)) return 'Nail Polish';
+    if(/nail file|nail clipper|cuticle|nail remover|acetone/.test(t)) return 'Nail Care';
+    // Ojos / oídos
+    if(/eye drop|eye wash|visine|contact solution|contact lens/.test(t)) return 'Eye Drops';
+    if(/ear drop|ear wax|earwax|ear cleaner/.test(t)) return 'Ear Care';
+    // Cuidado de pies
+    if(/foot cream|heel balm|callus|corn remover|athlete.?s foot|antifungal/.test(t)) return 'Foot Care';
+
+    // ── SUPLEMENTOS Y MEDICINA ─────────────────────────────────────
+    // Vitaminas y suplementos: el Type "Vitamin"/"Supplement" es mejor para
+    // búsqueda que la forma (tablet/capsule), así que va PRIMERO.
+    if(/multivitamin|vitamin [abcdek]|vitamin d3|vitamin b12|prenatal vitamin/.test(t)) return 'Vitamin';
+    if(/probiotic|omega.?3|fish oil|collagen|biotin|melatonin|turmeric|elderberry|ashwagandha|magnesium|zinc supplement|calcium supplement|iron supplement|coq10/.test(t)) return 'Supplement';
+    if(/fiber supplement|metamucil|benefiber|psyllium/.test(t)) return 'Fiber Supplement';
+    if(/whey protein|protein powder|protein shake|mass gainer/.test(t)) return 'Protein Powder';
+    if(/creatine|pre.?workout|bcaa|amino acid/.test(t)) return 'Sports Supplement';
+    if(/testosterone booster|test booster|nugenix|t.boost/.test(t)) return 'Supplement';
+    if(/\bvitamin\b|supplement/.test(t)) return 'Vitamin';
+    // Medicina OTC
+    if(/ibuprofen|tylenol|advil|motrin|aspirin|acetaminophen|naproxen|aleve/.test(t)) return 'Pain Reliever';
+    if(/antihistamine|allergy relief|zyrtec|claritin|benadryl|allegra/.test(t)) return 'Allergy Relief';
+    if(/antacid|heartburn|tums|pepcid|prilosec|nexium/.test(t)) return 'Antacid';
+    if(/cough|cold medicine|nyquil|dayquil|mucinex|robitussin|sinus|decongestant/.test(t)) return 'Cold & Flu';
+    if(/sleep aid|unisom|zzzquil/.test(t)) return 'Sleep Aid';
+    // Forma (solo si no fue identificado como vitamina/medicina arriba)
     if(/gummy|gummies/.test(t)) return 'Gummy';
-    if(/capsule|softgel/.test(t)) return 'Capsule';
-    if(/powder/.test(t)) return 'Powder';
-    if(/tablet|pill/.test(t)) return 'Tablet';
-    if(/insect|mosquito|bug spray|repellent/.test(t)) return 'Insect Repellent';
-    if(/glove|sleeve|brace|wrap|support/.test(t)) return 'Brace';
-    if(/bandage|gauze/.test(t)) return 'Bandage';
-    if(/sunscreen|spf/.test(t)) return 'Sunscreen';
+    if(/softgel|soft gel/.test(t)) return 'Softgel';
+    if(/capsule/.test(t)) return 'Capsule';
+    if(/tablet|caplet/.test(t)) return 'Tablet';
+
+    // ── PRIMEROS AUXILIOS ──────────────────────────────────────────
+    if(/band.?aid|bandage|adhesive bandage|gauze|medical tape/.test(t)) return 'Bandage';
+    if(/neosporin|bacitracin|antibiotic ointment|wound care/.test(t)) return 'First Aid';
+    if(/hydrogen peroxide|rubbing alcohol|antiseptic|betadine/.test(t)) return 'Antiseptic';
+    if(/thermometer|blood pressure|glucose meter|pulse oximeter/.test(t)) return 'Medical Device';
+    if(/heating pad|ice pack|hot pack/.test(t)) return 'Therapy';
+    if(/brace|compression sleeve|compression sock|support wrap|arthritis glove/.test(t)) return 'Brace';
+
+    // ── LIMPIEZA / HOGAR ───────────────────────────────────────────
+    if(/laundry detergent|laundry pod|tide|gain detergent|persil/.test(t)) return 'Laundry Detergent';
+    if(/fabric softener|dryer sheet|downy|bounce/.test(t)) return 'Fabric Softener';
+    if(/dish soap|dishwashing liquid|dawn dish|cascade/.test(t)) return 'Dish Soap';
+    if(/disinfectant|lysol|clorox|bleach|all.purpose cleaner|multi.surface/.test(t)) return 'Cleaner';
+    if(/glass cleaner|windex/.test(t)) return 'Glass Cleaner';
+    if(/paper towel|bounty|scott towel/.test(t)) return 'Paper Towel';
+    if(/toilet paper|bath tissue|charmin|cottonelle/.test(t)) return 'Toilet Paper';
+    if(/facial tissue|kleenex|puffs/.test(t)) return 'Facial Tissue';
+    if(/trash bag|garbage bag|hefty|glad bag/.test(t)) return 'Trash Bag';
+    if(/plastic wrap|aluminum foil|sandwich bag|ziploc|storage bag/.test(t)) return 'Food Storage';
+    if(/sponge|scrub brush|mop|broom|dustpan/.test(t)) return 'Cleaning Tool';
+
+    // ── COMIDA Y BEBIDA ────────────────────────────────────────────
+    if(/coffee|espresso|k.?cup|coffee pod|cold brew/.test(t)) return 'Coffee';
+    if(/tea bag|green tea|herbal tea/.test(t)) return 'Tea';
+    if(/energy drink|monster|red bull|5.hour energy|bang energy/.test(t)) return 'Energy Drink';
+    if(/sports drink|gatorade|powerade|electrolyte|pedialyte/.test(t)) return 'Sports Drink';
+    if(/protein bar|kind bar|clif bar|granola bar|nutri.grain/.test(t)) return 'Snack Bar';
+    if(/candy|chocolate|gummy candy|skittles|m&m|reese|hershey/.test(t)) return 'Candy';
+    if(/chewing gum|breath mint|tic tac|altoid|trident|orbit gum/.test(t)) return 'Gum & Mints';
+    if(/chip|popcorn|pretzel|trail mix|nut snack|cracker/.test(t)) return 'Snack';
+    if(/sauce|ketchup|mustard|mayonnaise|salad dressing|hot sauce/.test(t)) return 'Condiment';
+    if(/cereal|oatmeal|granola|breakfast/.test(t)) return 'Breakfast Food';
+    if(/soup|broth|ramen|instant noodle|bouillon/.test(t)) return 'Soup';
+    if(/seasoning|spice|garlic powder|paprika|cumin/.test(t)) return 'Seasoning';
+
+    // ── ELECTRÓNICOS ───────────────────────────────────────────────
+    if(/aa battery|aaa battery|9v battery|lithium battery|alkaline battery|duracell|energizer|rayovac/.test(t)) return 'Battery';
+    if(/usb.?c cable|lightning cable|charging cable|phone cable/.test(t)) return 'Cable';
+    if(/phone charger|wireless charger|power bank|charging pad|wall charger/.test(t)) return 'Charger';
+    if(/earbuds|earphone|airpod|in.?ear/.test(t)) return 'Earbuds';
+    if(/headphone|over.?ear|on.?ear/.test(t)) return 'Headphones';
+    if(/bluetooth speaker|portable speaker|wireless speaker/.test(t)) return 'Speaker';
+    if(/phone case|screen protector|tempered glass|tablet case/.test(t)) return 'Case';
+    if(/light bulb|led bulb|smart bulb|led strip/.test(t)) return 'Light Bulb';
+
+    // ── AUTOMOTIVE ─────────────────────────────────────────────────
+    if(/motor oil|engine oil|synthetic oil|castrol|mobil.?1|valvoline/.test(t)) return 'Motor Oil';
+    if(/wiper blade|windshield/.test(t)) return 'Wiper Blade';
+    if(/car wash|turtle wax|armor all|rain.?x/.test(t)) return 'Car Care';
+
+    // ── OFICINA / ESCUELA ──────────────────────────────────────────
+    if(/pen|sharpie|marker|highlighter/.test(t)) return 'Writing Instrument';
+    if(/notebook|composition book|legal pad|sticky note|post.?it/.test(t)) return 'Paper Product';
+    if(/stapler|tape dispenser|scotch tape|binder|folder/.test(t)) return 'Office Supply';
+
+    // ── DEPORTES / FITNESS ─────────────────────────────────────────
+    if(/yoga mat|yoga block|yoga strap/.test(t)) return 'Yoga';
+    if(/resistance band|dumbbell|weight plate|jump rope|foam roller/.test(t)) return 'Exercise Equipment';
+
+    // ── LIBROS ─────────────────────────────────────────────────────
+    if(/board book|children.?s book|coloring book|activity book|workbook|cookbook|novel|paperback|hardcover/.test(t)) return 'Book';
+
+    // ── COCINA / HOGAR ─────────────────────────────────────────────
+    if(/mug|tumbler|travel mug|coffee cup/.test(t)) return 'Mug';
+    if(/knife|knives|chef knife|paring knife/.test(t)) return 'Knife';
+    if(/pan|pot|skillet|wok|dutch oven|cookware/.test(t)) return 'Cookware';
+    if(/blender|mixer|toaster|air fryer|instant pot|slow cooker|coffee maker/.test(t)) return 'Small Appliance';
+    if(/plate|bowl|platter|dinnerware|flatware/.test(t)) return 'Dinnerware';
+    if(/grill tool|bbq tool|grilling set/.test(t)) return 'Grill Tool';
+
+    // ── JUGUETES ───────────────────────────────────────────────────
+    if(/lego|building set|building block/.test(t)) return 'Building Set';
+    if(/action figure|doll|barbie|funko/.test(t)) return 'Action Figure';
+    if(/board game|card game|puzzle|jigsaw/.test(t)) return 'Game';
+    if(/hot wheels|matchbox|die.?cast|toy car/.test(t)) return 'Toy Vehicle';
+    if(/fidget|slime|kinetic sand|pop it/.test(t)) return 'Novelty Toy';
+    if(/toy|playset/.test(t)) return 'Toy';
+
+    // ── BEBÉ ───────────────────────────────────────────────────────
+    if(/diaper|pampers|huggies|luvs/.test(t)) return 'Diaper';
+    if(/baby wipe|baby cleaning wipe/.test(t)) return 'Baby Wipe';
+    if(/baby formula|infant formula|similac|enfamil/.test(t)) return 'Baby Formula';
+    if(/baby food|pureed|gerber/.test(t)) return 'Baby Food';
+    if(/baby lotion|baby wash|baby shampoo|baby oil|baby powder/.test(t)) return 'Baby Care';
+
+    // ── MASCOTAS ───────────────────────────────────────────────────
+    if(/dog food|cat food|pet food|kibble/.test(t)) return 'Pet Food';
+    if(/dog treat|cat treat|pet treat/.test(t)) return 'Pet Treat';
+    if(/flea|tick|frontline|advantage flea|heartgard/.test(t)) return 'Flea & Tick';
+    if(/pet toy|cat toy|dog toy|catnip|chew toy/.test(t)) return 'Pet Toy';
+    if(/cat litter|kitty litter/.test(t)) return 'Cat Litter';
+
+    // ── RESPALDO POR CATEGORÍA (si el título no fue concluyente) ────
+    var mapped = CAT_TYPE[String(category)];
+    if (mapped) return mapped;
+
+    // ── ÚLTIMO RECURSO ─────────────────────────────────────────────
+    // Nunca devolvemos un Type engañoso. "Other" es honesto cuando no
+    // podemos determinar el tipo — mejor que asumir "Lotion".
     return 'Other';
   }
 
