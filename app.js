@@ -3286,6 +3286,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     packs:       packs,
     photo:       photoUrl,
     bundleImg:   photoUrl,
+    specifics:   (cur && cur._specifics) || {},
     scannedBy:   SAVVY_CURRENT_USER || 'unknown'
   });
   saveBulkToStorage();
@@ -4205,6 +4206,111 @@ Rules:
   }
 }
 
+// ── GENERAR ITEM SPECIFICS CON IA ───────────────────────────────────
+// Le pregunta a Claude los item specifics correctos para el producto,
+// según su título, marca y categoría. Claude CONOCE los productos (ej: sabe
+// que Advantage II = Imidacloprid 9.1%) y qué specifics pide cada categoría
+// de eBay. Devuelve solo los specifics que aplican; el resto quedan vacíos.
+// Guarda el resultado en cur._specifics (un objeto {nombre: valor}).
+async function psGenerateSpecifics(){
+  if(!cur) { toast('⚠️ Escanea un producto primero'); return; }
+  var key = (localStorage.getItem('savvy_api_key') || (typeof DEFAULT_CLAUDE_KEY !== 'undefined' ? DEFAULT_CLAUDE_KEY : ''));
+  if(!key){ toast('⚠️ Falta API key de Anthropic'); return; }
+
+  var btn = document.getElementById('specifics-btn');
+  var origBtnHtml = btn ? btn.innerHTML : '';
+  if(btn){ btn.disabled = true; btn.innerHTML = '⏳ Revisando...'; }
+
+  var titleForAI = (cur._selectedTitle || cur.title || '').replace(/\s*Pack of \d+\s*/gi,' ').replace(/\s*New\s*$/i,'').trim();
+  var brandForAI = cur.brand || '';
+  var catForAI   = String(cur.category || '');
+
+  // Lista de specifics que el CSV soporta (columnas comunes ampliadas).
+  // Claude llena SOLO los que apliquen al producto; deja el resto fuera.
+  var SUPPORTED = [
+    'Size','Volume','Count','Color','Scent','Flavor','Formulation','Material',
+    'Features','Active Ingredients','Ingredients','Number of Doses',
+    'For Pet Type','Pet Weight','Suitable For','Hair Type','Skin Type',
+    'Department','Age Group','MPN','Model','Connectivity','SPF','Power Source',
+    'Item Form','Fragrance','Scent Type','Unit Quantity','Unit Type'
+  ];
+
+  var prompt = 'You are an eBay listing expert. For the product below, return the correct eBay item specifics as a JSON object.\n\n'
+    + 'Product title: ' + titleForAI + '\n'
+    + 'Brand: ' + brandForAI + '\n'
+    + 'eBay category ID: ' + catForAI + '\n\n'
+    + 'RULES:\n'
+    + '- Return ONLY a flat JSON object of {"Specific Name": "value"}.\n'
+    + '- Use ONLY these specific names when they apply: ' + SUPPORTED.join(', ') + '.\n'
+    + '- Include a specific ONLY if you are confident of its value for THIS exact product. Omit ones you are unsure about.\n'
+    + '- Use your product knowledge: e.g. Advantage II for cats contains "Imidacloprid 9.1%, Pyriproxyfen 0.46%" as Active Ingredients, is Fragrance-Free, Waterproof, and a Topical/Spot-On formulation.\n'
+    + '- Extract Size/Volume/Count/Color/Scent from the title when present (e.g. "24.3 fl oz", "90 Count", "Pomegranate Rose Water").\n'
+    + '- Values must be short and eBay-friendly (a few words max).\n'
+    + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
+    + '- Return ONLY the JSON, no preamble, no markdown.';
+
+  try{
+    var ctrl = new AbortController();
+    var timer = setTimeout(function(){ ctrl.abort(); }, 20000);
+    var r = await fetch('https://api.anthropic.com/v1/messages',{
+      method:'POST',
+      signal: ctrl.signal,
+      headers:{
+        'Content-Type':'application/json',
+        'x-api-key':key,
+        'anthropic-version':'2023-06-01',
+        'anthropic-dangerous-direct-browser-access':'true'
+      },
+      body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:600,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
+    });
+    clearTimeout(timer);
+    if(!r.ok) throw new Error('Claude HTTP ' + r.status);
+    var d = await r.json();
+    var txt = (d.content && d.content[0] && d.content[0].text || '').replace(/```json|```/g,'').trim();
+    var parsed = JSON.parse(txt);
+
+    // Guardar solo pares válidos (nombre soportado + valor no vacío)
+    var clean = {};
+    var count = 0;
+    for(var k in parsed){
+      if(!parsed.hasOwnProperty(k)) continue;
+      var val = String(parsed[k] == null ? '' : parsed[k]).trim();
+      if(val && SUPPORTED.indexOf(k) !== -1){
+        clean[k] = val.substring(0, 65); // eBay limita valores de specifics
+        count++;
+      }
+    }
+    cur._specifics = clean;
+
+    renderSpecificsPreview(clean);
+    toast('✅ ' + count + ' especificaciones agregadas');
+  }catch(err){
+    console.error('psGenerateSpecifics error:', err);
+    toast(err.name==='AbortError' ? '⚠️ Claude tardó demasiado' : '⚠️ No se pudieron generar especificaciones');
+  }finally{
+    if(btn){ btn.disabled = false; btn.innerHTML = origBtnHtml; }
+  }
+}
+window.psGenerateSpecifics = psGenerateSpecifics;
+
+// Muestra los specifics generados en pantalla para que el usuario los revise
+function renderSpecificsPreview(specs){
+  var box = document.getElementById('specifics-preview');
+  if(!box) return;
+  if(!specs || !Object.keys(specs).length){
+    box.innerHTML = '';
+    return;
+  }
+  var rows = Object.keys(specs).map(function(k){
+    return '<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:1px solid var(--bd)">'
+      + '<span style="color:var(--tx2);font-size:12px">' + k + '</span>'
+      + '<span style="font-size:12px;font-weight:700;text-align:right;max-width:60%">' + specs[k] + '</span></div>';
+  }).join('');
+  box.innerHTML = '<div style="background:var(--sf2);border-radius:8px;padding:10px;margin-top:8px">'
+    + '<div style="color:var(--ac);font-size:11px;font-weight:800;margin-bottom:6px">✅ ESPECIFICACIONES (IA)</div>'
+    + rows + '</div>';
+}
+
 // Convierte la descripción estructurada en HTML para mostrar + copiar
 function renderDescriptionHTML(desc){
   if(!desc) return '';
@@ -4320,19 +4426,14 @@ function renderResult(r){
   h+=
   (function(){
     var _cb=low||avg||0;
-    var h2='<div class="card"><div class="lbl">📦 SELECT PACK SIZE</div>';
-    h2+='<div class="pack-chips" id="pack-chips">';
-    PACK_SIZES.forEach(function(n){
-      var sel=(n===packs)?' sel':'';
-      var cp=_cb>0?'$'+(_cb*n*0.88).toFixed(2):'';
-      h2+='<div class="pack-chip'+sel+'" onclick="pickPack('+n+')">'
-        +'<div class="pc-n">'+n+'pk</div>'+(cp?'<div class="pc-p">'+cp+'</div>':'')+'</div>';
-    });
-    h2+='</div>';
-    h2+='<div id="pack-sel-display" style="font-size:12px;color:var(--mu);margin-top:4px">Selected: <strong style="color:var(--ac)">Pack of '+packs+'</strong></div>';
-    h2+='<div class="extra-field"><div class="extra-label">🎨 Shade / Color (optional)</div><input class="extra-input" id="shade-input" type="text" placeholder="e.g. Cherry Red, #12 Brown..." oninput="updateShadeColor(this.value)"></div>';
-    // Expiration date fue movido ARRIBA (después de Location) para evitar el conflicto
-    // de memoria de cámara en iOS Safari. Este bloque queda vacío para no duplicar IDs.
+    // NOTA: La sección "SELECT PACK SIZE" de arriba fue removida porque no se
+    // usaba — el pack se elige abajo en el reparto de inventario (BULK SPLIT).
+    // Mantenemos los elementos ocultos (pack-chips, pack-sel-display) para no
+    // romper referencias de otras funciones, y conservamos el Shade/Color.
+    var h2='<div class="card"><div class="lbl">🎨 Shade / Color (opcional)</div>';
+    h2+='<div class="pack-chips" id="pack-chips" style="display:none"></div>';
+    h2+='<div id="pack-sel-display" style="display:none">Pack of '+packs+'</div>';
+    h2+='<div class="extra-field" style="margin-top:0"><input class="extra-input" id="shade-input" type="text" placeholder="e.g. Cherry Red, #12 Brown..." oninput="updateShadeColor(this.value)"></div>';
     return h2;
   }());
 
@@ -4426,6 +4527,16 @@ function renderResult(r){
 
   // ── 7. DWI REASON ────────────────────────────────────────────
   if(!sv)h+=`<div class="card"><div class="lbl">DWI Reason</div><div class="val">${esc(r.reason||'')}</div></div>`;
+
+  // ── AUDITORÍA FINAL CON IA — revisa TODO el listado y completa specifics ──
+  // Va al final, justo antes de agregar al CSV, para que revise el listado
+  // completo (título, categoría, fotos ya puestas) como último paso.
+  h+=`<div class="card" style="border-left:3px solid #7c4dff;background:rgba(124,77,255,.06)">
+    <div class="lbl" style="color:#a98bff">✨ Auditoría IA — Item Specifics</div>
+    <div style="font-size:12px;color:var(--mu);margin:4px 0 8px">Último paso: deja que la IA revise el listado y complete las especificaciones para máxima visibilidad en eBay.</div>
+    <button id="specifics-btn" onclick="psGenerateSpecifics()" ontouchend="event.preventDefault();psGenerateSpecifics()" style="width:100%;background:linear-gradient(135deg,#7c4dff,#448aff);border:none;border-radius:10px;padding:13px;color:#fff;font-size:15px;font-weight:800;cursor:pointer">🔍 Revisar y Completar Listado</button>
+    <div id="specifics-preview"></div>
+  </div>`;
 
   h+=sv
     ? `<button class="add-btn" id="addBtn">➕ ADD TO CSV</button>`
@@ -4711,16 +4822,6 @@ function emptyStateHTML(){
       <div class="pc"><div class="lbl">eBay Lowest<br><span style="font-size:9px;color:var(--mu)">(item+ship, NEW)</span></div><div class="pc-num low" style="color:var(--mu)">—</div></div>
       <div class="pc"><div class="lbl">eBay Avg<br><span style="font-size:9px;color:var(--mu)">(item+ship)</span></div><div class="pc-num avg" style="color:var(--mu)">—</div></div>
       <div class="pc"><div class="lbl">Your Bundle</div><div class="pc-num bdl" style="color:var(--mu)">—</div></div>
-    </div>
-    <div class="card">
-      <div class="lbl">📦 SELECT PACK SIZE</div>
-      <div class="pack-chips" style="opacity:.35;pointer-events:none">
-        <div class="pack-chip"><div class="pc-n">1pk</div></div>
-        <div class="pack-chip sel"><div class="pc-n">3pk</div></div>
-        <div class="pack-chip"><div class="pc-n">6pk</div></div>
-        <div class="pack-chip"><div class="pc-n">12pk</div></div>
-      </div>
-      <div style="font-size:12px;color:var(--mu);margin-top:4px">Pack size will be suggested automatically</div>
     </div>`;
 }
 
@@ -4957,8 +5058,27 @@ async function exportCSV(){
     '*C:Brand','Product:UPC','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
     'C:Expiration Date','C:Dosage','C:Shade','C:Connectivity',
+    // ── Item specifics generados por IA (columnas comunes) ──
+    'C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients',
+    'C:Features','C:Material','C:Number of Doses','C:Suitable For',
+    'C:Fragrance','C:Item Form',
     'WeightMajor','WeightMinor'
   ];
+
+  // Nombres de specific de IA → columna del CSV (para mapear cur._specifics).
+  // La IA puede usar varios nombres equivalentes; los normalizamos aquí.
+  var SPEC_COL_MAP = {
+    'Size':'C:Size', 'Volume':'C:Volume', 'Count':'C:Size', 'Unit Quantity':'C:Size',
+    'Scent':'C:Scent', 'Scent Type':'C:Scent', 'Flavor':'C:Scent',
+    'Formulation':'C:Formulation', 'Item Form':'C:Item Form',
+    'Active Ingredients':'C:Active Ingredients', 'Ingredients':'C:Active Ingredients',
+    'Features':'C:Features',
+    'Material':'C:Material',
+    'Number of Doses':'C:Number of Doses',
+    'Suitable For':'C:Suitable For', 'For Pet Type':'C:Suitable For', 'Hair Type':'C:Suitable For', 'Skin Type':'C:Suitable For',
+    'Fragrance':'C:Fragrance'
+  };
+  var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form'];
 
   var lines = ['Info,Version=1.0.0,Template=fx_category_template_EBAY_US', HDR.join(',')];
   var skipped = 0;
@@ -5419,6 +5539,19 @@ async function exportCSV(){
     // eBay solo acepta UPCs de 12-14 dígitos. Si no hay UPC válido, va vacío
     // (eBay permite "Does not apply" pero preferimos dejarlo vacío que inventar).
     var upcVal = '';
+    // ── Helper: obtiene el valor de un specific de IA para una columna dada.
+    // Recorre cur.specifics del producto y mapea cada nombre a su columna.
+    var _itSpecs = (it.specifics && typeof it.specifics === 'object') ? it.specifics : {};
+    var _specByCol = {};
+    for (var _sk in _itSpecs) {
+      if (!_itSpecs.hasOwnProperty(_sk)) continue;
+      var _col = SPEC_COL_MAP[_sk];
+      if (_col && _itSpecs[_sk] && !_specByCol[_col]) {
+        _specByCol[_col] = String(_itSpecs[_sk]).trim();
+      }
+    }
+    function _specForCol(col){ return _specByCol[col] || ''; }
+
     var _rawUpc = String((it.upc || '')).replace(/[^0-9]/g, '');
     if (!_rawUpc && it.sku) {
       // SKU formato BRAND-UPC-Npk → sacar el bloque de dígitos más largo
@@ -5456,6 +5589,18 @@ async function exportCSV(){
       dosageVal,
       (it.shade || ''),
       connectivityVal,
+      // ── Valores de specifics de IA (mapeados a sus columnas) ──
+      _specForCol('C:Size'),
+      _specForCol('C:Volume'),
+      _specForCol('C:Scent'),
+      _specForCol('C:Formulation'),
+      _specForCol('C:Active Ingredients'),
+      _specForCol('C:Features'),
+      _specForCol('C:Material'),
+      _specForCol('C:Number of Doses'),
+      _specForCol('C:Suitable For'),
+      _specForCol('C:Fragrance'),
+      _specForCol('C:Item Form'),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
