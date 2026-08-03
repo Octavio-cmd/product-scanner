@@ -3382,7 +3382,7 @@ function renderSplitCalculatorHTML(ebay){
         <input class="extra-input" id="split-weight-oz" type="text" inputmode="decimal" placeholder="oz" oninput="updateSplitCalc()" style="flex:1;text-align:center">
         <span style="color:var(--mu);font-size:13px;font-weight:700">oz</span>
       </div>
-      <div style="font-size:11px;color:var(--mu);margin-top:5px">Se suma ½ lb de caja por paquete. El envío es un estimado (promedio USPS/UPS a todo EE.UU.).</div>
+      <div style="font-size:11px;color:var(--mu);margin-top:5px">Se suma el peso de la caja según el tamaño (2-12 oz). El envío es un estimado (promedio USPS/UPS a todo EE.UU.).</div>
     </div>
     <div style="margin-top:8px;font-size:12px;color:var(--mu)">
       Demanda detectada: <strong id="split-tier-label" style="color:var(--ac)"></strong>
@@ -3395,7 +3395,7 @@ function renderSplitCalculatorHTML(ebay){
 
 // ── PESO Y ESTIMADO DE ENVÍO (Parte A: solo pantalla, no toca el CSV) ──
 // Constante: peso de caja/empaque que se suma a CADA paquete
-var BOX_WEIGHT_LB = 0.5;
+var BOX_WEIGHT_LB = 0.5; // OBSOLETO — reemplazado por boxWeightLb() proporcional. Se deja para no romper referencias externas.
 
 // Lee el peso de una unidad (lb + oz) de los inputs → devuelve libras decimales
 function getUnitWeightLb(){
@@ -3404,10 +3404,22 @@ function getUnitWeightLb(){
   return lb + (oz / 16);
 }
 
-// Peso total de un paquete = (peso unidad × cantidad) + caja
+// Peso de la CAJA de envío, proporcional al peso del producto.
+// Un producto chico va en sobre/caja chica (poco peso extra); uno grande
+// va en caja de cartón con relleno (más peso extra). Devuelve libras.
+function boxWeightLb(productLb){
+  if (productLb <= 0)   return 0;
+  if (productLb < 0.5)  return 2 / 16;   // < 8 oz  → +2 oz (sobre acolchado)
+  if (productLb < 1)    return 4 / 16;   // 8oz-1lb → +4 oz (caja chica)
+  if (productLb <= 3)   return 8 / 16;   // 1-3 lb  → +8 oz (caja mediana)
+  return 12 / 16;                        // > 3 lb  → +12 oz (caja grande)
+}
+
+// Peso total de un paquete = (peso unidad × cantidad) + caja proporcional
 function packTotalWeightLb(unitLb, packSize){
   if (unitLb <= 0) return 0;
-  return (unitLb * packSize) + BOX_WEIGHT_LB;
+  var productLb = unitLb * packSize;
+  return productLb + boxWeightLb(productLb);
 }
 
 // Estimado de costo de envío por peso — promedio USPS Ground Advantage / UPS Ground
