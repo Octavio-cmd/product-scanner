@@ -4267,9 +4267,11 @@ async function psGenerateSpecifics(){
     + 'RULES:\n'
     + '- Return ONLY a flat JSON object of {"Specific Name": "value"}.\n'
     + '- Use ONLY these specific names when they apply: ' + SUPPORTED.join(', ') + '.\n'
-    + '- Fill AS MANY specifics as possible — a complete listing ranks higher and sells more. ALWAYS try to fill Color and Country/Region of Manufacture plus the main descriptive specifics for the category. Only omit one you genuinely cannot determine; NEVER invent fake values.\n'
-    + '- Use your product knowledge to fill values even if NOT in the title. Example: Advantage II for cats = Active Ingredients \"Imidacloprid 9.1%, Pyriproxyfen 0.46%\", Item Form Topical, Fragrance Fragrance-Free, Features Waterproof, Color Orange, Country/Region of Manufacture Germany. Apply the same depth to every product (shampoo: Hair Type/Scent/Formulation; vitamin: Formulation/Count/Suitable For; electronics: Connectivity/Power Source/Color).\n'
+    + '- MANDATORY FIELDS: ALWAYS include Color and Formulation when applicable (haircare, beauty, skincare products MUST have both). Fill AS MANY other specifics as possible for ranking. Only omit one you genuinely cannot determine; NEVER invent fake values.\n'
+    + '- Use your product knowledge to fill values even if NOT in the title. Example: Advantage II for cats = Active Ingredients \"Imidacloprid 9.1%, Pyriproxyfen 0.46%\", Item Form Topical, Fragrance Fragrance-Free, Features Waterproof, Color Orange, Country/Region of Manufacture Germany. For hair gels: Color (Clear/Translucent), Formulation (Gel/Mousse/Lightweight), Hair Type, Scent, Features, etc. Apply the same depth to every product.\n'
     + '- Extract Size/Volume/Count/Color/Scent from the title when present (e.g. "24.3 fl oz", "90 Count", "Pomegranate Rose Water").\n'
+    + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
+    + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
     + '- Return ONLY the JSON, no preamble, no markdown.';
