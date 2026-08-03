@@ -5461,6 +5461,8 @@ async function exportCSV(){
     var expDateVal = it.expDate || '';
     var dosageVal  = '';
     var connectivityVal = '';
+    // ── IMPORTANTE: Definir _itSpecs aquí (ANTES de usarlo en lógica de colorVal) ──
+    var _itSpecs = (it._specifics && typeof it._specifics === 'object') ? it._specifics : {};
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
@@ -5570,7 +5572,6 @@ async function exportCSV(){
     var upcVal = '';
     // ── Helper: obtiene el valor de un specific de IA para una columna dada.
     // Recorre cur._specifics del producto y mapea cada nombre a su columna.
-    var _itSpecs = (it._specifics && typeof it._specifics === 'object') ? it._specifics : {};
     var _specByCol = {};
     for (var _sk in _itSpecs) {
       if (!_itSpecs.hasOwnProperty(_sk)) continue;
