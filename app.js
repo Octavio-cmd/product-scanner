@@ -2333,7 +2333,11 @@ function rebuildTitle(base, n, shade, expDate) {
   if (!base) return (shade?shade+' ':'') + (Number(n) >= 2 ? 'Pack of ' + n + ' ' : '') + 'New';
   // Strip existing pack / new / exp references
   var t = base
-    .replace(/\bexp\s+\d{2}\/\d{2}\b/gi, '')
+    // Fechas de expiración en CUALQUIER formato: "Exp 07/27", "Exp 07/2027",
+    // "Expires 03/28", "Exp. 12/2026", "EXP 5/27", "Exp 07-2027", etc.
+    // (antes solo cubría 2 dígitos de año y dejaba pasar "Exp 07/2027")
+    .replace(/\bexp(?:ires?|iration)?\.?\s*\d{1,2}[\/\-]\d{2,4}\b/gi, '')
+    .replace(/\bexp(?:ires?|iration)?\.?\s*\d{2,4}\b/gi, '')
     .replace(/\bpack of \d+\b/gi, '').replace(/\b\d+[-\s]?pack\b/gi, '')
     .replace(/\b\d+[\s]?x\b/gi, '').replace(/\bset of \d+\b/gi, '')
     .replace(/\bbundle of \d+\b/gi, '').replace(/\bnew sealed\b/gi, '')
@@ -2614,6 +2618,7 @@ REGLAS CRÍTICAS DEL TÍTULO:
 8. NO REPETIR la misma palabra dos veces (no "Sunscreen ... Sunscreen")
 9. Cada palabra en Title Case (Primera Letra Mayúscula), NUNCA TODO EN MAYÚSCULAS
 10. Solo palabras REALES del producto — nunca inventes atributos que no tenga
+11. NUNCA incluyas fecha de expiración (Exp, Expires, fechas tipo 07/27 o 03/2028) en el título — la app la agrega automáticamente aparte. Si el nombre original trae una fecha de expiración, IGNÓRALA y NO la copies.
 
 Responde ÚNICAMENTE con este JSON (sin markdown, sin explicación):
 {"verdict":"SAVVY o DWI","reason":"1 oración en español explicando el veredicto con el dato clave de eBay","title":"título eBay 70-80 chars, Title Case, lleno de keywords SEO reales","price":${bundlePrice||'NUMERO_precio'},"packSize":${optimalPack},"category":"ID_categoria_ebay","categoryName":"nombre categoría","description":"Bundle of [N] [product name]. [key benefit/use]. Brand new, factory sealed. Fast shipping from North Carolina.","brand":"marca exacta"}
@@ -3738,6 +3743,7 @@ async function addSplitPacksToCSV(){
       quantity:    getSplitListings(split, p),
       photo:       photoUrl,
       bundleImg:   photoUrl,
+      specifics:   (cur && cur._specifics) || {},
       weightLb:    _pkgLb,
       weightMajor: _wMajor,
       weightMinor: _wMinor,
