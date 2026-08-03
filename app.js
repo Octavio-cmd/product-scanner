@@ -3296,7 +3296,10 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
   });
   saveBulkToStorage();
   updateFAB();
-  toast('✅ Added — ' + bulk.length + ' in CSV');
+  // Mostrar confirmación clara de auto-save
+  var msg = '✅ Added — ' + bulk.length + ' in CSV (Auto-saved to device)';
+  toast(msg);
+  console.log('PERSIST: ' + msg);
 }
 
 // Render result
@@ -3768,7 +3771,9 @@ async function addSplitPacksToCSV(){
   saveBulkToStorage();
   updateFAB();
   if (added > 0) {
-    toast('✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : ''));
+    var msg = '✅ ' + added + ' pack(s) agregados al CSV' + (skippedDup ? ' — ' + skippedDup + ' ya estaban' : '') + ' (Auto-saved: ' + bulk.length + ' total)';
+    toast(msg);
+    console.log('PERSIST: ' + msg);
 
     // Nota: la ubicación se guardará en ShipStation automáticamente
     // cuando llegue la primera orden real desde eBay → Sellbrite → ShipStation.
@@ -5923,8 +5928,20 @@ function saveBulkToStorage() {
     if (bulk.length > 0) {
       localStorage.setItem('savvy_bulk_backup', JSON.stringify(bulk));
       localStorage.setItem('savvy_bulk_backup_ts', new Date().toISOString());
+      localStorage.setItem('savvy_bulk_count', String(bulk.length)); // Guardar count para recuperación
     }
   } catch(e) {}
+}
+
+// Protección: confirmar antes de borrar bulk (previene pérdida accidental)
+function confirmClearBulk(callback) {
+  if (bulk.length === 0) {
+    if (callback) callback();
+    return;
+  }
+  if (confirm(`⚠️ ¿Borrar ${bulk.length} producto(s)? NO se puede deshacer.`)) {
+    if (callback) callback();
+  }
 }
 
 // Auto-save clothing bulk
