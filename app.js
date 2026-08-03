@@ -3291,7 +3291,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     packs:       packs,
     photo:       photoUrl,
     bundleImg:   photoUrl,
-    specifics:   (cur && cur._specifics) || {},
+    _specifics:  (cur && cur._specifics) || {},
     scannedBy:   SAVVY_CURRENT_USER || 'unknown'
   });
   saveBulkToStorage();
@@ -3755,7 +3755,7 @@ async function addSplitPacksToCSV(){
       quantity:    getSplitListings(split, p),
       photo:       photoUrl,
       bundleImg:   photoUrl,
-      specifics:   (cur && cur._specifics) || {},
+      _specifics:  (cur && cur._specifics) || {},
       weightLb:    _pkgLb,
       weightMajor: _wMajor,
       weightMinor: _wMinor,
@@ -5091,6 +5091,7 @@ async function exportCSV(){
   var SPEC_COL_MAP = {
     'Size':'C:Size', 'Volume':'C:Volume', 'Count':'C:Size', 'Unit Quantity':'C:Size',
     'Scent':'C:Scent', 'Scent Type':'C:Scent', 'Flavor':'C:Scent',
+    'Color':'C:Color',
     'Formulation':'C:Formulation', 'Item Form':'C:Item Form',
     'Active Ingredients':'C:Active Ingredients', 'Ingredients':'C:Active Ingredients',
     'Features':'C:Features',
@@ -5568,8 +5569,8 @@ async function exportCSV(){
     // (eBay permite "Does not apply" pero preferimos dejarlo vacío que inventar).
     var upcVal = '';
     // ── Helper: obtiene el valor de un specific de IA para una columna dada.
-    // Recorre cur.specifics del producto y mapea cada nombre a su columna.
-    var _itSpecs = (it.specifics && typeof it.specifics === 'object') ? it.specifics : {};
+    // Recorre cur._specifics del producto y mapea cada nombre a su columna.
+    var _itSpecs = (it._specifics && typeof it._specifics === 'object') ? it._specifics : {};
     var _specByCol = {};
     for (var _sk in _itSpecs) {
       if (!_itSpecs.hasOwnProperty(_sk)) continue;
