@@ -4238,7 +4238,9 @@ async function psGenerateSpecifics(){
     'Features','Active Ingredients','Ingredients','Number of Doses',
     'For Pet Type','Pet Weight','Suitable For','Hair Type','Skin Type',
     'Department','Age Group','MPN','Model','Connectivity','SPF','Power Source',
-    'Item Form','Fragrance','Scent Type','Unit Quantity','Unit Type'
+    'Item Form','Fragrance','Scent Type','Unit Quantity','Unit Type',
+    'Country/Region of Manufacture','Country of Origin','Expiration Date',
+    'Main Purpose','Body Area','Type of Product','Set Includes'
   ];
 
   var prompt = 'You are an eBay listing expert. For the product below, return the correct eBay item specifics as a JSON object.\n\n'
@@ -4248,8 +4250,8 @@ async function psGenerateSpecifics(){
     + 'RULES:\n'
     + '- Return ONLY a flat JSON object of {"Specific Name": "value"}.\n'
     + '- Use ONLY these specific names when they apply: ' + SUPPORTED.join(', ') + '.\n'
-    + '- Include a specific ONLY if you are confident of its value for THIS exact product. Omit ones you are unsure about.\n'
-    + '- Use your product knowledge: e.g. Advantage II for cats contains "Imidacloprid 9.1%, Pyriproxyfen 0.46%" as Active Ingredients, is Fragrance-Free, Waterproof, and a Topical/Spot-On formulation.\n'
+    + '- Fill AS MANY specifics as possible — a complete listing ranks higher and sells more. ALWAYS try to fill Color and Country/Region of Manufacture plus the main descriptive specifics for the category. Only omit one you genuinely cannot determine; NEVER invent fake values.\n'
+    + '- Use your product knowledge to fill values even if NOT in the title. Example: Advantage II for cats = Active Ingredients \"Imidacloprid 9.1%, Pyriproxyfen 0.46%\", Item Form Topical, Fragrance Fragrance-Free, Features Waterproof, Color Orange, Country/Region of Manufacture Germany. Apply the same depth to every product (shampoo: Hair Type/Scent/Formulation; vitamin: Formulation/Count/Suitable For; electronics: Connectivity/Power Source/Color).\n'
     + '- Extract Size/Volume/Count/Color/Scent from the title when present (e.g. "24.3 fl oz", "90 Count", "Pomegranate Rose Water").\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
@@ -5067,7 +5069,8 @@ async function exportCSV(){
     // ── Item specifics generados por IA (columnas comunes) ──
     'C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients',
     'C:Features','C:Material','C:Number of Doses','C:Suitable For',
-    'C:Fragrance','C:Item Form',
+    'C:Fragrance','C:Item Form','C:Country/Region of Manufacture',
+    'C:Main Purpose','C:Age Group',
     'WeightMajor','WeightMinor'
   ];
 
@@ -5082,9 +5085,12 @@ async function exportCSV(){
     'Material':'C:Material',
     'Number of Doses':'C:Number of Doses',
     'Suitable For':'C:Suitable For', 'For Pet Type':'C:Suitable For', 'Hair Type':'C:Suitable For', 'Skin Type':'C:Suitable For',
-    'Fragrance':'C:Fragrance'
+    'Fragrance':'C:Fragrance',
+    'Country/Region of Manufacture':'C:Country/Region of Manufacture', 'Country of Origin':'C:Country/Region of Manufacture',
+    'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose', 'Type of Product':'C:Main Purpose',
+    'Age Group':'C:Age Group', 'Department':'C:Age Group'
   };
-  var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form'];
+  var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form','C:Country/Region of Manufacture','C:Main Purpose','C:Age Group'];
 
   var lines = ['Info,Version=1.0.0,Template=fx_category_template_EBAY_US', HDR.join(',')];
   var skipped = 0;
@@ -5517,6 +5523,10 @@ async function exportCSV(){
       else if (/clear|transparent/i.test(tl)) colorVal = 'Clear';
       else colorVal = 'Multicolor';
     }
+    // Si la IA determinó un Color y aún no tenemos uno, usar el de la IA.
+    if (!colorVal && _itSpecs && _itSpecs['Color']) {
+      colorVal = String(_itSpecs['Color']).trim();
+    }
 
     // Override type for books
     if (BOOK_C.includes(String(it.category))) {
@@ -5607,6 +5617,9 @@ async function exportCSV(){
       _specForCol('C:Suitable For'),
       _specForCol('C:Fragrance'),
       _specForCol('C:Item Form'),
+      _specForCol('C:Country/Region of Manufacture'),
+      _specForCol('C:Main Purpose'),
+      _specForCol('C:Age Group'),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
