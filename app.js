@@ -4954,7 +4954,7 @@ async function exportCSV(){
     'PicURL','*Format','*Duration','*StartPrice','*Quantity',
     'ImmediatePayRequired','*Location','*DispatchTimeMax',
     'ShippingProfileName','ReturnProfileName','PaymentProfileName',
-    '*C:Brand','C:Type','C:EPA Registration Number','C:Model',
+    '*C:Brand','Product:UPC','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
     'C:Expiration Date','C:Dosage','C:Shade','C:Connectivity',
     'WeightMajor','WeightMinor'
@@ -5415,6 +5415,20 @@ async function exportCSV(){
     var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
     var _finalCat = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
 
+    // UPC para el CSV: preferir it.upc; si no, extraerlo del SKU (BRAND-UPC-Npk).
+    // eBay solo acepta UPCs de 12-14 dígitos. Si no hay UPC válido, va vacío
+    // (eBay permite "Does not apply" pero preferimos dejarlo vacío que inventar).
+    var upcVal = '';
+    var _rawUpc = String((it.upc || '')).replace(/[^0-9]/g, '');
+    if (!_rawUpc && it.sku) {
+      // SKU formato BRAND-UPC-Npk → sacar el bloque de dígitos más largo
+      var _skuDigits = String(it.sku).match(/\d{8,14}/);
+      if (_skuDigits) _rawUpc = _skuDigits[0];
+    }
+    if (_rawUpc.length >= 12 && _rawUpc.length <= 14) {
+      upcVal = _rawUpc;
+    }
+
     lines.push([
       'Add',
       it.sku||'',
@@ -5429,6 +5443,7 @@ async function exportCSV(){
       'Lumberton, NC','1',
       SHIP, RET, PAY,
       brandFix,
+      upcVal,
       typeVal,
       epaVal,
       modelVal,
