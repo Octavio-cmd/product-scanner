@@ -1581,7 +1581,7 @@ async function psCapturePhoto(slotId){
 // ── FOTOS EXTRA (opcionales, hasta 3) — mismo proceso que BACK ──
 // Se agregan con el botón "+ Agregar Foto"; cada una se usa luego como foto
 // secundaria (centrada, sin duplicar, sin distintivo) en el generador de packs.
-const MAX_EXTRA_PHOTOS = 3;
+const MAX_EXTRA_PHOTOS = 6;
 
 function psAddExtraPhoto(){
   if(!cur){ toast('⚠️ Escanea un producto primero'); return; }
