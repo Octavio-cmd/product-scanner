@@ -5585,7 +5585,7 @@ async function exportCSV(){
     if(/car wash|turtle wax|armor all|rain.?x/.test(t)) return 'Car Care';
 
     // ── OFICINA / ESCUELA ──────────────────────────────────────────
-    if(/pen|sharpie|marker|highlighter/.test(t)) return 'Writing Instrument';
+    if(/\bpens?\b|sharpie|marker|highlighter/.test(t)) return 'Writing Instrument';
     if(/notebook|composition book|legal pad|sticky note|post.?it/.test(t)) return 'Paper Product';
     if(/stapler|tape dispenser|scotch tape|binder|folder/.test(t)) return 'Office Supply';
 
@@ -5597,11 +5597,11 @@ async function exportCSV(){
     if(/board book|children.?s book|coloring book|activity book|workbook|cookbook|novel|paperback|hardcover/.test(t)) return 'Book';
 
     // ── COCINA / HOGAR ─────────────────────────────────────────────
-    if(/mug|tumbler|travel mug|coffee cup/.test(t)) return 'Mug';
+    if(/\bmug\b|tumbler|travel mug|coffee cup/.test(t)) return 'Mug';
     if(/knife|knives|chef knife|paring knife/.test(t)) return 'Knife';
-    if(/pan|pot|skillet|wok|dutch oven|cookware/.test(t)) return 'Cookware';
+    if(/\bpan\b|\bpot\b|\bskillet\b|\bwok\b|dutch oven|\bcookware\b/.test(t)) return 'Cookware';
     if(/blender|mixer|toaster|air fryer|instant pot|slow cooker|coffee maker/.test(t)) return 'Small Appliance';
-    if(/plate|bowl|platter|dinnerware|flatware/.test(t)) return 'Dinnerware';
+    if(/\bplate\b|\bbowl\b|platter|dinnerware|flatware/.test(t)) return 'Dinnerware';
     if(/grill tool|bbq tool|grilling set/.test(t)) return 'Grill Tool';
 
     // ── JUGUETES ───────────────────────────────────────────────────
