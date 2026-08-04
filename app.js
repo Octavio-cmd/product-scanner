@@ -3945,7 +3945,13 @@ async function psCheckSellbrite(upc){
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
   try{
     const upcClean = String(upc).replace(/\D/g,'');
-    const res = await fetch(RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean));
+    const sbCtrl = new AbortController();
+    const sbTimer = setTimeout(function(){ sbCtrl.abort(); }, 10000);
+    const res = await fetch(RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean), { signal: sbCtrl.signal });
+    clearTimeout(sbTimer);
+    if (!res.ok && res.status !== 404) {
+      throw new Error('HTTP ' + res.status + ' del backend Sellbrite');
+    }
     const data = await res.json();
 
     if(res.status === 404 || data.status === 'not_found' || !data.products || !data.products.length){
@@ -4026,8 +4032,17 @@ async function psCheckSellbrite(upc){
     // Consultar la ubicación en ShipStation para cada SKU encontrado (en paralelo)
     products.forEach(function(p, idx){ psCheckShipStationLocation(p.sku, idx); });
   }catch(err){
-    console.error('psCheckSellbrite error:', err);
-    statusEl.innerHTML = '<span style="color:var(--mu)">⚠️ No se pudo consultar Sellbrite</span>';
+    // ── El "{}" que salía antes en el log era inútil: los objetos Error
+    // nativos de JS no serializan su .message/.stack con JSON.stringify.
+    // Ahora mostramos el mensaje real, y distinguimos el tipo de falla
+    // (red/timeout vs. HTTP error vs. respuesta no-JSON) para diagnosticar
+    // rápido la próxima vez que esto pase. ──
+    var errDetail = (err && err.name === 'AbortError') ? 'timeout — el backend no respondió a tiempo'
+      : (err && err.message) ? err.message
+      : String(err);
+    console.error('psCheckSellbrite error:', errDetail);
+    if (window._psDebug) window._psDebug('❌ psCheckSellbrite falló: ' + errDetail);
+    statusEl.innerHTML = '<span style="color:var(--mu)">⚠️ No se pudo consultar Sellbrite (' + esc(errDetail) + ')</span>';
   }
 }
 
