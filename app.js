@@ -4353,6 +4353,7 @@ Rules:
 - In package_contents, reinforce trust: items are brand new, factory-sealed, from the original manufacturer
 - benefits: 4 to 6 bullets, each under 12 words, NO quantities
 - package_contents must clearly state the quantity: ${packs} ${packs>1?'units':'unit'}
+- CRITICAL — DO NOT CONFUSE TWO DIFFERENT NUMBERS: (1) "Pack size" above (${packs}) is how many BUNDLES/UNITS this listing sells — always use that exact number for "X units/unit" in package_contents. (2) If the eBay title separately mentions a piece/count number for what's INSIDE each unit (e.g. "6 Pieces", "55-Piece Set", "24 Count", "8oz"), that is a COMPLETELY DIFFERENT number describing ONE unit\'s contents — copy it EXACTLY as written in the title, never substitute the pack size or invent "1 piece" instead. Example: title "Space Rocket Play Set 6 Pieces", pack size 1 → package_contents must say "1 unit, with 6 pieces included" — NOT "1 unit... contains 1 play piece".
 - IMPORTANT: NEVER write the literal characters "(s)" anywhere in your response — always write the fully resolved word (e.g. "2 units" or "1 unit", never "unit(s)" or "2 units(s)").`;
 
   try{
