@@ -5328,6 +5328,7 @@ async function exportCSV(){
     'PicURL','*Format','*Duration','*StartPrice','*Quantity',
     'ImmediatePayRequired','*Location','*DispatchTimeMax',
     'ShippingProfileName','ReturnProfileName','PaymentProfileName',
+    'StoreCategory',
     '*C:Brand','Product:UPC','C:Type','C:EPA Registration Number','C:Model',
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
     'C:Expiration Date','C:Dosage','C:Shade','C:Connectivity',
@@ -5614,6 +5615,101 @@ async function exportCSV(){
     return 'Other';
   }
 
+  // ── STORE CATEGORY — asigna automáticamente la categoría de TIENDA
+  // (no la categoría de eBay) según el Type ya detectado. IDs numéricos
+  // reales sacados directo de "Manage My Store > Store Categories" de
+  // savvydealdotcom (confirmados por Manuel el 4 de agosto 2026). ──
+  var STORE_CAT = {
+    id_healthBeauty:      '37588505016', // Health & Beauty (categoría padre / respaldo general)
+    id_vitaminsSuppDrugs: '37588513016', // VITAMINS / SUPPLEMENT / DRUGS
+    id_baby:              '37588508016', // Baby
+    id_generalMerch:      '37588510016', // General Merchandise (respaldo final)
+    id_hairCareStyling:   '37588507016', // Hair Care & Styling
+    id_homeGarden:        '37588509016', // Home & Garden
+    id_personalCare:      '37588511016', // Personal Care
+    id_pets:              '37588512016', // Pets
+    id_toysGamesHobbies:  '3657032016',  // Toys, Games & Hobbies
+    id_clothing:          '40909914016',// Clothing
+    id_food:              '44739916016' // FOOD
+  };
+
+  // Type (ya detectado arriba) → Store Category ID
+  var TYPE_TO_STORE_CAT = {
+    // Hair Care & Styling
+    'Shampoo': STORE_CAT.id_hairCareStyling, 'Conditioner': STORE_CAT.id_hairCareStyling,
+    'Hair Color': STORE_CAT.id_hairCareStyling, 'Hair Styling': STORE_CAT.id_hairCareStyling,
+    'Hair Treatment': STORE_CAT.id_hairCareStyling,
+    // Vitamins / Supplement / Drugs
+    'Vitamin': STORE_CAT.id_vitaminsSuppDrugs, 'Supplement': STORE_CAT.id_vitaminsSuppDrugs,
+    'Fiber Supplement': STORE_CAT.id_vitaminsSuppDrugs, 'Protein Powder': STORE_CAT.id_vitaminsSuppDrugs,
+    'Sports Supplement': STORE_CAT.id_vitaminsSuppDrugs, 'Pain Reliever': STORE_CAT.id_vitaminsSuppDrugs,
+    'Allergy Relief': STORE_CAT.id_vitaminsSuppDrugs, 'Antacid': STORE_CAT.id_vitaminsSuppDrugs,
+    'Cold & Flu': STORE_CAT.id_vitaminsSuppDrugs, 'Sleep Aid': STORE_CAT.id_vitaminsSuppDrugs,
+    // Baby
+    'Diaper': STORE_CAT.id_baby, 'Baby Wipe': STORE_CAT.id_baby, 'Baby Formula': STORE_CAT.id_baby,
+    'Baby Food': STORE_CAT.id_baby, 'Baby Care': STORE_CAT.id_baby,
+    // Personal Care
+    'Pain Relief': STORE_CAT.id_personalCare, 'Pads': STORE_CAT.id_personalCare,
+    'Adult Diaper': STORE_CAT.id_personalCare, 'Lip Balm': STORE_CAT.id_personalCare,
+    'Body Wash': STORE_CAT.id_personalCare, 'Soap': STORE_CAT.id_personalCare,
+    'Sunscreen': STORE_CAT.id_personalCare, 'Face Cream': STORE_CAT.id_personalCare,
+    'Body Lotion': STORE_CAT.id_personalCare, 'Face Wash': STORE_CAT.id_personalCare,
+    'Serum': STORE_CAT.id_personalCare, 'Lotion': STORE_CAT.id_personalCare,
+    'Toothpaste': STORE_CAT.id_personalCare, 'Toothbrush': STORE_CAT.id_personalCare,
+    'Mouthwash': STORE_CAT.id_personalCare, 'Floss': STORE_CAT.id_personalCare,
+    'Whitening': STORE_CAT.id_personalCare, 'Shaving Cream': STORE_CAT.id_personalCare,
+    'Razor': STORE_CAT.id_personalCare, 'Deodorant': STORE_CAT.id_personalCare,
+    'Fragrance': STORE_CAT.id_personalCare, 'Mascara': STORE_CAT.id_personalCare,
+    'Foundation': STORE_CAT.id_personalCare, 'Concealer': STORE_CAT.id_personalCare,
+    'Lipstick': STORE_CAT.id_personalCare, 'Eye Shadow': STORE_CAT.id_personalCare,
+    'Eyeliner': STORE_CAT.id_personalCare, 'Makeup': STORE_CAT.id_personalCare,
+    'Makeup Remover': STORE_CAT.id_personalCare, 'Nail Polish': STORE_CAT.id_personalCare,
+    'Nail Care': STORE_CAT.id_personalCare, 'Eye Drops': STORE_CAT.id_personalCare,
+    'Ear Care': STORE_CAT.id_personalCare, 'Foot Care': STORE_CAT.id_personalCare,
+    'Bandage': STORE_CAT.id_personalCare, 'First Aid': STORE_CAT.id_personalCare,
+    'Antiseptic': STORE_CAT.id_personalCare, 'Medical Device': STORE_CAT.id_personalCare,
+    'Therapy': STORE_CAT.id_personalCare, 'Brace': STORE_CAT.id_personalCare,
+    // Pets
+    'Pet Food': STORE_CAT.id_pets, 'Pet Treat': STORE_CAT.id_pets, 'Flea & Tick': STORE_CAT.id_pets,
+    'Pet Toy': STORE_CAT.id_pets, 'Cat Litter': STORE_CAT.id_pets,
+    // Toys, Games & Hobbies
+    'Building Set': STORE_CAT.id_toysGamesHobbies, 'Action Figure': STORE_CAT.id_toysGamesHobbies,
+    'Game': STORE_CAT.id_toysGamesHobbies, 'Toy Vehicle': STORE_CAT.id_toysGamesHobbies,
+    'Novelty Toy': STORE_CAT.id_toysGamesHobbies, 'Toy': STORE_CAT.id_toysGamesHobbies,
+    'Yoga': STORE_CAT.id_toysGamesHobbies, 'Exercise Equipment': STORE_CAT.id_toysGamesHobbies,
+    // Food
+    'Coffee': STORE_CAT.id_food, 'Tea': STORE_CAT.id_food, 'Energy Drink': STORE_CAT.id_food,
+    'Sports Drink': STORE_CAT.id_food, 'Snack Bar': STORE_CAT.id_food, 'Candy': STORE_CAT.id_food,
+    'Gum & Mints': STORE_CAT.id_food, 'Snack': STORE_CAT.id_food, 'Condiment': STORE_CAT.id_food,
+    'Breakfast Food': STORE_CAT.id_food, 'Soup': STORE_CAT.id_food, 'Seasoning': STORE_CAT.id_food,
+    // Home & Garden
+    'Laundry Detergent': STORE_CAT.id_homeGarden, 'Fabric Softener': STORE_CAT.id_homeGarden,
+    'Dish Soap': STORE_CAT.id_homeGarden, 'Cleaner': STORE_CAT.id_homeGarden,
+    'Glass Cleaner': STORE_CAT.id_homeGarden, 'Paper Towel': STORE_CAT.id_homeGarden,
+    'Toilet Paper': STORE_CAT.id_homeGarden, 'Facial Tissue': STORE_CAT.id_homeGarden,
+    'Trash Bag': STORE_CAT.id_homeGarden, 'Food Storage': STORE_CAT.id_homeGarden,
+    'Cleaning Tool': STORE_CAT.id_homeGarden, 'Mug': STORE_CAT.id_homeGarden,
+    'Knife': STORE_CAT.id_homeGarden, 'Cookware': STORE_CAT.id_homeGarden,
+    'Small Appliance': STORE_CAT.id_homeGarden, 'Appliance': STORE_CAT.id_homeGarden,
+    'Dinnerware': STORE_CAT.id_homeGarden, 'Grill Tool': STORE_CAT.id_homeGarden,
+    'Air Freshener': STORE_CAT.id_homeGarden, 'Candle': STORE_CAT.id_homeGarden,
+    'Motor Oil': STORE_CAT.id_homeGarden, 'Wiper Blade': STORE_CAT.id_homeGarden,
+    'Car Care': STORE_CAT.id_homeGarden, 'Automotive': STORE_CAT.id_homeGarden,
+    'Battery': STORE_CAT.id_homeGarden, 'Cable': STORE_CAT.id_homeGarden,
+    'Charger': STORE_CAT.id_homeGarden, 'Earbuds': STORE_CAT.id_homeGarden,
+    'Headphones': STORE_CAT.id_homeGarden, 'Speaker': STORE_CAT.id_homeGarden,
+    'Case': STORE_CAT.id_homeGarden, 'Light Bulb': STORE_CAT.id_homeGarden,
+    'Writing Instrument': STORE_CAT.id_homeGarden, 'Paper Product': STORE_CAT.id_homeGarden,
+    'Office Supply': STORE_CAT.id_homeGarden, 'Book': STORE_CAT.id_homeGarden
+  };
+
+  function getStoreCategoryId(typeVal) {
+    if (typeVal && TYPE_TO_STORE_CAT[typeVal]) return TYPE_TO_STORE_CAT[typeVal];
+    // Respaldo: si no lo reconocemos, mejor "General Merchandise" (existe
+    // en tu tienda como categoría genérica) que dejarlo sin categoría.
+    return STORE_CAT.id_generalMerch;
+  }
+
   // EPA Registration Number — REQUERIDO por eBay para pesticidas:
   // insect repellents Y productos de flea/tick (son pesticidas regulados).
   // Sin este número, eBay rechaza el listado (Error 21919303).
@@ -5886,6 +5982,7 @@ async function exportCSV(){
       String(it.quantity||1),'1',
       'Lumberton, NC','1',
       SHIP, RET, PAY,
+      getStoreCategoryId(typeVal),
       brandFix,
       upcVal,
       typeVal,
