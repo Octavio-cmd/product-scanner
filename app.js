@@ -2665,6 +2665,46 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
       res.title = normBrand + res.title.substring(rawBrand.length);
     }
     res.brand = normBrand;
+
+    // ── Respaldo determinístico: si el título salió por debajo del mínimo
+    // de 70 caracteres que configuramos (a veces la IA no lo cumple pese a
+    // la instrucción), reintentamos UNA vez pidiéndole que lo expanda con
+    // más keywords reales, en vez de dejarlo corto y perder SEO. ──
+    if (res.title && res.title.length < 70 && res.title.length > 0) {
+      try {
+        const expandPrompt = 'Your eBay title "' + res.title + '" is only ' + res.title.length + ' characters. '
+          + 'eBay titles need 70-80 characters for maximum SEO visibility. Rewrite it to be between 70 and 80 characters '
+          + 'by adding more REAL, relevant search keywords (size, count, scent/flavor, use-case, synonyms buyers search for) — '
+          + 'never invent attributes the product does not have. Keep the same brand, product name, and end with "New" '
+          + '(or "Pack of N New" if it already has a pack count). Return ONLY the new title as plain text — no quotes, no JSON, no explanation.';
+        const ctrl2 = new AbortController();
+        const timer2 = setTimeout(function(){ ctrl2.abort(); }, 8000);
+        const r2 = await fetch('https://api.anthropic.com/v1/messages',{
+          method:'POST',
+          signal: ctrl2.signal,
+          headers:{
+            'Content-Type':'application/json',
+            'x-api-key':key,
+            'anthropic-version':'2023-06-01',
+            'anthropic-dangerous-direct-browser-access':'true'
+          },
+          body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:150,messages:[{role:'user',content:expandPrompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
+        });
+        clearTimeout(timer2);
+        if (r2.ok) {
+          const d2 = await r2.json();
+          const newTitle = (d2.content && d2.content[0] && d2.content[0].text || '').replace(/^["']|["']$/g,'').trim();
+          // Solo usar el título nuevo si de verdad mejoró (más largo, dentro de 80, y sigue mencionando la marca)
+          if (newTitle && newTitle.length > res.title.length && newTitle.length <= 80) {
+            res.title = newTitle;
+          }
+        }
+      } catch(e2) {
+        // Si el reintento falla, seguimos con el título original — mejor
+        // uno corto que ninguno.
+      }
+    }
+
     return res;
   }catch(e){
     if(e.name==='AbortError') toast('⚠️ Claude timeout — using fast estimate');
@@ -5072,6 +5112,28 @@ function descForPack(desc, packs) {
   var qtyLine = 'This listing includes ' + packs + ' ' + unitWord + ', brand new and factory-sealed.';
   // Palabras contables que suelen llevar un número de cantidad delante.
   var COUNT_WORDS = 'units?|bottles?|boxes|box|packs?|pieces?|pcs?|items?|containers?|jars?|tubes?|cans?|bags?|pouches?|packets?|sets?|count|ct';
+  // ── Normaliza singular/plural de una palabra contable según packs.
+  // Antes solo se pluralizaba cuando packs>1 y se dejaba intacta cuando
+  // packs=1 — por eso salía "includes 1 units" (mal) en vez de "1 unit".
+  // Esta función corrige AMBAS direcciones (singular Y plural). ──
+  var UNIT_PAIRS = [
+    ['unit','units'], ['bottle','bottles'], ['box','boxes'], ['pack','packs'],
+    ['piece','pieces'], ['pc','pcs'], ['item','items'], ['container','containers'],
+    ['jar','jars'], ['tube','tubes'], ['can','cans'], ['bag','bags'],
+    ['pouch','pouches'], ['packet','packets'], ['set','sets']
+  ];
+  function normalizeUnitWord(word, n) {
+    var wLower = word.toLowerCase();
+    for (var i = 0; i < UNIT_PAIRS.length; i++) {
+      var sing = UNIT_PAIRS[i][0], plur = UNIT_PAIRS[i][1];
+      if (wLower === sing || wLower === plur) {
+        var result = (n === 1) ? sing : plur;
+        if (word[0] === word[0].toUpperCase()) result = result.charAt(0).toUpperCase() + result.slice(1);
+        return result;
+      }
+    }
+    return word; // "count"/"ct" no cambian de forma — se dejan igual
+  }
   function fixQty(text) {
     if (!text) return text;
     var s = String(text);
@@ -5082,12 +5144,12 @@ function descForPack(desc, packs) {
     // "includes 3 ..." / "contains 3 ..." antes de una palabra contable
     s = s.replace(new RegExp('\\b(includes?|contains?|comes with|features?)\\s+\\d+((?:\\s+[A-Za-z,\\-]+){0,4}?)\\s+(' + COUNT_WORDS + ')\\b', 'gi'),
       function(m, verb, mid, unit){
-        return verb + ' ' + packs + (mid || '') + ' ' + (packs > 1 ? unit.replace(/\b(bottle|box|pack|piece|pc|item|container|jar|tube|can|bag|pouch|packet|set|unit)\b/i, '$1s').replace(/boxs/i,'boxes') : unit);
+        return verb + ' ' + packs + (mid || '') + ' ' + normalizeUnitWord(unit, packs);
       });
     // "3 units" / "3 bottles" / "3 boxes" genérico (número + palabra contable)
     s = s.replace(new RegExp('\\b\\d+((?:\\s+[A-Za-z,\\-]+){0,3}?)\\s+(' + COUNT_WORDS + ')\\b', 'gi'),
       function(m, mid, unit){
-        return packs + (mid || '') + ' ' + unit;
+        return packs + (mid || '') + ' ' + normalizeUnitWord(unit, packs);
       });
     return s;
   }
