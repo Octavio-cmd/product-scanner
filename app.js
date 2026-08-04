@@ -2653,7 +2653,7 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
     const txt=(d.content&&d.content[0]&&d.content[0].text||'').replace(/```json|```/g,'').trim();
     const res=JSON.parse(txt);
     res.upc=upc;res.ebay=ebay;res.prod=prod;
-    if(!res.brand||res.brand.toLowerCase()==='generic')res.brand=prod.brand||'';
+    if(!res.brand||['generic','desconocida','unknown','n/a'].includes(res.brand.toLowerCase().trim()))res.brand=prod.brand||'';
     // ── Normalizador determinístico: si la marca viene TODA EN MAYÚSCULAS
     // (ej. "CAMILLE ROSE" desde el UPC/fuente), la convertimos a Title Case
     // ("Camille Rose") y arreglamos el título si empieza con la versión en
@@ -3069,7 +3069,7 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     res=await callClaude(upc,prod,ebay);
 
     step='render';
-    if(!res.brand||res.brand.toLowerCase()==='generic'||res.brand.trim()===''){
+    if(!res.brand||['generic','desconocida','unknown','n/a'].includes(res.brand.toLowerCase().trim())){
       res.brand = prod.brand||'';
     }
     if(!res.title||res.title.includes(upc)||res.title.toLowerCase().includes(' upc ')){
