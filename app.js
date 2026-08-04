@@ -3938,7 +3938,7 @@ function cycleSplitTier(){
 // ── SELLBRITE + SHIPSTATION — ¿ya existe este producto? ¿dónde está? ──
 // Portado del módulo Inventory Manager (mismo Railway backend, endpoints
 // /sb/search y /ss/location).
-async function psCheckSellbrite(upc){
+async function psCheckSellbrite(upc, brand){
   const statusEl = $('ps-sellbrite-status');
   if(!statusEl) return;
   window._psSbExisting = {}; // limpiar estado del producto anterior
@@ -3947,7 +3947,13 @@ async function psCheckSellbrite(upc){
     const upcClean = String(upc).replace(/\D/g,'');
     const sbCtrl = new AbortController();
     const sbTimer = setTimeout(function(){ sbCtrl.abort(); }, 10000);
-    const res = await fetch(RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean), { signal: sbCtrl.signal });
+    // ── Mandamos la marca también — el backend arma los mismos SKUs
+    // exactos que ya calcula makeSKU() aquí (PREFIJO-UPC-Npk) y los pide
+    // directo a Sellbrite, en vez de recorrer el catálogo completo (25k+
+    // productos), lo cual antes hacía que nunca encontrara nada real. ──
+    var sbUrl = RAILWAY_SB + '/sb/search?upc=' + encodeURIComponent(upcClean);
+    if (brand) sbUrl += '&brand=' + encodeURIComponent(brand);
+    const res = await fetch(sbUrl, { signal: sbCtrl.signal });
     clearTimeout(sbTimer);
     if (!res.ok && res.status !== 404) {
       throw new Error('HTTP ' + res.status + ' del backend Sellbrite');
@@ -4560,7 +4566,7 @@ function renderResult(r){
       <div style="margin-top:4px">🔖 <strong>SKU:</strong> <span style="font-family:monospace;color:var(--ac)">${esc(sku)}</span></div>
       <div id="ps-sellbrite-status" style="margin-top:8px;padding-top:8px;border-top:1px solid rgba(255,255,255,.1);font-size:12px;color:var(--mu)">🔍 Buscando en Sellbrite...</div>`;
     bcResult.style.display = 'block';
-    if (r.upc) psCheckSellbrite(r.upc);
+    if (r.upc) psCheckSellbrite(r.upc, r.brand);
   }
 
   // ── VER PRECIO REAL EN eBay + MARKET DATA — juntos, debajo del scanner ──
