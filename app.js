@@ -2671,6 +2671,7 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
     // la instrucción), reintentamos UNA vez pidiéndole que lo expanda con
     // más keywords reales, en vez de dejarlo corto y perder SEO. ──
     if (res.title && res.title.length < 70 && res.title.length > 0) {
+      if (window._psDebug) window._psDebug('📏 Título corto (' + res.title.length + '/80) — reintentando expandir...');
       try {
         const expandPrompt = 'Your eBay title "' + res.title + '" is only ' + res.title.length + ' characters. '
           + 'eBay titles need 70-80 characters for maximum SEO visibility. Rewrite it to be between 70 and 80 characters '
@@ -2678,7 +2679,9 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
           + 'never invent attributes the product does not have. Keep the same brand, product name, and end with "New" '
           + '(or "Pack of N New" if it already has a pack count). Return ONLY the new title as plain text — no quotes, no JSON, no explanation.';
         const ctrl2 = new AbortController();
-        const timer2 = setTimeout(function(){ ctrl2.abort(); }, 8000);
+        // 15s (antes 8s) — con señal débil 8s a veces no alcanzaba y el
+        // reintento fallaba en silencio, dejando el título corto sin avisar.
+        const timer2 = setTimeout(function(){ ctrl2.abort(); }, 15000);
         const r2 = await fetch('https://api.anthropic.com/v1/messages',{
           method:'POST',
           signal: ctrl2.signal,
@@ -2696,11 +2699,18 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
           const newTitle = (d2.content && d2.content[0] && d2.content[0].text || '').replace(/^["']|["']$/g,'').trim();
           // Solo usar el título nuevo si de verdad mejoró (más largo, dentro de 80, y sigue mencionando la marca)
           if (newTitle && newTitle.length > res.title.length && newTitle.length <= 80) {
+            if (window._psDebug) window._psDebug('✅ Título expandido: ' + res.title.length + ' → ' + newTitle.length + ' chars');
             res.title = newTitle;
+          } else if (window._psDebug) {
+            window._psDebug('⚠️ Reintento de título no mejoró (nuevo: ' + (newTitle ? newTitle.length : 0) + ' chars) — se mantiene el original');
           }
+        } else if (window._psDebug) {
+          window._psDebug('⚠️ Reintento de título falló — HTTP ' + r2.status);
         }
       } catch(e2) {
+        if (window._psDebug) window._psDebug('⚠️ Reintento de título falló: ' + (e2 && e2.name === 'AbortError' ? 'timeout (15s)' : (e2 && e2.message || e2)));
         // Si el reintento falla, seguimos con el título original — mejor
+
         // uno corto que ninguno.
       }
     }
