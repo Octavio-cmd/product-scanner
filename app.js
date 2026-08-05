@@ -4421,32 +4421,50 @@ Rules:
 function psParseSetIncludes(title) {
   if (!title) return null;
   
-  // Patrones comunes: "44 Count", "3 Pack", "X units", "X tests", "X strips", etc.
+  // Patrones comunes: "44 Count", "3 Pack", "X units", "X tests", "X strips", "365ct", etc.
+  // IMPORTANTE: "ct" (count abreviado) agregado para detectar "365ct"
   var patterns = [
-    /(\d+)\s*(?:Count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/i
+    /(\d+)\s*(?:ct|CT|count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/i
   ];
   
-  for (var i = 0; i < patterns.length; i++) {
-    var match = title.match(patterns[i]);
-    if (match) {
-      var num = match[1];
-      var word = match[0].replace(/^\d+\s*/, '').toLowerCase();
-      
-      // Mapear a valores eBay estándar
-      if (word.match(/count/i)) return num + ' Test Strips';
-      if (word.match(/pack|units?|pieces?|pcs?/i)) return num + ' Units';
-      if (word.match(/test/i)) return num + ' Tests';
-      if (word.match(/strip/i)) return num + ' Strips';
-      if (word.match(/bottle/i)) return num + ' Bottles';
-      if (word.match(/box/i)) return num + ' Boxes';
-      if (word.match(/tab/i)) return num + ' Tablets';
-      if (word.match(/cap/i)) return num + ' Capsules';
-      
-      // Default
-      return match[0];
-    }
+  var matches = [];
+  
+  // Encontrar TODAS las coincidencias, no solo la primera
+  var regex = /(\d+)\s*(?:ct|CT|count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/gi;
+  var match;
+  
+  while ((match = regex.exec(title)) !== null) {
+    matches.push({
+      num: parseInt(match[1]),
+      text: match[0],
+      word: match[0].replace(/^\d+\s*/, '').toLowerCase()
+    });
   }
-  return null;
+  
+  // Si no hay coincidencias, retornar null
+  if (matches.length === 0) return null;
+  
+  // ESTRATEGIA: Priorizar números grandes (365, 100) sobre pequeños (10, 3)
+  // Porque "365 tablets" es el Set Includes, "10mg" es dosage (que no queremos)
+  var bestMatch = matches.reduce(function(prev, curr) {
+    return curr.num > prev.num ? curr : prev;
+  });
+  
+  var num = bestMatch.num;
+  var word = bestMatch.word;
+  
+  // Mapear a valores eBay estándar
+  if (word.match(/ct|count/i)) return num + ' Tablets';  // "365ct" o "365 count" → "365 Tablets"
+  if (word.match(/pack|units?|pieces?|pcs?/i)) return num + ' Units';
+  if (word.match(/test/i)) return num + ' Tests';
+  if (word.match(/strip/i)) return num + ' Strips';
+  if (word.match(/bottle/i)) return num + ' Bottles';
+  if (word.match(/box/i)) return num + ' Boxes';
+  if (word.match(/tab/i)) return num + ' Tablets';
+  if (word.match(/cap/i)) return num + ' Capsules';
+  
+  // Default
+  return bestMatch.text;
 }
 
 // Extrae "Type" correcto según categoría y título (NO devuelve "Other")
