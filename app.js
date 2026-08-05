@@ -4421,16 +4421,19 @@ Rules:
 function psParseSetIncludes(title) {
   if (!title) return null;
   
-  // Patrones comunes: "44 Count", "3 Pack", "X units", "X tests", "X strips", "365ct", etc.
+  var t = (title || '').toLowerCase();
+  
+  // ⚠️ ESPECIAL: Para Dolls/Toys - detectar "Doll" en el título
+  if (t.match(/doll|barbie|polly\s+pocket|american\s+girl|bratz/i)) {
+    // Si el título mention "set" o múltiples items
+    if (t.match(/\bset\b|playset|collector|bundle/i)) return null; // Dejar que Claude lo llene
+    return 'Doll'; // Default para dolls individuales
+  }
+  
+  // Patrones comunes para medicinas/skincare: "44 Count", "3 Pack", "X units", "X tests", "365ct", etc.
   // IMPORTANTE: "ct" (count abreviado) agregado para detectar "365ct"
-  var patterns = [
-    /(\d+)\s*(?:ct|CT|count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/i
-  ];
-  
-  var matches = [];
-  
-  // Encontrar TODAS las coincidencias, no solo la primera
   var regex = /(\d+)\s*(?:ct|CT|count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/gi;
+  var matches = [];
   var match;
   
   while ((match = regex.exec(title)) !== null) {
@@ -4489,17 +4492,19 @@ function psExtractTypeFromTitle(title, category, brand) {
     if (t.match(/flu/i)) return 'Flu Treatment';
   }
   
-  // OVER-THE-COUNTER MEDICATIONS (categoría 75037)
+  // OVER-THE-COUNTER MEDICATIONS (categoría 75037) - ALLERGY/ANTIHISTAMINE
   if (cat === '75037') {
-    // Antihistamines (loratadine, cetirizine, fexofenadine, etc.)
-    if (t.match(/loratadine|cetirizine|fexofenadine|antihistamine/i)) return 'Antihistamine';
+    // ⚠️ CRÍTICO: Antihistamines PRIMERO, antes de "Allergy Relief"
+    if (t.match(/loratadine|cetirizine|fexofenadine|desloratadine|levocetirizine|antihistamine\b/i)) {
+      return 'Antihistamine';
+    }
     // Decongestants
     if (t.match(/pseudoephedrine|phenylephrine|decongestant/i)) return 'Decongestant';
     // Pain relief
     if (t.match(/pain|ache|analgesic|ibuprofen|acetaminophen/i)) return 'Pain Relief';
     // Digestive
     if (t.match(/digestiv|acid|antacid|omeprazole/i)) return 'Digestive Aid';
-    // Generic allergy (only if no specific match above)
+    // Generic allergy fallback (SOLO si no hay antihistamine)
     if (t.match(/allerg/i)) return 'Allergy Relief';
   }
   
@@ -4508,6 +4513,26 @@ function psExtractTypeFromTitle(title, category, brand) {
     if (t.match(/vitamin\s*[a-z]/i)) return 'Vitamin Supplement';
     if (t.match(/mineral/i)) return 'Mineral Supplement';
     if (t.match(/omega|fish oil/i)) return 'Omega Supplement';
+  }
+  
+  // SKINCARE (categorías 21205, 177765, 67181, etc.)
+  if (['21205', '177765', '67181', '67169', '180959', '31774', '31787'].includes(cat)) {
+    // Tipos de skincare basados en título
+    if (t.match(/cleanser|cleansing\s+water|toner|cleanser|makeup\s+remover/i)) return 'Cleansing Water';
+    if (t.match(/cream\b/i) && !t.match(/sun|spf/i)) return 'Face Cream';
+    if (t.match(/lotion\b/i)) return 'Lotion';
+    if (t.match(/serum\b/i)) return 'Serum';
+    if (t.match(/moisturizer|moisturiser/i)) return 'Moisturizer';
+    if (t.match(/daily\s+use|daily\s+moisturizer|daily\s+care/i)) return 'Daily Use';
+    if (t.match(/sunscreen|sun\s+protection|spf\s+\d+/i)) return 'Sunscreen';
+  }
+  
+  // TOYS - DOLLS (categoría 220)
+  if (cat === '220') {
+    // Types específicos de dolls/toys
+    if (t.match(/doll\b/i)) return 'Doll';
+    if (t.match(/action\s+figure|figure\b/i)) return 'Action Figure';
+    if (t.match(/plushie|plush\b/i)) return 'Plushie';
   }
   
   // Si no match específico, devolver null (dejar que Claude lo llene)
@@ -4616,6 +4641,75 @@ function psExtractBodyArea(category, title) {
     return 'Hair'; // Default para haircare
   }
   
+  // SKINCARE - Moisturizers, Cleansers, etc. (categoría 21205, 177765, 67181, etc.)
+  if (['21205', '177765', '67181', '67169', '180959'].includes(cat)) {
+    // Detectar Body Area del título
+    if (t.match(/face|facial|cleanser|toner|serum/i)) return 'Face';
+    if (t.match(/body\s+lotion|body\s+cream|body\s+moisturizer/i)) return 'Full Body';
+    if (t.match(/hand\s+cream|hand\s+lotion|hand\s+moisturizer/i)) return 'Hand';
+    if (t.match(/lip\b|lip\s+balm/i)) return 'Lip';
+    if (t.match(/eye\b|eye\s+cream|under\s+eye/i)) return 'Eye';
+    // Default para skincare: Face
+    if (t.match(/moisturizer|lotion|cream|serum/i)) return 'Face';
+  }
+  
+  return null;
+}
+
+// NUEVA: Extrae "Character" para Dolls (Barbie - Chelsea, Ken, etc.)
+function psExtractDollCharacter(title, brand) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  var b = (brand || '').toLowerCase();
+  
+  // Si es Barbie, detectar character específico
+  if (b.match(/barbie/i)) {
+    // Barbie characters
+    if (t.match(/chelsea/i)) return 'Chelsea';
+    if (t.match(/ken\b/i)) return 'Ken';
+    if (t.match(/skipper/i)) return 'Skipper';
+    if (t.match(/stacie/i)) return 'Stacie';
+    if (t.match(/babysitters\s+club|bsc/i)) return 'BSC';
+    // Default para Barbie
+    return 'Barbie';
+  }
+  
+  // Otros dolls/characters
+  if (t.match(/polly\s+pocket/i)) return 'Polly Pocket'; // Aunque esto es Franchise, puede usarse aquí
+  if (t.match(/american\s+girl/i)) return 'American Girl';
+  if (t.match(/monster\s+high/i)) return 'Monster High';
+  
+  return null;
+}
+
+// NUEVA: Extrae "Franchise" para Dolls (Polly Pocket, American Girl, Monster High)
+function psExtractFranchise(title, brand) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  var b = (brand || '').toLowerCase();
+  
+  // Franchises principales
+  if (t.match(/polly\s+pocket/i)) return 'Polly Pocket';
+  if (t.match(/american\s+girl/i)) return 'American Girl';
+  if (t.match(/monster\s+high/i)) return 'Monster High';
+  if (t.match(/bratz/i)) return 'Bratz';
+  if (t.match(/lol\s+surprise|l\.o\.l/i)) return 'LOL Surprise';
+  if (t.match(/our\s+generation/i)) return 'Our Generation';
+  
+  return null;
+}
+
+// NUEVA: Extrae "Skin Type" para Skincare (Dry Skin, Oily Skin, Sensitive Skin)
+function psExtractSkinType(title) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  
+  if (t.match(/dry\s+skin|for\s+dry|dryness/i)) return 'Dry Skin';
+  if (t.match(/oily\s+skin|for\s+oily|oily|acne/i)) return 'Oily Skin';
+  if (t.match(/sensitive\s+skin|for\s+sensitive|sensitive|hypoallergenic/i)) return 'Sensitive Skin';
+  if (t.match(/combination\s+skin|combination|mixed/i)) return 'Combination Skin';
+  if (t.match(/normal\s+skin|for\s+normal|normal/i)) return 'Normal Skin';
+  
   return null;
 }
 
@@ -4653,6 +4747,25 @@ function psPreFillSpecifics(title, category, brand) {
   
   var bodyArea = psExtractBodyArea(category, title);
   if (bodyArea) prefilled['Body Area'] = bodyArea;
+  
+  // FASE 3 - TOYS & DOLLS: Character, Franchise, Product Line
+  var dollChar = psExtractDollCharacter(title, brand);
+  if (dollChar) prefilled['Character'] = dollChar;
+  
+  var franchise = psExtractFranchise(title, brand);
+  if (franchise) prefilled['Franchise'] = franchise;
+  
+  // Agregar "Product Line" si es Barbie con character
+  if (brand && brand.toLowerCase().match(/barbie/i) && dollChar && dollChar !== 'Barbie') {
+    // Para Barbie, product line puede ser "Barbie Club Chelsea", etc.
+    if (title && title.match(/barbie\s+club/i)) {
+      prefilled['Product Line'] = 'Barbie Club ' + dollChar;
+    }
+  }
+  
+  // FASE 3 - SKINCARE: Skin Type
+  var skinType = psExtractSkinType(title);
+  if (skinType) prefilled['Skin Type'] = skinType;
   
   return prefilled;
 }
@@ -4766,7 +4879,16 @@ async function psGenerateSpecifics(){
     // aceptado por eBay (no inventamos números de dosis específicos). ──
     var _dosageCats = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
     if (_dosageCats.includes(String(catForAI)) && !clean['Dosage']) {
-      clean['Dosage'] = 'See product label';
+      // ⚠️ PRIMERO: Intentar parsear dosage del título (ej. "10 mg", "500mg")
+      var dosageMatch = titleForAI.match(/(\d+)\s*(?:mg|mcg|iu|ml|cc)\b/i);
+      if (dosageMatch) {
+        var dosageNum = dosageMatch[1];
+        var dosageUnit = titleForAI.substring(dosageMatch.index + dosageNum.length, dosageMatch.index + dosageMatch[0].length).trim().toUpperCase();
+        clean['Dosage'] = dosageNum + ' ' + dosageUnit; // Ej: "10 mg", "500 mcg"
+      } else {
+        // FALLBACK: Si no hay dosage en el título
+        clean['Dosage'] = 'See product label';
+      }
     }
 
     cur._specifics = clean;
