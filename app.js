@@ -3254,7 +3254,7 @@ async function addBulk() {
 }
 
 async function _addBulkInternal() {
-  var EXP_REQ = ['67169','180959','75037','51227','57041','2984','67167','105070'];
+  var EXP_REQ = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
   if (EXP_REQ.includes(String(cur.category||''))) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
     var expVal = cur._expDate || '';
@@ -4434,7 +4434,7 @@ async function psGenerateSpecifics(){
   // Claude llena SOLO los que apliquen al producto; deja el resto fuera.
   var SUPPORTED = [
     'Size','Volume','Count','Color','Scent','Flavor','Formulation','Material',
-    'Features','Active Ingredients','Ingredients','Number of Doses',
+    'Features','Active Ingredients','Ingredients','Number of Doses','Dosage',
     'For Pet Type','Pet Weight','Suitable For','Hair Type','Skin Type',
     'Department','Age Group','MPN','Model','Connectivity','SPF','Power Source',
     'Item Form','Fragrance','Scent Type','Unit Quantity','Unit Type',
@@ -4452,6 +4452,7 @@ async function psGenerateSpecifics(){
     + '- MANDATORY FIELDS: ALWAYS include Color, Formulation, and Country/Region of Manufacture (haircare, beauty, skincare, pet, health products MUST have all three). Fill AS MANY other specifics as possible for ranking. Only omit one you genuinely cannot determine; NEVER invent fake values.\n'
     + '- Use your product knowledge to fill values even if NOT in the title. Example: Advantage II for cats = Active Ingredients \"Imidacloprid 9.1%, Pyriproxyfen 0.46%\", Item Form Topical, Fragrance Fragrance-Free, Features Waterproof, Color Orange, Country/Region of Manufacture Germany. For hair gels: Color (Clear/Translucent), Formulation (Gel/Mousse/Lightweight), Hair Type, Scent, Features, Country/Region of Manufacture, etc. Apply the same depth to every product.\n'
     + '- CRITICAL SAFETY RULE for "Active Ingredients" and "Ingredients": these are FACTUAL health/safety claims, not general knowledge like Color or Country. Only fill them from memory for products you are HIGHLY confident about (major, iconic, extremely well-documented formulas like Advantage II, Tylenol, well-known EPA-registered pesticides). For smaller, niche, or less common brands, do NOT guess a plausible-sounding ingredient list from memory — if the ingredients are not stated in the title/description provided, LEAVE THIS FIELD OUT ENTIRELY rather than inventing one. A wrong ingredient claim is a real safety/liability risk (allergies, false advertising) — omitting is always safer than guessing wrong.\n'
+    + '- MANDATORY for medicine/OTC/supplement/vitamin products: "Dosage" is REQUIRED by eBay for these categories and listings FAIL to publish without it (this is a hard blocker, not just a quality issue). If you know the actual dosing instructions confidently (e.g. from a well-known product), state them briefly (e.g. "1 tablet every 4-6 hours", "Ages 6-12: 1 tsp"). If you do NOT know the exact dosing with confidence, use the literal value "See product label" — this is a standard, safe, eBay-accepted value; never leave Dosage blank for a medicine/OTC/supplement product, and never invent specific numbers you are not sure about.\n'
     + '- Extract Size/Volume/Count/Color/Scent from the title when present (e.g. "24.3 fl oz", "90 Count", "Pomegranate Rose Water").\n'
     + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
     + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
@@ -4491,6 +4492,19 @@ async function psGenerateSpecifics(){
         count++;
       }
     }
+    // ── RESPALDO DETERMINÍSTICO: "Dosage" es OBLIGATORIO en eBay para
+    // categorías de medicina/OTC/suplementos — si falta, el listado
+    // NO se publica (error 21919303, bloqueante, no solo de calidad).
+    // No podemos confiar 100% en que la IA siempre lo llene (mismo
+    // patrón que ya vimos con otros campos hoy), así que si la categoría
+    // lo requiere y sigue vacío después de la IA, lo llenamos aquí con
+    // el valor estándar "See product label" — seguro, honesto, y
+    // aceptado por eBay (no inventamos números de dosis específicos). ──
+    var _dosageCats = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
+    if (_dosageCats.includes(String(catForAI)) && !clean['Dosage']) {
+      clean['Dosage'] = 'See product label';
+    }
+
     cur._specifics = clean;
 
     renderSpecificsPreview(clean);
@@ -4665,7 +4679,7 @@ function renderResult(r){
 
   // ── EXPIRATION DATE (movido ANTES de las fotos también) ──
   // Duplicamos el picker aquí arriba para que Manuel lo llene antes de generar packs
-  var EXP_REQUIRED_CATS_TOP = ['67169','180959','75037','51227','57041','2984','67167','105070'];
+  var EXP_REQUIRED_CATS_TOP = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
   var needsExpTop = EXP_REQUIRED_CATS_TOP.includes(String(r.category||''));
   h+='<div class="card" style="border:1px solid ' + (needsExpTop?'rgba(231,76,60,.5)':'rgba(255,109,31,.35)') + ';background:' + (needsExpTop?'rgba(231,76,60,.05)':'rgba(255,109,31,.05)') + '">'
     + '<div class="lbl">📅 Expiration Date'
@@ -5373,6 +5387,7 @@ async function exportCSV(){
     'Features':'C:Features',
     'Material':'C:Material',
     'Number of Doses':'C:Number of Doses',
+    'Dosage':'C:Dosage',
     'Suitable For':'C:Suitable For', 'For Pet Type':'C:Suitable For', 'Hair Type':'C:Suitable For', 'Skin Type':'C:Suitable For',
     'Fragrance':'C:Fragrance',
     'Country/Region of Manufacture':'C:Country/Region of Manufacture', 'Country of Origin':'C:Country/Region of Manufacture',
@@ -5866,12 +5881,12 @@ async function exportCSV(){
     // Dosage — requerido para vitaminas, suplementos, productos de salud
     // Lista ampliada de categorías que requieren Dosage en eBay
     var EXP_CATS_D = [
-      '67169','180959','75037','51227','57041','2984','67167','105070',
+      '67169','180959','75037','75038','51227','57041','2984','67167','105070',
       '11776','109130','31387','3457','177762','177763','67272','3516'
     ];
     // También detectar por palabras clave en el título
     // Incluye vitaminas, suplementos Y productos de salud/analgésicos
-    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain relief|pain killer|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze/i.test(it.title||'');
+    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain relief|pain killer|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
     if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
       var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
       dosageVal = doseMatch ? doseMatch[0] : 'See product label';
