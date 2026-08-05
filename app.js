@@ -4440,7 +4440,7 @@ async function psGenerateSpecifics(){
     'Item Form','Fragrance','Scent Type','Unit Quantity','Unit Type',
     'Country/Region of Manufacture','Country of Origin','Expiration Date',
     'Main Purpose','Body Area','Type of Product','Set Includes',
-    'Period After Opening (PAO)','Styling Effect','Product Line','Item Weight','Size Type'
+    'Period After Opening (PAO)','Styling Effect','Product Line','Item Weight','Size Type','When to Take'
   ];
 
   var prompt = 'You are an eBay listing expert. For the product below, return the correct eBay item specifics as a JSON object.\n\n'
@@ -4458,7 +4458,7 @@ async function psGenerateSpecifics(){
     + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
     + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
     + '- For Country/Region of Manufacture: use common knowledge (e.g., USA for Hollywood Beauty, Germany for many European brands, Japan for many beauty brands). If genuinely unknown, use the brand origin country.\n'
-    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number).\n'
+    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements only: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — only fill if the product\'s typical usage instructions are reasonably well-known; otherwise omit).\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
     + '- Return ONLY the JSON, no preamble, no markdown.';
@@ -5375,7 +5375,7 @@ async function exportCSV(){
     'C:Features','C:Material','C:Number of Doses','C:Suitable For',
     'C:Fragrance','C:Item Form','C:Country/Region of Manufacture',
     'C:Main Purpose','C:Age Group',
-    'C:MPN','C:Period After Opening (PAO)','C:Styling Effect','C:Product Line','C:Item Weight','C:Size Type',
+    'C:MPN','C:Period After Opening (PAO)','C:Styling Effect','C:Product Line','C:Item Weight','C:Size Type','C:When to Take',
     'WeightMajor','WeightMinor'
   ];
 
@@ -5401,7 +5401,8 @@ async function exportCSV(){
     'Styling Effect':'C:Styling Effect',
     'Product Line':'C:Product Line',
     'Item Weight':'C:Item Weight',
-    'Size Type':'C:Size Type'
+    'Size Type':'C:Size Type',
+    'When to Take':'C:When to Take'
   };
   var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form','C:Country/Region of Manufacture','C:Main Purpose','C:Age Group'];
 
@@ -6064,6 +6065,7 @@ async function exportCSV(){
       _specForCol('C:Product Line'),
       _specForCol('C:Item Weight'),
       _specForCol('C:Size Type'),
+      _specForCol('C:When to Take'),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
     ].map(q).join(','));
