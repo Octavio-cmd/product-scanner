@@ -4412,6 +4412,121 @@ Rules:
 }
 
 // ── GENERAR ITEM SPECIFICS CON IA ───────────────────────────────────
+// ──────────────────────────────────────────────────────────────────────────
+// FASE 1: Parsing local de Item Specifics ANTES de llamar a Claude
+// Esto pre-llena Set Includes, Type correcto, Flavor, etc. sin APIs
+// ──────────────────────────────────────────────────────────────────────────
+
+// Extrae "Set Includes" del título (ej: "44 Count", "3 Pack", "6 Tests")
+function psParseSetIncludes(title) {
+  if (!title) return null;
+  
+  // Patrones comunes: "44 Count", "3 Pack", "X units", "X tests", "X strips", etc.
+  var patterns = [
+    /(\d+)\s*(?:Count|pack|units?|tests?|strips?|bottles?|boxes?|pieces?|pcs?|tabs?|tablets?|caps?|capsules?)/i
+  ];
+  
+  for (var i = 0; i < patterns.length; i++) {
+    var match = title.match(patterns[i]);
+    if (match) {
+      var num = match[1];
+      var word = match[0].replace(/^\d+\s*/, '').toLowerCase();
+      
+      // Mapear a valores eBay estándar
+      if (word.match(/count/i)) return num + ' Test Strips';
+      if (word.match(/pack|units?|pieces?|pcs?/i)) return num + ' Units';
+      if (word.match(/test/i)) return num + ' Tests';
+      if (word.match(/strip/i)) return num + ' Strips';
+      if (word.match(/bottle/i)) return num + ' Bottles';
+      if (word.match(/box/i)) return num + ' Boxes';
+      if (word.match(/tab/i)) return num + ' Tablets';
+      if (word.match(/cap/i)) return num + ' Capsules';
+      
+      // Default
+      return match[0];
+    }
+  }
+  return null;
+}
+
+// Extrae "Type" correcto según categoría y título (NO devuelve "Other")
+function psExtractTypeFromTitle(title, category, brand) {
+  if (!title) return null;
+  
+  var cat = String(category || '');
+  var t = (title || '').toLowerCase();
+  var b = (brand || '').toLowerCase();
+  
+  // FERTILITY & OVULATION (categoría 30118)
+  if (cat === '30118') {
+    if (t.match(/ovulation|lh|opk/i)) return 'Ovulation Test';
+    if (t.match(/pregnancy|hcg/i)) return 'Pregnancy Test';
+    if (t.match(/fsh|hormone/i)) return 'Hormone Test';
+  }
+  
+  // COLD, COUGH & FLU (categoría 75038)
+  if (cat === '75038') {
+    if (t.match(/cough/i)) return 'Cough Treatment';
+    if (t.match(/cold/i)) return 'Cold Treatment';
+    if (t.match(/flu/i)) return 'Flu Treatment';
+  }
+  
+  // OVER-THE-COUNTER MEDICATIONS (categoría 75037)
+  if (cat === '75037') {
+    if (t.match(/pain|ache|analgesic/i)) return 'Pain Relief';
+    if (t.match(/allerg/i)) return 'Allergy Relief';
+    if (t.match(/digestiv|acid/i)) return 'Digestive Aid';
+  }
+  
+  // VITAMINS & SUPPLEMENTS (categoría 51227)
+  if (cat === '51227') {
+    if (t.match(/vitamin\s*[a-z]/i)) return 'Vitamin Supplement';
+    if (t.match(/mineral/i)) return 'Mineral Supplement';
+    if (t.match(/omega|fish oil/i)) return 'Omega Supplement';
+  }
+  
+  // Si no match específico, devolver null (dejar que Claude lo llene)
+  return null;
+}
+
+// Extrae "Flavor" del título si existe (para medicinas, bebidas, etc.)
+function psExtractFlavorFromTitle(title) {
+  if (!title) return null;
+  
+  var flavorPatterns = [
+    /(?:Flavor|Flavour|Taste):\s*(\w+)/i,
+    /^([A-Z][a-z]+)\s+(?:Flavor|Flavour|Taste)/i,
+    /(Grape|Cherry|Strawberry|Raspberry|Orange|Lemon|Lime|Mint|Vanilla|Chocolate|Cinnamon|Honey|Peach|Apple|Blueberry|Watermelon|Pineapple)\b/i
+  ];
+  
+  for (var i = 0; i < flavorPatterns.length; i++) {
+    var match = title.match(flavorPatterns[i]);
+    if (match) {
+      var flavor = match[1] || match[0];
+      // Normalizar
+      flavor = flavor.charAt(0).toUpperCase() + flavor.slice(1).toLowerCase();
+      return flavor;
+    }
+  }
+  return null;
+}
+
+// Extrae campos básicos que Claude puede usar directamente
+function psPreFillSpecifics(title, category, brand) {
+  var prefilled = {};
+  
+  var setInc = psParseSetIncludes(title);
+  if (setInc) prefilled['Set Includes'] = setInc;
+  
+  var typeVal = psExtractTypeFromTitle(title, category, brand);
+  if (typeVal) prefilled['Type'] = typeVal;
+  
+  var flavor = psExtractFlavorFromTitle(title);
+  if (flavor) prefilled['Flavor'] = flavor;
+  
+  return prefilled;
+}
+
 // Le pregunta a Claude los item specifics correctos para el producto,
 // según su título, marca y categoría. Claude CONOCE los productos (ej: sabe
 // que Advantage II = Imidacloprid 9.1%) y qué specifics pide cada categoría
@@ -4429,6 +4544,10 @@ async function psGenerateSpecifics(){
   var titleForAI = (cur._selectedTitle || cur.title || '').replace(/\s*Pack of \d+\s*/gi,' ').replace(/\s*New\s*$/i,'').trim();
   var brandForAI = cur.brand || '';
   var catForAI   = String(cur.category || '');
+  
+  // ✨ FASE 1: PRE-PARSE local fields sin APIs (Set Includes, Type, Flavor)
+  var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI);
+  console.log('🔍 Pre-parsed specifics:', prefilled);
 
   // Lista de specifics que el CSV soporta (columnas comunes ampliadas).
   // Claude llena SOLO los que apliquen al producto; deja el resto fuera.
@@ -4446,8 +4565,10 @@ async function psGenerateSpecifics(){
   var prompt = 'You are an eBay listing expert. For the product below, return the correct eBay item specifics as a JSON object.\n\n'
     + 'Product title: ' + titleForAI + '\n'
     + 'Brand: ' + brandForAI + '\n'
-    + 'eBay category ID: ' + catForAI + '\n\n'
+    + 'eBay category ID: ' + catForAI + '\n'
+    + 'Pre-parsed fields (already extracted): ' + JSON.stringify(prefilled) + '\n\n'
     + 'RULES:\n'
+    + '- Pre-parsed values are ALREADY CONFIRMED; use them as-is in your response (do NOT change or override Set Includes, Type, or Flavor if they were pre-parsed).\n'
     + '- Return ONLY a flat JSON object of {"Specific Name": "value"}.\n'
     + '- Use ONLY these specific names when they apply: ' + SUPPORTED.join(', ') + '.\n'
     + '- MANDATORY FIELDS: ALWAYS include Color, Formulation, and Country/Region of Manufacture (haircare, beauty, skincare, pet, health products MUST have all three). Fill AS MANY other specifics as possible for ranking. Only omit one you genuinely cannot determine; NEVER invent fake values.\n'
@@ -4486,8 +4607,19 @@ async function psGenerateSpecifics(){
     // Guardar solo pares válidos (nombre soportado + valor no vacío)
     var clean = {};
     var count = 0;
+    
+    // FASE 1: Empezar con prefilled values (pre-parsed del título, 100% confiables)
+    for(var pk in prefilled){
+      if(prefilled.hasOwnProperty(pk)){
+        clean[pk] = String(prefilled[pk]).substring(0, 65);
+        count++;
+      }
+    }
+    
+    // Luego agregar/sobreescribir con respuesta de Claude (excepto los que ya están en prefilled)
     for(var k in parsed){
       if(!parsed.hasOwnProperty(k)) continue;
+      if(prefilled.hasOwnProperty(k)) continue; // Skip si ya fue pre-parsed
       var val = String(parsed[k] == null ? '' : parsed[k]).trim();
       if(val && SUPPORTED.indexOf(k) !== -1){
         clean[k] = val.substring(0, 65); // eBay limita valores de specifics
