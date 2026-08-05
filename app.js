@@ -4541,6 +4541,66 @@ function psExtractDepartment(title) {
   return 'Adult'; // Default para mayoría
 }
 
+// Extrae SPF del título para sunscreen (CRÍTICO para categoría 31774)
+function psExtractSPF(title, category) {
+  if (!title) return null;
+  var t = title.toLowerCase();
+  var cat = String(category || '');
+  
+  // Categorías de sunscreen: 31774, 31787, 180959
+  if (['31774', '31787', '180959'].includes(cat)) {
+    var match = t.match(/spf\s*(\d+)/i);
+    if (match) return 'SPF ' + match[1];
+  }
+  return null;
+}
+
+// Extrae Hair Type según el título (para haircare cat 177660, 67181)
+function psExtractHairType(title) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  
+  if (t.match(/damaged|damage|repair/i)) return 'Damaged Hair';
+  if (t.match(/curly|curl|coily/i)) return 'Curly Hair';
+  if (t.match(/straight|straightening/i)) return 'Straight Hair';
+  if (t.match(/oily|oiliness|oil control/i)) return 'Oily Hair';
+  if (t.match(/dry|dryness/i)) return 'Dry Hair';
+  if (t.match(/thick|volume|volumizing/i)) return 'Thick Hair';
+  if (t.match(/thin|fine|thinning/i)) return 'Fine Hair';
+  
+  // Default para haircare
+  return null;
+}
+
+// Extrae PAO (Period After Opening) para cosmetics/haircare/skincare
+function psExtractPAO(category) {
+  var cat = String(category || '');
+  
+  // Cosmetics/Haircare/Skincare típicamente = 12 meses (12M)
+  // Categorías: 177660 (Hair), 67181 (Haircare), 67169 (Skincare), 180959 (First Aid/Sunscreen)
+  if (['177660', '67181', '67169', '180959', '31774', '31787'].includes(cat)) {
+    return '12M'; // 12 months post-opening (estándar industria)
+  }
+  return null;
+}
+
+// Extrae Body Area según categoría (Full Body para sunscreen, Hair para haircare)
+function psExtractBodyArea(category, title) {
+  var cat = String(category || '');
+  var t = (title || '').toLowerCase();
+  
+  // Sunscreen = Full Body por default
+  if (['31774', '31787'].includes(cat)) return 'Full Body';
+  
+  // Haircare = Scalp/Hair
+  if (['177660', '67181'].includes(cat)) {
+    if (t.match(/scalp/i)) return 'Scalp';
+    return 'Hair'; // Default para haircare
+  }
+  
+  return null;
+}
+
 // Extrae campos básicos que Claude puede usar directamente
 function psPreFillSpecifics(title, category, brand) {
   var prefilled = {};
@@ -4554,14 +4614,27 @@ function psPreFillSpecifics(title, category, brand) {
   var flavor = psExtractFlavorFromTitle(title);
   if (flavor) prefilled['Flavor'] = flavor;
   
-  // FASE 1.5: Agregar Administration + Department automáticamente
+  // FASE 1.5: Administration + Department
   var admin = psExtractAdministration(category);
   if (admin) prefilled['Administration'] = admin;
   
   var dept = psExtractDepartment(title);
-  if (dept && dept !== 'Adult') { // Solo agregar si no es default
+  if (dept && dept !== 'Adult') {
     prefilled['Department'] = dept;
   }
+  
+  // FASE 2: SPF + Hair Type + PAO + Body Area
+  var spf = psExtractSPF(title, category);
+  if (spf) prefilled['Sun Protection Factor'] = spf;
+  
+  var hairType = psExtractHairType(title);
+  if (hairType) prefilled['Hair Type'] = hairType;
+  
+  var pao = psExtractPAO(category);
+  if (pao) prefilled['Period After Opening (PAO)'] = pao;
+  
+  var bodyArea = psExtractBodyArea(category, title);
+  if (bodyArea) prefilled['Body Area'] = bodyArea;
   
   return prefilled;
 }
