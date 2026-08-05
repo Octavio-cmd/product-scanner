@@ -4473,9 +4473,16 @@ function psExtractTypeFromTitle(title, category, brand) {
   
   // OVER-THE-COUNTER MEDICATIONS (categoría 75037)
   if (cat === '75037') {
-    if (t.match(/pain|ache|analgesic/i)) return 'Pain Relief';
+    // Antihistamines (loratadine, cetirizine, fexofenadine, etc.)
+    if (t.match(/loratadine|cetirizine|fexofenadine|antihistamine/i)) return 'Antihistamine';
+    // Decongestants
+    if (t.match(/pseudoephedrine|phenylephrine|decongestant/i)) return 'Decongestant';
+    // Pain relief
+    if (t.match(/pain|ache|analgesic|ibuprofen|acetaminophen/i)) return 'Pain Relief';
+    // Digestive
+    if (t.match(/digestiv|acid|antacid|omeprazole/i)) return 'Digestive Aid';
+    // Generic allergy (only if no specific match above)
     if (t.match(/allerg/i)) return 'Allergy Relief';
-    if (t.match(/digestiv|acid/i)) return 'Digestive Aid';
   }
   
   // VITAMINS & SUPPLEMENTS (categoría 51227)
@@ -4511,6 +4518,29 @@ function psExtractFlavorFromTitle(title) {
   return null;
 }
 
+// Extrae "Administration" según categoría (Oral para OTC/Medicines)
+function psExtractAdministration(category) {
+  var cat = String(category || '');
+  
+  // OTC/Medicines/Supplements = Oral por default
+  // Categorías: 75037 (OTC), 75038 (Cold/Cough), 51227 (Vitamins), 180959 (First Aid), 67169 (Supplements)
+  if (['75037', '75038', '51227', '180959', '67169', '105070'].includes(cat)) {
+    return 'Oral'; // Default seguro para la mayoría de OTC
+  }
+  return null;
+}
+
+// Extrae "Department" según título (Adult/Children/Senior)
+function psExtractDepartment(title) {
+  if (!title) return 'Adult'; // Default
+  var t = (title || '').toLowerCase();
+  
+  if (t.match(/children|kids|baby|infant|toddler|pediatric/i)) return 'Children';
+  if (t.match(/senior|elderly|adult\s+65|65\+/i)) return 'Senior';
+  
+  return 'Adult'; // Default para mayoría
+}
+
 // Extrae campos básicos que Claude puede usar directamente
 function psPreFillSpecifics(title, category, brand) {
   var prefilled = {};
@@ -4523,6 +4553,15 @@ function psPreFillSpecifics(title, category, brand) {
   
   var flavor = psExtractFlavorFromTitle(title);
   if (flavor) prefilled['Flavor'] = flavor;
+  
+  // FASE 1.5: Agregar Administration + Department automáticamente
+  var admin = psExtractAdministration(category);
+  if (admin) prefilled['Administration'] = admin;
+  
+  var dept = psExtractDepartment(title);
+  if (dept && dept !== 'Adult') { // Solo agregar si no es default
+    prefilled['Department'] = dept;
+  }
   
   return prefilled;
 }
