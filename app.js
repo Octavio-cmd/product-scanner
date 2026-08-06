@@ -3213,10 +3213,12 @@ async function addBulk() {
   var cat = String(cur.category || '');
   var shadeVal = cur._specifics && cur._specifics['Shade'] ? String(cur._specifics['Shade']).trim() : '';
   
-  // Categoría 172023 (Lash & Brow) REQUIERE Shade
-  if (cat === '172023') {
+  // Categorías que REQUIEREN Shade obligatoriamente
+  var shadeRequiredCats = ['172023', '31804']; // 172023=Lash/Brow, 31804=Lipstick
+  if (shadeRequiredCats.includes(cat)) {
     if (!shadeVal || shadeVal === '') {
-      toast('❌ FALTA SHADE - Campo obligatorio para esta categoría\n\nDebes completar manualmente el Shade (ej: Clear, Black, Brown) antes de continuar.\n\nEdita el producto y vuelve a intentar.');
+      var catName = cat === '172023' ? 'Lash/Brow' : 'Lipstick';
+      toast('❌ FALTA SHADE - Campo obligatorio para ' + catName + '\n\nDebes completar manualmente el Shade antes de continuar.\n\nEdita el producto y vuelve a intentar.');
       var addBtn = document.getElementById('addBtn');
       if (addBtn) {
         addBtn.disabled = false;
@@ -4545,6 +4547,24 @@ function psExtractTypeFromTitle(title, category, brand) {
     if (t.match(/sunscreen|sun\s+protection|spf\s+\d+/i)) return 'Sunscreen';
   }
   
+  // LASH & BROW (categoría 172023) - MEJORADO
+  if (cat === '172023') {
+    if (t.match(/eyelash|lash\s+serum|brow\s+serum/i)) return 'Lash Serum';
+    if (t.match(/eyebrow|brow/i)) return 'Eyebrow Serum';
+    if (t.match(/eyelash|lash/i)) return 'Lash Serum';
+    return 'Lash Serum'; // Default para esta categoría
+  }
+  
+  // LIPSTICK & LIP PRODUCTS (categoría 31804) - NUEVA
+  if (cat === '31804') {
+    if (t.match(/lipstick\b/i)) return 'Lipstick';
+    if (t.match(/lip\s+kit|lip\s+set/i)) return 'Lip Kit';
+    if (t.match(/lip\s+gloss|gloss\b/i)) return 'Lip Gloss';
+    if (t.match(/lip\s+liner/i)) return 'Lip Liner';
+    if (t.match(/ready|kit/i)) return 'Lip Kit'; // "Mistletoe Ready Lip Kit"
+    return 'Lipstick'; // Default para lip products
+  }
+  
   // TOYS - DOLLS (categoría 220)
   if (cat === '220') {
     // Types específicos de dolls/toys
@@ -4731,26 +4751,54 @@ function psExtractSkinType(title) {
   return null;
 }
 
-// NUEVA: Extrae "Shade" para Lash/Brow products (categoría 172023)
+// NUEVA: Extrae Brand inteligentemente del título
+function psExtractBrand(title) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  
+  // Marcas conocidas: Milani, Essie, Maybelline, etc.
+  if (t.match(/\bmilani\b/i)) return 'Milani';
+  if (t.match(/\bessie\b/i)) return 'Essie';
+  if (t.match(/\bmaybelline\b/i)) return 'Maybelline';
+  if (t.match(/\bsally hansen\b/i)) return 'Sally Hansen';
+  if (t.match(/\borp\b|opi\b/i)) return 'OPI';
+  if (t.match(/\bcvs\b/i)) return 'CVS';
+  if (t.match(/\bwalgreens\b/i)) return 'Walgreens';
+  if (t.match(/\bthe creme shop\b/i)) return 'The Crème Shop';
+  if (t.match(/\bpolly pocket\b/i)) return 'Polly Pocket';
+  if (t.match(/\bbarbie\b/i)) return 'Barbie';
+  
+  // Si no detecta marca específica, retornar null (dejar que lo determine de otra forma)
+  return null;
+}
+
+// NUEVA: Extrae "Shade" para Lash/Brow y Lip products
 function psExtractShade(title, category) {
   if (!title) return null;
   var t = (title || '').toLowerCase();
   var cat = String(category || '');
   
-  // Solo para lash/brow products (categoría 172023)
+  // Para lash/brow products (categoría 172023)
   if (cat === '172023') {
     // Detectar colores/shades específicos
-    if (t.match(/clear\b|transparent|colorless/i)) return 'Clear';
+    if (t.match(/clear\b|transparent|colorless|serum\b/i)) return 'Clear';
     if (t.match(/\bblack\b|jet black|ebony/i)) return 'Black';
     if (t.match(/\bbrown\b|dark brown|medium brown|light brown/i)) return 'Brown';
     if (t.match(/espresso/i)) return 'Espresso';
     if (t.match(/brunette/i)) return 'Brunette';
     if (t.match(/blonde|light/i)) return 'Blonde';
-    // Si el título tiene "eyelash" o "lash" pero no especifica color
-    if (t.match(/eyelash|lash|brow/i)) {
-      // Fallback seguro para lash serums sin color específico
-      return 'Clear'; // Default seguro para serums transparentes
-    }
+  }
+  
+  // Para Lipstick (categoría 31804)
+  if (cat === '31804') {
+    // Detectar colores de labios - buscar después de números (ej: "True 02 TRUE RED")
+    if (t.match(/\bred\b|red\s+flag|true\s+red/i)) return 'Red';
+    if (t.match(/pink\b/i)) return 'Pink';
+    if (t.match(/coral\b/i)) return 'Coral';
+    if (t.match(/nude\b|beige\b/i)) return 'Nude';
+    if (t.match(/berry\b|plum\b/i)) return 'Berry';
+    if (t.match(/mauve\b|wine\b/i)) return 'Mauve';
+    if (t.match(/fuchsia\b|magenta\b/i)) return 'Fuchsia';
   }
   
   return null;
@@ -4762,6 +4810,10 @@ function psPreFillSpecifics(title, category, brand) {
   
   var setInc = psParseSetIncludes(title);
   if (setInc) prefilled['Set Includes'] = setInc;
+  
+  // NUEVA: Brand inteligente - busca marca real en el título
+  var brandVal = psExtractBrand(title);
+  if (brandVal) prefilled['Brand'] = brandVal;
   
   var typeVal = psExtractTypeFromTitle(title, category, brand);
   if (typeVal) prefilled['Type'] = typeVal;
