@@ -3209,6 +3209,24 @@ async function addBulk() {
     // subir el listado a tiempo que bloquear indefinidamente.
   }
 
+  // ⚠️ VALIDACIÓN CRÍTICA: Verificar campos obligatorios por categoría
+  var cat = String(cur.category || '');
+  var shadeVal = cur._specifics && cur._specifics['Shade'] ? String(cur._specifics['Shade']).trim() : '';
+  
+  // Categoría 172023 (Lash & Brow) REQUIERE Shade
+  if (cat === '172023') {
+    if (!shadeVal || shadeVal === '') {
+      toast('❌ FALTA SHADE - Campo obligatorio para esta categoría\n\nDebes completar manualmente el Shade (ej: Clear, Black, Brown) antes de continuar.\n\nEdita el producto y vuelve a intentar.');
+      var addBtn = document.getElementById('addBtn');
+      if (addBtn) {
+        addBtn.disabled = false;
+        addBtn.textContent = '➕ ADD TO CSV';
+        addBtn.style.background = '';
+      }
+      return;
+    }
+  }
+
   toast('🟢 Agregando al CSV...');
 
   // TIMEOUT GLOBAL de 45 segundos — si tarda más, restaurar botón y avisar
@@ -4713,6 +4731,31 @@ function psExtractSkinType(title) {
   return null;
 }
 
+// NUEVA: Extrae "Shade" para Lash/Brow products (categoría 172023)
+function psExtractShade(title, category) {
+  if (!title) return null;
+  var t = (title || '').toLowerCase();
+  var cat = String(category || '');
+  
+  // Solo para lash/brow products (categoría 172023)
+  if (cat === '172023') {
+    // Detectar colores/shades específicos
+    if (t.match(/clear\b|transparent|colorless/i)) return 'Clear';
+    if (t.match(/\bblack\b|jet black|ebony/i)) return 'Black';
+    if (t.match(/\bbrown\b|dark brown|medium brown|light brown/i)) return 'Brown';
+    if (t.match(/espresso/i)) return 'Espresso';
+    if (t.match(/brunette/i)) return 'Brunette';
+    if (t.match(/blonde|light/i)) return 'Blonde';
+    // Si el título tiene "eyelash" o "lash" pero no especifica color
+    if (t.match(/eyelash|lash|brow/i)) {
+      // Fallback seguro para lash serums sin color específico
+      return 'Clear'; // Default seguro para serums transparentes
+    }
+  }
+  
+  return null;
+}
+
 // Extrae campos básicos que Claude puede usar directamente
 function psPreFillSpecifics(title, category, brand) {
   var prefilled = {};
@@ -4747,6 +4790,10 @@ function psPreFillSpecifics(title, category, brand) {
   
   var bodyArea = psExtractBodyArea(category, title);
   if (bodyArea) prefilled['Body Area'] = bodyArea;
+  
+  // NUEVA: Shade para Lash/Brow products (categoría 172023)
+  var shade = psExtractShade(title, category);
+  if (shade) prefilled['Shade'] = shade;
   
   // FASE 3 - TOYS & DOLLS: Character, Franchise, Product Line
   var dollChar = psExtractDollCharacter(title, brand);
