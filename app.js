@@ -4555,6 +4555,16 @@ function psExtractTypeFromTitle(title, category, brand) {
     return 'Lash Serum'; // Default para esta categoría
   }
   
+  // GROOMING & TRIMMERS (categoría 67408) - NUEVA
+  if (cat === '67408') {
+    if (t.match(/beard\s+trimmer|mustache\s+trimmer/i)) return 'Beard Trimmer';
+    if (t.match(/nose\s+trimmer/i)) return 'Nose Trimmer';
+    if (t.match(/hair\s+clipper|clipper\b/i)) return 'Hair Clipper';
+    if (t.match(/grooming\s+kit|kit\b/i)) return 'Grooming Kit';
+    if (t.match(/trimmer\b/i)) return 'Trimmer';
+    return 'Grooming Kit'; // Default para grooming
+  }
+  
   // LIPSTICK & LIP PRODUCTS (categoría 31804) - NUEVA
   if (cat === '31804') {
     if (t.match(/lipstick\b/i)) return 'Lipstick';
