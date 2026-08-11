@@ -6023,15 +6023,17 @@ function setupPromoteButton() {
   return promoteBtn;
 }
 
-// Inicializar el botón cuando carga la app
+// Inicializar el botón cuando carga la app - ABAJO, cerca de ADD TO CSV
 document.addEventListener('DOMContentLoaded', function() {
   setTimeout(function() {
-    const container = document.getElementById('bulk-editor') || document.body;
-    if (container && !document.getElementById('promote-btn')) {
-      const btn = setupPromoteButton();
-      container.insertBefore(btn, container.firstChild);
+    // Buscar el contenedor del botón ADD TO CSV
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn && addBtn.parentNode && !document.getElementById('promote-btn')) {
+      var btn = setupPromoteButton();
+      // Insertar DESPUÉS del botón ADD TO CSV (abajo)
+      addBtn.parentNode.insertBefore(btn, addBtn.nextSibling);
     }
-  }, 500);
+  }, 1000);
 });
 
 
