@@ -4868,6 +4868,33 @@ function psExtractShade(title, category) {
 }
 
 // Extrae campos básicos que Claude puede usar directamente
+// Detecta la forma física del producto (Softgel, Capsule, Tablet, Gummy,
+// Powder, Liquid, Drops) directamente del título — usado como fuente de
+// verdad para C:Formulation y C:Item Form en vitaminas/suplementos/medicina,
+// porque el título casi siempre lo dice explícitamente y es más confiable
+// que dejarlo 100% a criterio de la IA.
+function psDetectIngestibleForm(title) {
+  var t = (title || '').toLowerCase();
+  if (/gumm(y|ies)/.test(t)) return 'Gummy';
+  if (/softgel|soft gel/.test(t)) return 'Softgel';
+  if (/capsule/.test(t)) return 'Capsule';
+  if (/tablet|caplet/.test(t)) return 'Tablet';
+  if (/\bpowder\b/.test(t)) return 'Powder';
+  if (/\bliquid\b/.test(t)) return 'Liquid';
+  if (/\bdrops?\b/.test(t)) return 'Drops';
+  return '';
+}
+
+// Quita una dosis final tipo "400mg" / "500 mcg" del nombre de un
+// ingrediente (ej. "Magnesium 400mg" → "Magnesium"). La dosis ya tiene su
+// propia columna (C:Dosage); dejarla mezclada en el ingrediente no calza
+// con el valor exacto que eBay espera para el aspecto "Active Ingredients"/
+// "Ingredients".
+function psStripDosageFromIngredient(val) {
+  if (!val) return '';
+  return String(val).replace(/\s*\d+\.?\d*\s?(mg|mcg|iu|ml|oz|g)\b\.?\s*$/i, '').trim();
+}
+
 function psPreFillSpecifics(title, category, brand) {
   var prefilled = {};
   
@@ -4995,7 +5022,7 @@ async function psGenerateSpecifics(){
     + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
     + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
     + '- For Country/Region of Manufacture: use common knowledge (e.g., USA for Hollywood Beauty, Germany for many European brands, Japan for many beauty brands). If genuinely unknown, use the brand origin country.\n'
-    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements only: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — only fill if the product\'s typical usage instructions are reasonably well-known; otherwise omit).\n'
+    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements ONLY: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — use the well-known instructions if confident. If NOT confident, use the literal value "See product label" instead of omitting it — same rule as Dosage; never leave this blank for a vitamin/supplement product).\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
     + '- Return ONLY the JSON, no preamble, no markdown.';
@@ -5925,22 +5952,28 @@ async function exportCSV(){
     'C:Color','C:Language','C:Book Title','C:Author','ISBN',
     'C:Expiration Date','C:Dosage','C:Shade','C:Connectivity',
     // ── Item specifics generados por IA (columnas comunes) ──
-    'C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients',
+    'C:Size','C:Volume','C:Scent','C:Flavor','C:Formulation','C:Active Ingredients','C:Ingredients',
     'C:Features','C:Material','C:Number of Doses','C:Suitable For',
     'C:Fragrance','C:Item Form','C:Country/Region of Manufacture',
-    'C:Main Purpose','C:Age Group',
+    'C:Main Purpose','C:Age Group','C:Department',
     'C:MPN','C:Period After Opening (PAO)','C:Styling Effect','C:Product Line','C:Item Weight','C:Size Type','C:When to Take',
     'WeightMajor','WeightMinor'
   ];
 
   // Nombres de specific de IA → columna del CSV (para mapear cur._specifics).
   // La IA puede usar varios nombres equivalentes; los normalizamos aquí.
+  // IMPORTANTE: "Flavor", "Ingredients" y "Department" son aspectos PROPIOS
+  // de eBay (distintos de Scent, Active Ingredients y Age Group) — antes se
+  // mezclaban en la misma columna y uno pisaba al otro, dejando el aspecto
+  // real de eBay vacío. Ahora cada uno tiene su columna dedicada.
   var SPEC_COL_MAP = {
     'Size':'C:Size', 'Volume':'C:Volume', 'Count':'C:Size', 'Unit Quantity':'C:Size',
-    'Scent':'C:Scent', 'Scent Type':'C:Scent', 'Flavor':'C:Scent',
+    'Scent':'C:Scent', 'Scent Type':'C:Scent',
+    'Flavor':'C:Flavor',
     'Color':'C:Color',
     'Formulation':'C:Formulation', 'Item Form':'C:Item Form',
-    'Active Ingredients':'C:Active Ingredients', 'Ingredients':'C:Active Ingredients',
+    'Active Ingredients':'C:Active Ingredients',
+    'Ingredients':'C:Ingredients',
     'Features':'C:Features',
     'Material':'C:Material',
     'Number of Doses':'C:Number of Doses',
@@ -5949,7 +5982,8 @@ async function exportCSV(){
     'Fragrance':'C:Fragrance',
     'Country/Region of Manufacture':'C:Country/Region of Manufacture', 'Country of Origin':'C:Country/Region of Manufacture',
     'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose', 'Type of Product':'C:Main Purpose',
-    'Age Group':'C:Age Group', 'Department':'C:Age Group',
+    'Age Group':'C:Age Group',
+    'Department':'C:Department',
     'MPN':'C:MPN',
     'Period After Opening (PAO)':'C:Period After Opening (PAO)', 'PAO':'C:Period After Opening (PAO)',
     'Styling Effect':'C:Styling Effect',
@@ -5958,7 +5992,7 @@ async function exportCSV(){
     'Size Type':'C:Size Type',
     'When to Take':'C:When to Take'
   };
-  var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Formulation','C:Active Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form','C:Country/Region of Manufacture','C:Main Purpose','C:Age Group'];
+  var SPEC_COLS = ['C:Size','C:Volume','C:Scent','C:Flavor','C:Formulation','C:Active Ingredients','C:Ingredients','C:Features','C:Material','C:Number of Doses','C:Suitable For','C:Fragrance','C:Item Form','C:Country/Region of Manufacture','C:Main Purpose','C:Age Group','C:Department'];
 
   var lines = ['Info,Version=1.0.0,Template=fx_category_template_EBAY_US', HDR.join(',')];
   var skipped = 0;
@@ -6453,7 +6487,7 @@ async function exportCSV(){
     var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain relief|pain killer|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
     if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
       var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
-      dosageVal = doseMatch ? doseMatch[0] : 'See product label';
+      dosageVal = doseMatch ? doseMatch[0].replace(/(\d)([a-zA-Z])/, '$1 $2') : 'See product label';
     }
 
     // Auto-fix brand for known brands in title
@@ -6570,6 +6604,22 @@ async function exportCSV(){
       upcVal = _rawUpc;
     }
 
+    // ── Formulation / Item Form: cuando el título dice explícitamente la
+    // forma del producto (Softgel, Capsule, Tablet, Gummy, etc.), esa es la
+    // fuente de verdad — más confiable que lo que adivine la IA. Solo se usa
+    // el valor de la IA cuando el título no lo deja claro (cremas, geles,
+    // líquidos tópicos donde no aplica este detector).
+    var _ingestibleForm = psDetectIngestibleForm(it.title);
+    var formulationVal = _ingestibleForm || _specForCol('C:Formulation');
+    var itemFormVal     = _ingestibleForm || _specForCol('C:Item Form');
+
+    // ── Active Ingredients / Ingredients: quitar la dosis del nombre del
+    // ingrediente (ej. "Magnesium 400mg" → "Magnesium"). La dosis ya vive
+    // en su propia columna (C:Dosage); dejarla en el ingrediente duplica el
+    // dato y no calza con el valor exacto que eBay espera para el aspecto.
+    var activeIngredientsVal = psStripDosageFromIngredient(_specForCol('C:Active Ingredients'));
+    var ingredientsVal       = psStripDosageFromIngredient(_specForCol('C:Ingredients')) || activeIngredientsVal;
+
     lines.push([
       'Add',
       it.sku||'',
@@ -6602,17 +6652,20 @@ async function exportCSV(){
       _specForCol('C:Size'),
       _specForCol('C:Volume'),
       _specForCol('C:Scent'),
-      _specForCol('C:Formulation'),
-      _specForCol('C:Active Ingredients'),
+      _specForCol('C:Flavor'),
+      formulationVal,
+      activeIngredientsVal,
+      ingredientsVal,
       _specForCol('C:Features'),
       _specForCol('C:Material'),
       _specForCol('C:Number of Doses'),
       _specForCol('C:Suitable For'),
       _specForCol('C:Fragrance'),
-      _specForCol('C:Item Form'),
+      itemFormVal,
       _specForCol('C:Country/Region of Manufacture'),
       _specForCol('C:Main Purpose'),
       _specForCol('C:Age Group'),
+      _specForCol('C:Department'),
       _specForCol('C:MPN'),
       _specForCol('C:Period After Opening (PAO)'),
       _specForCol('C:Styling Effect'),
