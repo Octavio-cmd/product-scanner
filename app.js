@@ -5326,6 +5326,11 @@ function renderResult(r){
     <div id="specifics-preview"></div>
   </div>`;
 
+  // ── AUTO-PROMOTE — botón estático en la plantilla (entre Revisar y ADD TO CSV) ──
+  // Va en el HTML del resultado, no insertado por DOM, para que siempre
+  // aparezca en el orden correcto y sobreviva cada re-render del escaneo.
+  h+=`<button id="promote-btn" onclick="psPromoteClick()" ontouchend="event.preventDefault();psPromoteClick()" style="width:100%;padding:13px;margin:8px 0;background:linear-gradient(135deg,#667eea,#764ba2);color:#fff;border:none;border-radius:10px;font-weight:800;font-size:15px;cursor:pointer">📢 Auto-Promote Items</button>`;
+
   h+=sv
     ? `<button class="add-btn" id="addBtn">➕ ADD TO CSV</button>`
     : `<button class="ov-add-btn" id="addBtn">➕ Add anyway (DWI override)</button>`;
@@ -5964,97 +5969,53 @@ async function promoteItemsAutomatically(csvText) {
 // AGREGAR BOTÓN PARA PROMOCIONAR ITEMS DESDE IVEY CSV
 // ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
-function setupPromoteButton() {
+function psPromoteClick() {
   /**
-   * Crea un botón "📢 Auto-Promote" que permite cargar el Ivey CSV
-   * Posicionado ARRIBA del botón ADD TO CSV
+   * Handler del botón "📢 Auto-Promote Items" (renderizado en la plantilla
+   * del resultado). Abre file picker para el Ivey CSV de eBay y llama a
+   * promoteItemsAutomatically().
    */
-  const promoteBtn = document.createElement('button');
-  promoteBtn.id = 'promote-btn';
-  promoteBtn.innerHTML = '📢 Auto-Promote Items';
-  promoteBtn.style.cssText = `
-    padding: 12px 20px;
-    margin: 10px 0;
-    background: linear-gradient(135deg, #667eea, #764ba2);
-    color: white;
-    border: none;
-    border-radius: 6px;
-    font-weight: bold;
-    cursor: pointer;
-    font-size: 14px;
-    width: 100%;
-    transition: all 0.3s ease;
-  `;
-  
-  promoteBtn.onmouseover = function() {
-    this.style.transform = 'translateY(-2px)';
-    this.style.boxShadow = '0 8px 16px rgba(102, 126, 234, 0.4)';
-  };
-  promoteBtn.onmouseout = function() {
-    this.style.transform = 'translateY(0)';
-    this.style.boxShadow = 'none';
-  };
-  
-  promoteBtn.onclick = async function() {
-    const input = document.createElement('input');
-    input.type = 'file';
-    input.accept = '.csv';
-    input.style.display = 'none';
-    document.body.appendChild(input);
-    
-    input.onchange = async function(e) {
-      const file = e.target.files[0];
-      if (!file) return;
-      
-      const reader = new FileReader();
-      reader.onload = async function(event) {
-        const csv = event.target.result;
-        const success = await promoteItemsAutomatically(csv);
-        if (success) {
-          promoteBtn.style.background = 'linear-gradient(135deg, #52c41a, #135200)';
-          promoteBtn.innerHTML = '✅ Items Promocionados';
-          setTimeout(function() {
-            promoteBtn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
-            promoteBtn.innerHTML = '📢 Auto-Promote Items';
-          }, 3000);
+  var promoteBtn = document.getElementById('promote-btn');
+  var input = document.createElement('input');
+  input.type = 'file';
+  input.accept = '.csv,text/csv';
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+
+  input.addEventListener('change', function(e) {
+    var file = e.target.files && e.target.files[0];
+    if (!file) { document.body.removeChild(input); return; }
+
+    var reader = new FileReader();
+    reader.onload = function(event) {
+      var csv = event.target.result;
+      if (promoteBtn) { promoteBtn.textContent = '⏳ Promocionando...'; promoteBtn.disabled = true; }
+      promoteItemsAutomatically(csv).then(function(success) {
+        if (promoteBtn) {
+          promoteBtn.disabled = false;
+          if (success) {
+            promoteBtn.style.background = 'linear-gradient(135deg,#52c41a,#135200)';
+            promoteBtn.textContent = '✅ Items Promocionados';
+            setTimeout(function() {
+              if (document.getElementById('promote-btn')) {
+                promoteBtn.style.background = 'linear-gradient(135deg,#667eea,#764ba2)';
+                promoteBtn.textContent = '📢 Auto-Promote Items';
+              }
+            }, 3000);
+          } else {
+            promoteBtn.textContent = '📢 Auto-Promote Items';
+          }
         }
-      };
-      reader.readAsText(file);
-      document.body.removeChild(input);
+      });
+      if (input.parentNode) document.body.removeChild(input);
     };
-    
-    // Para iOS: usar dispatchEvent en lugar de click()
-    input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-  };
-  
-  return promoteBtn;
+    reader.readAsText(file);
+  });
+
+  // Para iOS: usar dispatchEvent en lugar de click()
+  input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
 }
-
-// Inicializar el botón - INSERTAR ANTES de ADD TO CSV
-document.addEventListener('DOMContentLoaded', function() {
-  setTimeout(function() {
-    if (!document.getElementById('promote-btn')) {
-      // Buscar el botón ADD TO CSV por su contenido
-      var allBtns = document.querySelectorAll('button');
-      var addBtn = null;
-      for (var i = 0; i < allBtns.length; i++) {
-        if (allBtns[i].textContent.includes('ADD TO CSV')) {
-          addBtn = allBtns[i];
-          break;
-        }
-      }
-      
-      if (addBtn && addBtn.parentNode) {
-        var btn = setupPromoteButton();
-        // Insertar ANTES del botón ADD TO CSV
-        addBtn.parentNode.insertBefore(btn, addBtn);
-        console.log('✅ Auto-Promote button inserted before ADD TO CSV');
-      }
-    }
-  }, 800);
-});
-
-
 
 async function exportCSV(){
   try {
