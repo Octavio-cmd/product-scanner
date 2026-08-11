@@ -4621,7 +4621,9 @@ function psExtractAdministration(category) {
   return null;
 }
 
-// Extrae "Department" según título (Adult/Children/Senior)
+// Extrae "Age Group" según título (Adult/Children/Senior) — OJO: pese al
+// nombre de la función, esto llena el aspecto "Age Group" de eBay, NO
+// "Department". Se dejó el nombre por compatibilidad con el resto del código.
 function psExtractDepartment(title) {
   if (!title) return 'Adult'; // Default
   var t = (title || '').toLowerCase();
@@ -4630,6 +4632,18 @@ function psExtractDepartment(title) {
   if (t.match(/senior|elderly|adult\s+65|65\+/i)) return 'Senior';
   
   return 'Adult'; // Default para mayoría
+}
+
+// Extrae "Department" REAL de eBay para salud/belleza: es un aspecto de
+// GÉNERO (Men/Women/Unisex), no de edad — confirmado con la respuesta real
+// de eBay ("Department: Unisex" como sugerencia, separado de "Adult").
+// Default seguro: "Unisex", salvo que el título indique explícitamente
+// un producto dirigido a un género.
+function psExtractGenderDepartment(title) {
+  var t = (title || '').toLowerCase();
+  if (/\bwomen'?s?\b|\bfor her\b|\bfeminine\b|\bprenatal\b|\bmenopause\b/.test(t)) return 'Women';
+  if (/\bmen'?s?\b|\bfor him\b|\bmasculine\b|\bprostate\b/.test(t)) return 'Men';
+  return 'Unisex';
 }
 
 // Extrae SPF del título para sunscreen (CRÍTICO para categoría 31774)
@@ -4923,17 +4937,22 @@ function psPreFillSpecifics(title, category, brand) {
     }
   }
   
-  // FASE 1.5: Administration + Department
+  // FASE 1.5: Administration + Age Group + Department (género)
   var admin = psExtractAdministration(category);
   if (admin) prefilled['Administration'] = admin;
   
-  // Department: SIEMPRE se envía (incluyendo "Adult", el caso más común —
+  // Age Group: SIEMPRE se envía (incluyendo "Adult", el caso más común —
   // antes se omitía justo cuando era "Adult", dejando ese campo de eBay
-  // vacío en la mayoría de los productos).
-  var dept = psExtractDepartment(title);
-  if (dept) {
-    prefilled['Department'] = dept;
+  // vacío en la mayoría de los productos). OJO: esto llena el aspecto
+  // "Age Group" de eBay, no "Department" (son campos distintos).
+  var ageGroupVal = psExtractDepartment(title);
+  if (ageGroupVal) {
+    prefilled['Age Group'] = ageGroupVal;
   }
+  
+  // Department: aspecto de GÉNERO en eBay (Men/Women/Unisex) — separado
+  // de Age Group. Default "Unisex" salvo que el título indique un género.
+  prefilled['Department'] = psExtractGenderDepartment(title);
   
   // FASE 2: SPF + Hair Type + PAO + Body Area
   var spf = psExtractSPF(title, category);
@@ -6635,6 +6654,20 @@ async function exportCSV(){
     var activeIngredientsVal = psStripDosageFromIngredient(_specForCol('C:Active Ingredients'));
     var ingredientsVal       = psStripDosageFromIngredient(_specForCol('C:Ingredients')) || activeIngredientsVal;
 
+    // ── Flavor / Department: mismo respaldo que Formulation — se calculan
+    // de nuevo aquí con el TÍTULO FINAL (it.title). La generación automática
+    // de specifics corre 900ms después de escanear y a veces el título aún
+    // no tiene su forma definitiva (ej. sin "Softgels" todavía) — por eso
+    // Flavor podía quedar vacío aunque la lógica en sí esté bien. Al
+    // recalcular aquí, en el momento de exportar, siempre usa el título
+    // ya terminado.
+    var flavorVal = _specForCol('C:Flavor');
+    if (!flavorVal && _ingestibleForm && _ingestibleForm !== 'Gummy') {
+      flavorVal = 'Unflavored';
+    }
+    var ageGroupVal   = _specForCol('C:Age Group') || psExtractDepartment(it.title);
+    var departmentVal = _specForCol('C:Department') || psExtractGenderDepartment(it.title);
+
     lines.push([
       'Add',
       it.sku||'',
@@ -6667,7 +6700,7 @@ async function exportCSV(){
       _specForCol('C:Size'),
       _specForCol('C:Volume'),
       _specForCol('C:Scent'),
-      _specForCol('C:Flavor'),
+      flavorVal,
       formulationVal,
       activeIngredientsVal,
       ingredientsVal,
@@ -6679,8 +6712,8 @@ async function exportCSV(){
       itemFormVal,
       _specForCol('C:Country/Region of Manufacture'),
       _specForCol('C:Main Purpose'),
-      _specForCol('C:Age Group'),
-      _specForCol('C:Department'),
+      ageGroupVal,
+      departmentVal,
       _specForCol('C:MPN'),
       _specForCol('C:Period After Opening (PAO)'),
       _specForCol('C:Styling Effect'),
