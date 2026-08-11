@@ -1,4 +1,4 @@
-// ── ON-SCREEN DEBUG CONSOLE — para ver errores directo en el iPhone,
+  // ── ON-SCREEN DEBUG CONSOLE — para ver errores directo en el iPhone,
 // sin necesitar Mac ni Safari Web Inspector. Toca el logo 5 veces para abrir/cerrar. ──
 (function setupDebugConsole(){
   var logs = [];
