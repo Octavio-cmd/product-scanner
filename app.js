@@ -5967,7 +5967,7 @@ async function promoteItemsAutomatically(csvText) {
 function setupPromoteButton() {
   /**
    * Crea un botón "📢 Auto-Promote" que permite cargar el Ivey CSV
-   * y automáticamente promociona todos los items exitosos
+   * Posicionado ARRIBA del botón ADD TO CSV
    */
   const promoteBtn = document.createElement('button');
   promoteBtn.id = 'promote-btn';
@@ -5982,6 +5982,7 @@ function setupPromoteButton() {
     font-weight: bold;
     cursor: pointer;
     font-size: 14px;
+    width: 100%;
     transition: all 0.3s ease;
   `;
   
@@ -6029,12 +6030,26 @@ function setupPromoteButton() {
   return promoteBtn;
 }
 
-// Inicializar el botón - SIMPLE Y FUNCIONAL
+// Inicializar el botón - INSERTAR ANTES de ADD TO CSV
 document.addEventListener('DOMContentLoaded', function() {
   setTimeout(function() {
     if (!document.getElementById('promote-btn')) {
-      var btn = setupPromoteButton();
-      document.body.appendChild(btn);
+      // Buscar el botón ADD TO CSV por su contenido
+      var allBtns = document.querySelectorAll('button');
+      var addBtn = null;
+      for (var i = 0; i < allBtns.length; i++) {
+        if (allBtns[i].textContent.includes('ADD TO CSV')) {
+          addBtn = allBtns[i];
+          break;
+        }
+      }
+      
+      if (addBtn && addBtn.parentNode) {
+        var btn = setupPromoteButton();
+        // Insertar ANTES del botón ADD TO CSV
+        addBtn.parentNode.insertBefore(btn, addBtn);
+        console.log('✅ Auto-Promote button inserted before ADD TO CSV');
+      }
     }
   }, 800);
 });
