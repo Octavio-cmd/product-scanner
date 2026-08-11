@@ -5840,46 +5840,163 @@ function psSendToRegistroSheet(items) {
 // Le manda a eBay el TÍTULO + categoría de cada producto. eBay elige la
 // mejor categoría leaf real por título. Devuelve un mapa {categoriaOriginal: leafValida}.
 // Si el backend no responde, devuelve mapa vacío y se usa psSafeCategory de respaldo.
-async function validateCategoriesWithEbay(items) {
-  var map = {};
+async function promoteItemsAutomatically(csvText) {
+  /**
+   * Procesa un Ivey CSV de respuesta de eBay y promociona automáticamente
+   * todos los items exitosos a la campaña de Promoted Listings 12%
+   * 
+   * CSV esperado con columnas: ItemID, Status, etc.
+   */
   try {
-    // Armar la lista de {category, title} — un producto por SKU único
-    var payload = [];
-    var seen = {};
-    items.forEach(function(it) {
-      var cat = String(it.category || '').trim();
-      var title = String(it.title || '').trim();
-      var key = cat + '|' + title;
-      if (!seen[key] && title) {
-        seen[key] = true;
-        payload.push({ category: cat, title: title });
-      }
-    });
-    if (!payload.length) return map;
-
-    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ items: payload })
-    });
-    if (!r.ok) { console.warn('leaf-category HTTP', r.status); return map; }
-    var d = await r.json();
-
-    // El backend devuelve results con clave "categoria|titulo" → suggested.
-    // Armamos un mapa por título para aplicarlo con precisión a cada producto.
-    if (d && d.results) {
-      Object.keys(d.results).forEach(function(k) {
-        var res = d.results[k];
-        if (res && res.suggested) {
-          map[k] = String(res.suggested); // clave = "categoria|titulo"
-        }
-      });
+    const lines = csvText.split('\n').filter(function(l) { return l.trim(); });
+    if (lines.length < 2) {
+      toast('❌ CSV inválido o vacío');
+      return false;
     }
+    
+    // Parsear headers (línea 1)
+    const headers = lines[0].split(',');
+    const itemIdIdx = headers.indexOf('ItemID');
+    const statusIdx = headers.indexOf('Status');
+    
+    if (itemIdIdx === -1) {
+      console.warn('⚠️ No ItemID column found in CSV');
+      return false;
+    }
+    
+    // Recolectar items exitosos
+    const itemsToPromote = [];
+    for (let i = 1; i < lines.length; i++) {
+      const cells = lines[i].split(',');
+      if (cells.length <= itemIdIdx) continue;
+      
+      const itemId = cells[itemIdIdx] ? cells[itemIdIdx].trim() : '';
+      const status = statusIdx >= 0 && cells[statusIdx] ? cells[statusIdx].trim() : 'Success';
+      
+      // Promocionar si es exitoso (Success o Warning son OK)
+      if (itemId && (status === 'Success' || status === 'Warning' || status === '')) {
+        itemsToPromote.push(itemId);
+      }
+    }
+    
+    if (!itemsToPromote.length) {
+      toast('⚠️ No items exitosos para promocionar');
+      return false;
+    }
+    
+    // Promocionar cada item al backend
+    toast(`📢 Promocionando ${itemsToPromote.length} items...`);
+    let promoted = 0;
+    
+    for (const itemId of itemsToPromote) {
+      try {
+        const response = await fetch('https://savvy-ebay-prices-production.up.railway.app/promote-item', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ item_id: itemId, bid_rate: 12.2 })
+        });
+        
+        if (response.ok) {
+          promoted++;
+          console.log(`✅ Promoted item ${itemId}`);
+        } else {
+          console.warn(`⚠️ Failed to promote ${itemId}: ${response.status}`);
+        }
+      } catch (e) {
+        console.error(`❌ Error promoting ${itemId}:`, e);
+      }
+    }
+    
+    if (promoted > 0) {
+      toast(`✅ ${promoted}/${itemsToPromote.length} items promocionados a campaña 12%`);
+      return true;
+    } else {
+      toast('❌ No se pudo promocionar ningún item');
+      return false;
+    }
+    
   } catch (e) {
-    console.warn('validateCategoriesWithEbay error:', e && e.message);
+    console.error('❌ Error en promoteItemsAutomatically:', e);
+    toast('❌ Error procesando Ivey CSV: ' + (e.message || e));
+    return false;
   }
-  return map;
 }
+
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+// AGREGAR BOTÓN PARA PROMOCIONAR ITEMS DESDE IVEY CSV
+// ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+function setupPromoteButton() {
+  /**
+   * Crea un botón "📢 Auto-Promote" que permite cargar el Ivey CSV
+   * y automáticamente promociona todos los items exitosos
+   */
+  const promoteBtn = document.createElement('button');
+  promoteBtn.id = 'promote-btn';
+  promoteBtn.innerHTML = '📢 Auto-Promote Items';
+  promoteBtn.style.cssText = `
+    padding: 12px 20px;
+    margin: 10px 0;
+    background: linear-gradient(135deg, #667eea, #764ba2);
+    color: white;
+    border: none;
+    border-radius: 6px;
+    font-weight: bold;
+    cursor: pointer;
+    font-size: 14px;
+    transition: all 0.3s ease;
+  `;
+  
+  promoteBtn.onmouseover = function() {
+    this.style.transform = 'translateY(-2px)';
+    this.style.boxShadow = '0 8px 16px rgba(102, 126, 234, 0.4)';
+  };
+  promoteBtn.onmouseout = function() {
+    this.style.transform = 'translateY(0)';
+    this.style.boxShadow = 'none';
+  };
+  
+  promoteBtn.onclick = async function() {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.csv';
+    input.onchange = async function(e) {
+      const file = e.target.files[0];
+      if (!file) return;
+      
+      const reader = new FileReader();
+      reader.onload = async function(event) {
+        const csv = event.target.result;
+        const success = await promoteItemsAutomatically(csv);
+        if (success) {
+          promoteBtn.style.background = 'linear-gradient(135deg, #52c41a, #135200)';
+          promoteBtn.innerHTML = '✅ Items Promocionados';
+          setTimeout(function() {
+            promoteBtn.style.background = 'linear-gradient(135deg, #667eea, #764ba2)';
+            promoteBtn.innerHTML = '📢 Auto-Promote Items';
+          }, 3000);
+        }
+      };
+      reader.readAsText(file);
+    };
+    input.click();
+  };
+  
+  return promoteBtn;
+}
+
+// Inicializar el botón cuando carga la app
+document.addEventListener('DOMContentLoaded', function() {
+  setTimeout(function() {
+    const container = document.getElementById('bulk-editor') || document.body;
+    if (container && !document.getElementById('promote-btn')) {
+      const btn = setupPromoteButton();
+      container.insertBefore(btn, container.firstChild);
+    }
+  }, 500);
+});
+
+
 
 async function exportCSV(){
   try {
