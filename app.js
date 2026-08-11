@@ -5850,7 +5850,7 @@ async function exportCSV(){
   }
 
   var SHIP = 'Flat:Standard Shipp(Free),Same business day';
-  var RET  = '30 Day return Copy';
+  var RET  = '30 Day return';
   var PAY  = 'eBay Payments';
 
   var HDR = [
