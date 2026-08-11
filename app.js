@@ -6029,22 +6029,22 @@ function setupPromoteButton() {
   return promoteBtn;
 }
 
-// Inicializar el botón cuando carga la app - ENTRE "Revisar" e "ADD TO CSV"
+// Inicializar el botón cuando carga la app - DESPUÉS "Revisar y Completar Listado"
 document.addEventListener('DOMContentLoaded', function() {
   setTimeout(function() {
     if (!document.getElementById('promote-btn')) {
-      var addBtn = document.getElementById('addBtn');
-      if (addBtn && addBtn.parentNode) {
+      var specificsBtn = document.getElementById('specifics-btn');
+      if (specificsBtn && specificsBtn.parentNode) {
         var btn = setupPromoteButton();
-        // Insertar ANTES del botón ADD TO CSV
-        addBtn.parentNode.insertBefore(btn, addBtn);
+        // Insertar DESPUÉS del botón "Revisar"
+        specificsBtn.parentNode.insertBefore(btn, specificsBtn.nextSibling);
       } else {
-        // Fallback: insertar al final si no encuentra addBtn
+        // Fallback
         var btn = setupPromoteButton();
         document.body.appendChild(btn);
       }
     }
-  }, 1500);
+  }, 500);
 });
 
 
