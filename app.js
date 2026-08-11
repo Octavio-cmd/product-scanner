@@ -5840,6 +5840,44 @@ function psSendToRegistroSheet(items) {
 // Le manda a eBay el TÍTULO + categoría de cada producto. eBay elige la
 // mejor categoría leaf real por título. Devuelve un mapa {categoriaOriginal: leafValida}.
 // Si el backend no responde, devuelve mapa vacío y se usa psSafeCategory de respaldo.
+async function validateCategoriesWithEbay(items) {
+  var map = {};
+  try {
+    var payload = [];
+    var seen = {};
+    items.forEach(function(it) {
+      var cat = String(it.category || '').trim();
+      var title = String(it.title || '').trim();
+      var key = cat + '|' + title;
+      if (!seen[key] && title) {
+        seen[key] = true;
+        payload.push({ category: cat, title: title });
+      }
+    });
+    if (!payload.length) return map;
+
+    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ items: payload })
+    });
+    if (!r.ok) { console.warn('leaf-category HTTP', r.status); return map; }
+    var d = await r.json();
+
+    if (d && d.results) {
+      Object.keys(d.results).forEach(function(k) {
+        var res = d.results[k];
+        if (res && res.suggested) {
+          map[k] = String(res.suggested);
+        }
+      });
+    }
+  } catch (e) {
+    console.warn('validateCategoriesWithEbay error:', e && e.message);
+  }
+  return map;
+}
+
 async function promoteItemsAutomatically(csvText) {
   /**
    * Procesa un Ivey CSV de respuesta de eBay y promociona automáticamente
