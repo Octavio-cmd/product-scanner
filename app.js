@@ -5998,6 +5998,9 @@ function setupPromoteButton() {
     const input = document.createElement('input');
     input.type = 'file';
     input.accept = '.csv';
+    input.style.display = 'none';
+    document.body.appendChild(input);
+    
     input.onchange = async function(e) {
       const file = e.target.files[0];
       if (!file) return;
@@ -6016,22 +6019,25 @@ function setupPromoteButton() {
         }
       };
       reader.readAsText(file);
+      document.body.removeChild(input);
     };
-    input.click();
+    
+    // Para iOS: usar dispatchEvent en lugar de click()
+    input.dispatchEvent(new MouseEvent('click', { bubbles: true }));
   };
   
   return promoteBtn;
 }
 
-// Inicializar el botón cuando carga la app - EN LUGAR SEGURO (body)
+// Inicializar el botón cuando carga la app - AL FINAL, después ADD TO CSV
 document.addEventListener('DOMContentLoaded', function() {
   setTimeout(function() {
     if (!document.getElementById('promote-btn')) {
       var btn = setupPromoteButton();
-      // Insertar en body (lugar que SIEMPRE existe)
-      document.body.insertBefore(btn, document.body.firstChild);
+      // Insertar en el final del body (ABAJO)
+      document.body.appendChild(btn);
     }
-  }, 500);
+  }, 1000);
 });
 
 
