@@ -4782,6 +4782,59 @@ function psExtractBrand(title) {
   return null;
 }
 
+// NUEVA: Extrae especificaciones LEGO automáticamente
+function psExtractLEGOSpecifics(title) {
+  if (!title) return {};
+  var t = (title || '').toLowerCase();
+  var specs = {};
+  
+  // Si NO es LEGO, retornar vacío
+  if (!t.match(/lego/i)) return specs;
+  
+  // LEGO Set Name - palabras después de "LEGO" hasta números
+  // Ej: "LEGO Creator 3-in-1 Space Shuttle" → "Space Shuttle"
+  var nameMatch = t.match(/lego\s+(?:creator\s+)?(?:\d-in-\d\s+)?([a-z\s]+?)(?:\d+|pack|set|new|$)/i);
+  if (nameMatch && nameMatch[1]) {
+    var setName = nameMatch[1].trim();
+    setName = setName.replace(/3-in-1|2-in-1|pack|set/i, '').trim();
+    if (setName.length > 2) specs['LEGO Set Name'] = setName;
+  }
+  
+  // LEGO Set Number - números entre 3-5 dígitos precedidos de "31", "60", "10", etc
+  // Ej: "31134", "60123", "10991"
+  var numMatch = t.match(/\b(\d{5})\b/);
+  if (!numMatch) numMatch = t.match(/\b(31\d{3}|10\d{3}|60\d{3}|21\d{3}|75\d{3})\b/i);
+  if (numMatch) {
+    specs['LEGO Set Number'] = numMatch[1];
+    specs['MPN'] = numMatch[1]; // MPN es el mismo set number
+  }
+  
+  // LEGO Subtheme - detectar "3-in-1", "2-in-1"
+  if (t.match(/3-in-1/i)) specs['LEGO Subtheme'] = '3 in 1';
+  if (t.match(/2-in-1/i)) specs['LEGO Subtheme'] = '2 in 1';
+  
+  // LEGO Character - palabras como "Astronaut", "Robot", "Pirate", etc.
+  if (t.match(/astronaut/i)) specs['LEGO Character'] = 'Astronaut';
+  if (t.match(/robot/i)) specs['LEGO Character'] = 'Robot';
+  if (t.match(/pirate/i)) specs['LEGO Character'] = 'Pirate';
+  if (t.match(/knight/i)) specs['LEGO Character'] = 'Knight';
+  if (t.match(/dragon/i)) specs['LEGO Character'] = 'Dragon';
+  
+  // Number of Pieces - ej: "144 pieces", "500 pcs"
+  var piecesMatch = t.match(/(\d+)\s*(?:pieces?|pcs?|blocks?)\b/i);
+  if (piecesMatch) specs['Number of Pieces'] = piecesMatch[1];
+  
+  // Defaults seguros para LEGO nuevo
+  specs['Material'] = 'Plastic';
+  specs['Retired'] = 'No';
+  specs['Vintage'] = 'No';
+  specs['Packaging'] = 'Box';
+  specs['Type'] = 'Complete Set';
+  specs['Release Year'] = ''; // No lo detectamos (difícil de confiar)
+  
+  return specs;
+}
+
 // NUEVA: Extrae "Shade" para Lash/Brow y Lip products
 function psExtractShade(title, category) {
   if (!title) return null;
@@ -4875,6 +4928,17 @@ function psPreFillSpecifics(title, category, brand) {
   // FASE 3 - SKINCARE: Skin Type
   var skinType = psExtractSkinType(title);
   if (skinType) prefilled['Skin Type'] = skinType;
+  
+  // NUEVA: LEGO Automatización (categoría 19006 = Toys)
+  var cat = String(category || '');
+  if (cat === '19006') {
+    var legoSpecs = psExtractLEGOSpecifics(title);
+    for (var key in legoSpecs) {
+      if (legoSpecs[key] && legoSpecs[key] !== '') {
+        prefilled[key] = legoSpecs[key];
+      }
+    }
+  }
   
   return prefilled;
 }
