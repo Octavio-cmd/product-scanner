@@ -4909,14 +4909,29 @@ function psPreFillSpecifics(title, category, brand) {
   if (typeVal) prefilled['Type'] = typeVal;
   
   var flavor = psExtractFlavorFromTitle(title);
-  if (flavor) prefilled['Flavor'] = flavor;
+  if (flavor) {
+    prefilled['Flavor'] = flavor;
+  } else {
+    // Sin sabor explícito en el título: si la forma es de las que
+    // normalmente NO tienen sabor (softgel/cápsula/tableta/polvo/líquido/
+    // gotas — se tragan enteras, no se saborean), "Unflavored" es un valor
+    // seguro y estándar de eBay. Para Gummy NO se asume — casi siempre
+    // tienen un sabor real y adivinar uno específico podría ser incorrecto.
+    var _ingestForm = psDetectIngestibleForm(title);
+    if (_ingestForm && _ingestForm !== 'Gummy') {
+      prefilled['Flavor'] = 'Unflavored';
+    }
+  }
   
   // FASE 1.5: Administration + Department
   var admin = psExtractAdministration(category);
   if (admin) prefilled['Administration'] = admin;
   
+  // Department: SIEMPRE se envía (incluyendo "Adult", el caso más común —
+  // antes se omitía justo cuando era "Adult", dejando ese campo de eBay
+  // vacío en la mayoría de los productos).
   var dept = psExtractDepartment(title);
-  if (dept && dept !== 'Adult') {
+  if (dept) {
     prefilled['Department'] = dept;
   }
   
@@ -5022,7 +5037,7 @@ async function psGenerateSpecifics(){
     + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
     + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
     + '- For Country/Region of Manufacture: use common knowledge (e.g., USA for Hollywood Beauty, Germany for many European brands, Japan for many beauty brands). If genuinely unknown, use the brand origin country.\n'
-    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements ONLY: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — use the well-known instructions if confident. If NOT confident, use the literal value "See product label" instead of omitting it — same rule as Dosage; never leave this blank for a vitamin/supplement product).\n'
+    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements ONLY: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — use the well-known instructions if confident. If NOT confident, use the literal value "As Directed" instead of omitting it — never leave this blank for a vitamin/supplement product).\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
     + '- Return ONLY the JSON, no preamble, no markdown.';
