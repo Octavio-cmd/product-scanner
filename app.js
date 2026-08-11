@@ -6029,36 +6029,14 @@ function setupPromoteButton() {
   return promoteBtn;
 }
 
-// Inicializar el botón con REINTENTOS hasta lograrlo
-function tryInsertPromoteButton() {
-  if (document.getElementById('promote-btn')) return; // Ya existe
-  
-  var specificsBtn = document.getElementById('specifics-btn');
-  if (specificsBtn && specificsBtn.parentNode) {
-    var btn = setupPromoteButton();
-    // Insertar DESPUÉS del botón "Revisar"
-    specificsBtn.parentNode.insertBefore(btn, specificsBtn.nextSibling);
-    console.log('✅ Auto-Promote button inserted successfully');
-    return true;
-  }
-  return false;
-}
-
-// Intentar insertar inmediatamente y luego reintentar cada 500ms
+// Inicializar el botón - SIMPLE Y FUNCIONAL
 document.addEventListener('DOMContentLoaded', function() {
-  var attempts = 0;
-  var maxAttempts = 20; // Reintentar hasta 10 segundos
-  
-  var interval = setInterval(function() {
-    if (tryInsertPromoteButton()) {
-      clearInterval(interval);
+  setTimeout(function() {
+    if (!document.getElementById('promote-btn')) {
+      var btn = setupPromoteButton();
+      document.body.appendChild(btn);
     }
-    attempts++;
-    if (attempts >= maxAttempts) {
-      clearInterval(interval);
-      console.warn('⚠️ Failed to insert Auto-Promote button after 20 attempts');
-    }
-  }, 500);
+  }, 800);
 });
 
 
