@@ -341,7 +341,7 @@ function catId(n){
   if(/dog food|cat food|pet food|kibble|pedigree|purina|iams|blue buffalo|friskies|fancy feast|whiskas|royal canin|hill.s science/i.test(t))return'1281';
   if(/dog treat|cat treat|milk bone|greenies|temptations treat|beggin strip/i.test(t))return'1281';
   if(/cat toy|dog toy|catnip|scratching post|chew toy|dog chew|pet toy|kong toy/i.test(t))return'1281';
-  if(/pet shampoo|dog shampoo|cat shampoo|flea|tick collar|frontline|heartgard|advantage flea|pet medicine/i.test(t))return'1281';
+  if(/pet shampoo|dog shampoo|cat shampoo|\bfleas?\b|\btick collar\b|frontline|heartgard|advantage flea|pet medicine/i.test(t))return'1281';
   if(/cat litter|kitty litter|tidy cats|fresh step|arm hammer litter/i.test(t))return'1281';
   if(/leash|dog collar|pet bed|pet carrier|aquarium|hamster|bird seed|puppy|kitten/i.test(t))return'1281';
 
@@ -3273,8 +3273,29 @@ async function addBulk() {
   }
 }
 
+// ── FUENTE ÚNICA DE VERDAD: categorías de salud/OTC/suplementos/belleza que
+// eBay exige con "Dosage" y/o "Expiration Date". Antes esta lista estaba
+// duplicada en TRES lugares distintos y desincronizada entre sí (EXP_REQ,
+// _dosageCats, EXP_CATS_D), lo que dejaba pasar listados incompletos según
+// en qué categoría cayera el producto. Ahora es una sola constante global
+// que consumen los tres puntos. Si eBay agrega una categoría, se agrega AQUÍ
+// y los tres caminos quedan cubiertos automáticamente. ──────────────────────
+window.PS_HEALTH_CATS = [
+  // originales (vitaminas / suplementos / OTC)
+  '67169','180959','75037','75038','51227','57041','2984','67167','105070',
+  // agregadas antes al export
+  '11776','109130','31387','3457','177762','177763','67272','3516',
+  // ⚠️ agregadas 13 ago 2026 — categorías reales usadas en producción que
+  // NO estaban cubiertas y causaron rechazos de eBay:
+  '75040',   // Pain Relief / analgésicos tópicos (falló FRA-815439007304)
+  '180952',  // Health Care / otros
+  '72875',   // Health & Beauty misc
+  '36870',   // Lip Balm & Treatments (falló OKE-722510010057)
+  '180937'   // Vitamins & Supplements misc
+];
+
 async function _addBulkInternal() {
-  var EXP_REQ = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
+  var EXP_REQ = window.PS_HEALTH_CATS;
   if (EXP_REQ.includes(String(cur.category||''))) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
     var expVal = cur._expDate || '';
@@ -5111,7 +5132,7 @@ async function psGenerateSpecifics(){
     // lo requiere y sigue vacío después de la IA, lo llenamos aquí con
     // el valor estándar "See product label" — seguro, honesto, y
     // aceptado por eBay (no inventamos números de dosis específicos). ──
-    var _dosageCats = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
+    var _dosageCats = window.PS_HEALTH_CATS;
     if (_dosageCats.includes(String(catForAI)) && !clean['Dosage']) {
       // ⚠️ PRIMERO: Intentar parsear dosage del título (ej. "10 mg", "500mg")
       var dosageMatch = titleForAI.match(/(\d+)\s*(?:mg|mcg|iu|ml|cc)\b/i);
@@ -6270,7 +6291,9 @@ async function exportCSV(){
     // ── MASCOTAS ───────────────────────────────────────────────────
     if(/dog food|cat food|pet food|kibble/.test(t)) return 'Pet Food';
     if(/dog treat|cat treat|pet treat/.test(t)) return 'Pet Treat';
-    if(/flea|tick|frontline|advantage flea|heartgard/.test(t)) return 'Flea & Tick';
+    // \b obligatorio: sin él, "s-TICK" (lipstick, chapstick, stick deodorant)
+    // caía aquí y ponía C:Type = "Flea & Tick" en productos de belleza.
+    if(/\bfleas?\b|\bticks?\b|frontline|advantage flea|heartgard/.test(t)) return 'Flea & Tick';
     if(/pet toy|cat toy|dog toy|catnip|chew toy/.test(t)) return 'Pet Toy';
     if(/cat litter|kitty litter/.test(t)) return 'Cat Litter';
 
@@ -6400,14 +6423,25 @@ async function exportCSV(){
     if(/seresto/.test(t) && /dog/.test(t)) return '11556-154';        // Seresto Dog collar
     // Otros flea/tick sin número conocido → usar el del pet flea genérico de la categoría
     // (mejor tener uno que dejar vacío; el vendedor puede corregir)
+    //
+    // ⚠️ BUG CORREGIDO (13 ago 2026): antes decía /flea|tick/ SIN límites de
+    // palabra. "S-TICK" contiene "tick", así que a un lip balm ("...Oil Stick
+    // Twin Pack") se le puso EPA 11556-151 y eBay lo rechazó por política de
+    // pesticidas (OKE-722510010057-3pk). Mismo riesgo con lipstick, chapstick,
+    // stick deodorant, nonstick, sticker, ticket. Ahora: \b límites de palabra
+    // + exigir contexto de mascota/plaga, no solo la palabra suelta.
     if(String(category) === '20738' || String(category) === '20742' ||
-       /flea|tick/.test(t)) {
+       (/\b(flea|ticks?)\b/.test(t) && /\b(dog|dogs|cat|cats|pet|pets|puppy|kitten|collar|topical|treatment|spot[\s-]?on|shampoo|spray|repell)/.test(t))) {
       return '11556-151'; // respaldo flea/tick (Advantage II Small Cat, EPA verificado)
     }
 
     // ── INSECT REPELLENT ───────────────────────────────────────────
+    // También con \b: "repellent" suelto aparece en textiles ("water
+    // repellent"), así que se exige contexto de insecto/plaga.
     if(String(category) === '1232' || String(category) === '261844' ||
-       /insect|mosquito|bug spray|repellent|deet/.test(t)) {
+       /\b(insect|mosquito|deet)\b/.test(t) ||
+       /\bbug\s+(spray|repellent)\b/.test(t) ||
+       (/\brepellent\b/.test(t) && /\b(insect|mosquito|bug|fly|flies|gnat|tick|pest)\w*\b/.test(t))) {
       return '4822-547'; // OFF! generic EPA registration
     }
     return '';
@@ -6458,6 +6492,37 @@ async function exportCSV(){
     }
     // Si el usuario decide continuar, avisar cuántos van a fallar
     toast('⚠️ ' + _dupSkus.length + ' SKU(s) duplicado(s) — eBay los rechazará');
+  }
+
+  // ── RED DE SEGURIDAD: fecha de expiración faltante ────────────────────
+  // El guardia de _addBulkInternal() solo cubre UN camino de entrada; el
+  // flujo de split/packs mete productos al CSV sin pasar por ahí. eBay
+  // rechaza el listado completo (error 21919303) si falta Expiration Date
+  // en categorías de salud — falló así BOO-637866288459-2pk el 13 ago.
+  // Se valida aquí, al exportar, porque este punto SÍ lo cruzan todos los
+  // caminos. Mismo criterio que ya usamos con los item specifics.
+  var _noExp = bulk.filter(function(it){
+    return window.PS_HEALTH_CATS.includes(String(it.category || '')) &&
+           !String(it.expDate || '').trim();
+  });
+  if (_noExp.length) {
+    var _noExpList = _noExp.map(function(it){ return it.sku || it.title || '?'; }).join('\n• ');
+    var _seguir = confirm(
+      '⚠️ ' + _noExp.length + ' producto(s) SIN fecha de expiración:\n\n• ' + _noExpList +
+      '\n\neBay va a RECHAZAR estos listados. Se recomienda cancelar, agregar la fecha y volver a exportar.\n\n' +
+      '¿Exportar de todos modos?'
+    );
+    if (!_seguir) {
+      window._exportLock = false;
+      if (expBtnEl) {
+        expBtnEl.innerHTML = expBtnOldHTML;
+        expBtnEl.style.opacity = '';
+        expBtnEl.style.pointerEvents = '';
+      }
+      toast('❌ Export cancelado — agrega las fechas de expiración faltantes');
+      return;
+    }
+    toast('⚠️ ' + _noExp.length + ' sin fecha de exp — eBay los rechazará');
   }
 
   // Validar categorías contra eBay ANTES de armar el CSV.
@@ -6512,13 +6577,10 @@ async function exportCSV(){
     // Extract dosage from title for health products
     // Dosage — requerido para vitaminas, suplementos, productos de salud
     // Lista ampliada de categorías que requieren Dosage en eBay
-    var EXP_CATS_D = [
-      '67169','180959','75037','75038','51227','57041','2984','67167','105070',
-      '11776','109130','31387','3457','177762','177763','67272','3516'
-    ];
+    var EXP_CATS_D = window.PS_HEALTH_CATS;
     // También detectar por palabras clave en el título
     // Incluye vitaminas, suplementos Y productos de salud/analgésicos
-    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain relief|pain killer|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
+    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain reliev|pain relief|pain killer|arthritis|joint pain|muscle rub|muscle ache|sore muscle|backache|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
     if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
       var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
       dosageVal = doseMatch ? doseMatch[0].replace(/(\d)([a-zA-Z])/, '$1 $2') : 'See product label';
