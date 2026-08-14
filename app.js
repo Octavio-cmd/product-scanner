@@ -82,6 +82,20 @@
   });
 })();
 
+// ── MARCA DE VERSIÓN ────────────────────────────────────────────────────────
+// Safari en iOS cachea app.js con fuerza (index.html lo carga como
+// <script src="app.js"> sin parámetro de versión), así que el iPhone puede
+// seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
+// Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
+// dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
+window.PS_BUILD = '2026-08-14b';
+try {
+  console.log('[Savvy Scanner] build ' + window.PS_BUILD);
+  window.addEventListener('load', function(){
+    if (window._psDebug) window._psDebug('🏷️ Build ' + window.PS_BUILD);
+  });
+} catch(e){}
+
 // Función directa y a prueba de fallos — escribe inmediatamente en el cuadro
 // visible junto al botón de packs, sin depender de nada más.
 window._psDebug = function(msg){
@@ -6509,42 +6523,49 @@ async function exportCSV(){
     toast('⚠️ ' + _dupSkus.length + ' SKU(s) duplicado(s) — eBay los rechazará');
   }
 
-  // ── RED DE SEGURIDAD: fecha de expiración faltante ────────────────────
-  // El guardia de _addBulkInternal() solo cubre UN camino de entrada; el
-  // flujo de split/packs mete productos al CSV sin pasar por ahí. eBay
-  // rechaza el listado completo (error 21919303) si falta Expiration Date
-  // en categorías de salud — falló así BOO-637866288459-2pk el 13 ago.
-  // Se valida aquí, al exportar, porque este punto SÍ lo cruzan todos los
-  // caminos. Mismo criterio que ya usamos con los item specifics.
-  var _noExp = bulk.filter(function(it){
-    return window.psMayNeedExpDate(it.category, it.title) &&
-           !String(it.expDate || '').trim();
-  });
-  if (_noExp.length) {
-    var _noExpList = _noExp.map(function(it){ return it.sku || it.title || '?'; }).join('\n• ');
-    var _seguir = confirm(
-      '⚠️ ' + _noExp.length + ' producto(s) SIN fecha de expiración:\n\n• ' + _noExpList +
-      '\n\neBay va a RECHAZAR estos listados. Se recomienda cancelar, agregar la fecha y volver a exportar.\n\n' +
-      '¿Exportar de todos modos?'
-    );
-    if (!_seguir) {
-      window._exportLock = false;
-      if (expBtnEl) {
-        expBtnEl.innerHTML = expBtnOldHTML;
-        expBtnEl.style.opacity = '';
-        expBtnEl.style.pointerEvents = '';
-      }
-      toast('❌ Export cancelado — agrega las fechas de expiración faltantes');
-      return;
-    }
-    toast('⚠️ ' + _noExp.length + ' sin fecha de exp — eBay los rechazará');
-  }
-
   // Validar categorías contra eBay ANTES de armar el CSV.
   // eBay elige la mejor categoría leaf real según el título de cada producto.
   // Esto elimina el Error 87 de raíz. Si el backend no responde, usamos psSafeCategory.
   toast('🔎 Validando categorías con eBay...');
   var leafMap = await validateCategoriesWithEbay(bulk);
+
+  // ── RED DE SEGURIDAD: fecha de expiración faltante ────────────────────
+  // El guardia de _addBulkInternal() solo cubre UN camino de entrada; el
+  // flujo de split/packs mete productos al CSV sin pasar por ahí. eBay
+  // rechaza el listado completo (error 21919303) si falta Expiration Date.
+  //
+  // ⚠️ VA DESPUÉS de validateCategoriesWithEbay A PROPÓSITO (corregido 14 ago):
+  // antes estaba arriba y leía it.category, que es la categoría ADIVINADA
+  // localmente — no la que eBay realmente asigna. El Boost Oxygen entraba con
+  // una categoría local cualquiera y terminaba en 45206 recién aquí abajo, así
+  // que el chequeo miraba la categoría equivocada. Ahora usa _finalCat, la
+  // misma que va a viajar en el CSV.
+  //
+  // Es BLOQUEO, no confirmación: BOO-637866288459 se rechazó TRES veces por
+  // esto. Un CSV que ya sabemos que eBay va a rechazar no debe poder salir.
+  var _noExp = bulk.filter(function(it){
+    if (String(it.expDate || '').trim()) return false;
+    var _k  = String(it.category || '').trim() + '|' + String(it.title || '').trim();
+    var _fc = leafMap[_k] || leafMap[_k.substring(0,120)] || psSafeCategory(it.category, '31786');
+    return window.psMayNeedExpDate(_fc, it.title);
+  });
+  if (_noExp.length) {
+    var _noExpList = _noExp.map(function(it){ return '• ' + (it.sku || it.title || '?'); }).join('\n');
+    window._exportLock = false;
+    if (expBtnEl) {
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }
+    alert(
+      '🚫 EXPORT DETENIDO\n\n' + _noExp.length + ' producto(s) SIN fecha de expiración:\n\n' +
+      _noExpList +
+      '\n\neBay RECHAZA estos listados (error 21919303).\n\n' +
+      'Abre cada uno, toca 📅 y agrega la fecha del envase. Después exporta otra vez.'
+    );
+    toast('🚫 Export detenido — faltan ' + _noExp.length + ' fecha(s) de expiración');
+    return;
+  }
 
   bulk.forEach(function(it) {
     // Saltar productos no identificados o restringidos por EPA
