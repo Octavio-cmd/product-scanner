@@ -88,7 +88,7 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-14b';
+window.PS_BUILD = '2026-08-14c';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -3307,7 +3307,9 @@ window.PS_HEALTH_CATS = [
   '36870',   // Lip Balm & Treatments (falló OKE-722510010057)
   '180937',  // Vitamins & Supplements misc
   // ⚠️ agregada 14 ago 2026 — segundo rechazo del mismo producto:
-  '45206'    // Breathing Aids / oxígeno en lata (falló BOO-637866288459 x2)
+  '45206',   // Breathing Aids / oxígeno en lata (falló BOO-637866288459 x2)
+  // ⚠️ agregada 14 ago 2026 — antiácidos / digestivos:
+  '75039'    // Antacids & Acid Reducers (falló TUM-307667388107)
 ];
 
 // ── Detector por PALABRA CLAVE, no solo por categoría ───────────────────────
@@ -6568,6 +6570,19 @@ async function exportCSV(){
   }
 
   bulk.forEach(function(it) {
+    // ── CATEGORÍA FINAL, CALCULADA AL PRINCIPIO DEL CICLO ──────────────────
+    // Antes esto se calculaba hasta abajo (justo antes de armar la fila), pero
+    // toda la lógica de item specifics de arriba usaba it.category — que es la
+    // categoría ADIVINADA localmente, no la que eBay asigna y que realmente
+    // viaja en el CSV. Por eso el Dosage no se llenaba: TUM-307667388107 salió
+    // en 75039 y NAT-074312014024 en 11776, pero la lógica estaba comparando
+    // contra otra categoría. Se calcula UNA vez aquí y se reutiliza en todo
+    // el ciclo. (Corregido 14 ago 2026 — misma clase de bug que la fecha de
+    // expiración.)
+    var _catKey     = String(it.category || '').trim() + '|' + String(it.title || '').trim();
+    var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
+    var _finalCat   = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
+
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
       skipped++; toast('⚠️ ' + it.sku + ' — Bloqueado por EPA'); return;
@@ -6616,8 +6631,8 @@ async function exportCSV(){
     var EXP_CATS_D = window.PS_HEALTH_CATS;
     // También detectar por palabras clave en el título
     // Incluye vitaminas, suplementos Y productos de salud/analgésicos
-    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain reliev|pain relief|pain killer|arthritis|joint pain|muscle rub|muscle ache|sore muscle|backache|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
-    if (EXP_CATS_D.includes(String(it.category)) || _isSupplement) {
+    var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain reliev|pain relief|pain killer|arthritis|joint pain|muscle rub|muscle ache|sore muscle|backache|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|antacid|heartburn|acid reducer|acid indigestion|\btums\b|rolaids|maalox|mylanta|pepcid|prilosec|nexium|zantac|famotidine|omeprazole|ranitidine|pepto|bismol|simethicone|gas relief|laxative|stool softener|fiber supplement|metamucil|dulcolax|miralax|imodium|anti.?diarrheal|electrolyte|rehydration|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
+    if (EXP_CATS_D.includes(String(_finalCat)) || _isSupplement) {
       var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
       dosageVal = doseMatch ? doseMatch[0].replace(/(\d)([a-zA-Z])/, '$1 $2') : 'See product label';
     }
@@ -6704,11 +6719,8 @@ async function exportCSV(){
       isbnVal = isbnMatch ? isbnMatch[1] : (upcStr.length >= 13 ? upcStr.substring(0,13) : '');
     }
 
-    // Categoría final: 1) la leaf que eBay validó por título (leafMap),
-    //                  2) respaldo psSafeCategory si el backend no respondió.
-    var _catKey = String(it.category || '').trim() + '|' + String(it.title || '').trim();
-    var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
-    var _finalCat = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
+    // Categoría final: ya se calculó al inicio del ciclo (_finalCat), para que
+    // la lógica de item specifics de arriba use la MISMA categoría que el CSV.
 
     // UPC para el CSV: preferir it.upc; si no, extraerlo del SKU (BRAND-UPC-Npk).
     // eBay solo acepta UPCs de 12-14 dígitos. Si no hay UPC válido, va vacío
