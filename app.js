@@ -3291,8 +3291,23 @@ window.PS_HEALTH_CATS = [
   '180952',  // Health Care / otros
   '72875',   // Health & Beauty misc
   '36870',   // Lip Balm & Treatments (falló OKE-722510010057)
-  '180937'   // Vitamins & Supplements misc
+  '180937',  // Vitamins & Supplements misc
+  // ⚠️ agregada 14 ago 2026 — segundo rechazo del mismo producto:
+  '45206'    // Breathing Aids / oxígeno en lata (falló BOO-637866288459 x2)
 ];
+
+// ── Detector por PALABRA CLAVE, no solo por categoría ───────────────────────
+// La lista de arriba siempre va a ir un paso atrás: cada categoría nueva que
+// eBay exija se descubre cuando ya rechazó un listado (nos pasó con 75040,
+// después con 45206). Esto atrapa productos consumibles/médicos aunque su
+// categoría todavía no esté en la lista. Se usa SOLO en la red de seguridad
+// del export (que es un aviso con confirmación, no un bloqueo), para que un
+// falso positivo nunca deje a las muchachas trabadas sin poder exportar.
+window.psMayNeedExpDate = function(category, title) {
+  if (window.PS_HEALTH_CATS.includes(String(category || ''))) return true;
+  var t = String(title || '').toLowerCase();
+  return /\b(oxygen|supplement|vitamin|probiotic|collagen|melatonin|medicine|medication|tablet|capsule|softgel|gummies|gummy|lozenge|syrup|ointment|antiseptic|antibiotic|sunscreen|spf|eye drops|ear drops|nasal|inhaler|first aid|bandage|antacid|laxative|electrolyte|protein powder|meal replacement|baby formula|infant formula|test strips?|lancets?|glucose|peroxide|alcohol prep|contact lens|saline)\b/.test(t);
+};
 
 async function _addBulkInternal() {
   var EXP_REQ = window.PS_HEALTH_CATS;
@@ -6502,7 +6517,7 @@ async function exportCSV(){
   // Se valida aquí, al exportar, porque este punto SÍ lo cruzan todos los
   // caminos. Mismo criterio que ya usamos con los item specifics.
   var _noExp = bulk.filter(function(it){
-    return window.PS_HEALTH_CATS.includes(String(it.category || '')) &&
+    return window.psMayNeedExpDate(it.category, it.title) &&
            !String(it.expDate || '').trim();
   });
   if (_noExp.length) {
