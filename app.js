@@ -5141,6 +5141,42 @@ function psPreFillSpecifics(title, category, brand) {
   return prefilled;
 }
 
+// ── LIMPIEZA DE SPECIFICS INVENTADOS ────────────────────────────────────────
+// 15 ago 2026. Historia de este bug, porque importa: primero se bloquearon
+// Size y Age Group en los valores PREVIOS (los que el código deduce del
+// título). No sirvió — al quitarlos de ahí, la respuesta de la IA dejó de
+// chocar con un valor existente y entró sin filtro. El mismo LEGO salió
+// primero con Size=1128 y luego con Size=1176: dos números distintos para
+// una caja que trae 144 piezas.
+//
+// Por eso el filtro va AQUÍ, después de mezclar previos + IA, y se aplica
+// otra vez al exportar. Un dato inventado en la ficha es peor que un campo
+// vacío: el comprador lo lee como cierto.
+var PS_TOY_CATS = ['19006','220','261068','2536','19169','233'];
+
+function psScrubSpecs(specs, category, title) {
+  if (!specs || typeof specs !== 'object') return specs;
+  var cat = String(category || '');
+  if (PS_TOY_CATS.indexOf(cat) === -1) return specs;
+
+  // "Size" no es un aspecto real en sets de construcción; es donde aterrizan
+  // los conteos de piezas inventados.
+  delete specs['Size'];
+
+  // Age Group adivinado ("Adult" por defecto) saca al juguete de las
+  // búsquedas de regalo para niños. Sin dato real, mejor no mandarlo.
+  delete specs['Age Group'];
+
+  // El conteo de piezas solo se acepta si ese número aparece de verdad en el
+  // título — o sea, si vino de una fuente y no de la imaginación del modelo.
+  var t = String(title || '');
+  ['Number of Pieces','Number of Items'].forEach(function(k){
+    var n = String(specs[k] || '').replace(/[^0-9]/g, '');
+    if (n && t.indexOf(n) === -1) delete specs[k];
+  });
+  return specs;
+}
+
 // Le pregunta a Claude los item specifics correctos para el producto,
 // según su título, marca y categoría. Claude CONOCE los productos (ej: sabe
 // que Advantage II = Imidacloprid 9.1%) y qué specifics pide cada categoría
@@ -5262,6 +5298,8 @@ async function psGenerateSpecifics(){
       }
     }
 
+    // Filtrar valores inventados antes de guardar (ver psScrubSpecs).
+    clean = psScrubSpecs(clean, catForAI, title);
     cur._specifics = clean;
 
     renderSpecificsPreview(clean);
@@ -6696,6 +6734,9 @@ async function exportCSV(){
     var connectivityVal = '';
     // ── IMPORTANTE: Definir _itSpecs aquí (ANTES de usarlo en lógica de colorVal) ──
     var _itSpecs = (it._specifics && typeof it._specifics === 'object') ? it._specifics : {};
+    // Segunda pasada: el export es el punto por donde cruzan TODOS los
+    // caminos, incluidos productos guardados antes de este arreglo.
+    _itSpecs = psScrubSpecs(_itSpecs, _finalCat, it.title);
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
