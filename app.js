@@ -2409,14 +2409,14 @@ function psFixTitleCase(title, brand) {
 
   var out = words.join(' ');
 
-  // Si la marca es una sola palabra TODA EN MAYÚSCULAS y corta (LEGO, USB, GE,
-  // JBL, RCA), se respeta tal cual en el título para que coincida con
-  // *C:Brand. Marcas de varias palabras NO se tocan: "CAMILLE ROSE" debe
-  // quedar como "Camille Rose", no gritado.
+  // Si la marca va en mayúsculas de verdad (LEGO, JBL, GE), se respeta tal
+  // cual en el título para que coincida con *C:Brand. La lista vive en
+  // PS_ALLCAPS_BRANDS, la misma que usa normalizeBrandCase, para que el
+  // título y el item specific nunca se separen.
   var b = String(brand || '').trim();
-  if (b && b.indexOf(' ') === -1 && b.length >= 2 && b.length <= 6 &&
-      b === b.toUpperCase() && /^[A-Za-z]+$/.test(b)) {
-    out = out.replace(new RegExp('\\b' + b + '\\b', 'gi'), b);
+  if (b && typeof psIsAllCapsBrand === 'function' && psIsAllCapsBrand(b)) {
+    var bUp = b.toUpperCase();
+    out = out.replace(new RegExp('\\b' + bUp + '\\b', 'gi'), bUp);
   }
   return out;
 }
@@ -2782,11 +2782,31 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
   }
 }
 
+// ── MARCAS QUE SÍ SE ESCRIBEN EN MAYÚSCULAS ─────────────────────────────────
+// 15 ago 2026: normalizeBrandCase() se hizo para arreglar marcas que llegan
+// gritadas desde el UPC ("CAMILLE ROSE" → "Camille Rose"). Pero también
+// convertía LEGO en "Lego", y entonces el título decía "Lego" mientras
+// *C:Brand decía "LEGO" — el listado se contradecía solo.
+// Esto es una lista, no una regla automática, a propósito: una regla del
+// tipo "si es corta déjala en mayúsculas" convertiría DOVE, NIVEA o AVEENO
+// en marcas gritadas. Cuando aparezca una marca nueva que va en mayúsculas,
+// se agrega aquí y queda cubierta en el título Y en el item specific.
+var PS_ALLCAPS_BRANDS = [
+  'LEGO','IKEA','ASUS','MSI','JBL','LG','HP','GE','RCA','IBM','JVC','TCL',
+  'BIC','OPI','NYX','GNC','CVS','3M','KFC','AMD','HDMI','USB','LED'
+];
+
+function psIsAllCapsBrand(str) {
+  return PS_ALLCAPS_BRANDS.indexOf(String(str || '').trim().toUpperCase()) !== -1;
+}
+
 // Convierte una marca TODA EN MAYÚSCULAS (ej "CAMILLE ROSE") a Title Case
 // ("Camille Rose"). Si ya viene en case normal/mixto, la deja intacta —
 // nunca toca marcas que ya están bien formateadas (ej "iPhone", "eBay").
 function normalizeBrandCase(str) {
   if (!str) return str;
+  // Excepción: marcas que legítimamente van en mayúsculas se dejan intactas.
+  if (psIsAllCapsBrand(str)) return String(str).trim().toUpperCase();
   if (str === str.toUpperCase() && /[A-Z]{2,}/.test(str)) {
     return str.toLowerCase().replace(/(^|[\s\-'])([a-z])/g, function(m, sep, c){ return sep + c.toUpperCase(); });
   }
@@ -5043,8 +5063,15 @@ function psPreFillSpecifics(title, category, brand) {
   // antes se omitía justo cuando era "Adult", dejando ese campo de eBay
   // vacío en la mayoría de los productos). OJO: esto llena el aspecto
   // "Age Group" de eBay, no "Department" (son campos distintos).
+  // ⚠️ 15 ago 2026: en JUGUETES no se manda un Age Group adivinado.
+  // psExtractDepartment() devuelve 'Adult' por defecto cuando el título no
+  // trae palabras de niño — razonable en salud y belleza, desastroso en
+  // juguetes: el LEGO 31134 salió como "Adult" cuando la caja marca una edad
+  // infantil, y eso lo saca de todas las búsquedas de regalo para niños.
+  // Mejor no mandar el aspecto que mandarlo mal.
+  var _toyCats = ['19006','220','261068','2536','19169','233'];
   var ageGroupVal = psExtractDepartment(title);
-  if (ageGroupVal) {
+  if (ageGroupVal && _toyCats.indexOf(String(category || '')) === -1) {
     prefilled['Age Group'] = ageGroupVal;
   }
   
@@ -5096,6 +5123,18 @@ function psPreFillSpecifics(title, category, brand) {
       if (legoSpecs[key] && legoSpecs[key] !== '') {
         prefilled[key] = legoSpecs[key];
       }
+    }
+    // ⚠️ 15 ago 2026: LEG-673419373609 se publicó con C:Size = "1128".
+    // psExtractLEGOSpecifics() NUNCA escribe Size — ese número lo inventó la
+    // IA. La caja del set trae 144 piezas. Un conteo falso en la ficha es
+    // información incorrecta al comprador, así que se bloquea: en LEGO,
+    // "Size" no es un aspecto real, y "Number of Pieces" solo se acepta si
+    // el número aparece de verdad en el título (o sea, si vino de una
+    // fuente y no de la imaginación del modelo).
+    delete prefilled['Size'];
+    var _np = String(prefilled['Number of Pieces'] || '').replace(/[^0-9]/g, '');
+    if (_np && String(title || '').indexOf(_np) === -1) {
+      delete prefilled['Number of Pieces'];
     }
   }
   
