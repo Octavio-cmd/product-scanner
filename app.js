@@ -2372,7 +2372,53 @@ function rebuildTitle(base, n, shade, expDate) {
   if (t.length > maxBase) {
     t = t.substring(0, maxBase).replace(/\s+\S*$/, '').trim();
   }
-  return (t + suffix).trim().substring(0, 80);
+  var _out = (t + suffix).trim().substring(0, 80);
+  // Corrección de mayúsculas antes de mostrarlo (ver psFixTitleCase).
+  return psFixTitleCase(_out, (typeof cur !== 'undefined' && cur && cur.brand) || '');
+}
+
+// ── CORRECCIÓN DE MAYÚSCULAS EN EL TÍTULO ───────────────────────────────────
+// 15 ago 2026: la regla 9 del prompt decía "Cada palabra en Title Case", y la
+// IA la seguía al pie de la letra. Resultado en LEG-673419373609:
+//   "Lego Creator Space Shuttle 31134 3 In 1 Building Set New"
+// Dos errores: "3 In 1" (en inglés las preposiciones cortas van en minúscula)
+// y "Lego" cuando la marca es LEGO, que además es lo que va en *C:Brand —
+// el título y el item specific se contradecían.
+// Se corrige aquí, de forma determinista, en vez de confiar en que el modelo
+// obedezca: el prompt también se ajustó, pero esta función es la garantía.
+var PS_SMALL_WORDS = ['a','an','the','and','or','nor','but','of','in','on','at',
+  'to','for','with','by','from','per','vs','as','into','over','up'];
+
+function psFixTitleCase(title, brand) {
+  var s = String(title || '').trim();
+  if (!s) return s;
+  var words = s.split(/\s+/);
+
+  words = words.map(function(w, i) {
+    // Tokens con dígitos (31134, 3-in-1, 16oz) o ya en MAYÚSCULAS reales
+    // (USB, LED, SPF) se dejan intactos.
+    if (/\d/.test(w)) return w;
+    if (w.length >= 2 && w === w.toUpperCase() && /[A-Z]/.test(w)) return w;
+    var bare = w.replace(/[^A-Za-z]/g, '').toLowerCase();
+    // Palabra corta a media frase → minúscula. Nunca la primera ni la última.
+    if (i > 0 && i < words.length - 1 && PS_SMALL_WORDS.indexOf(bare) !== -1) {
+      return w.toLowerCase();
+    }
+    return w.charAt(0).toUpperCase() + w.slice(1);
+  });
+
+  var out = words.join(' ');
+
+  // Si la marca es una sola palabra TODA EN MAYÚSCULAS y corta (LEGO, USB, GE,
+  // JBL, RCA), se respeta tal cual en el título para que coincida con
+  // *C:Brand. Marcas de varias palabras NO se tocan: "CAMILLE ROSE" debe
+  // quedar como "Camille Rose", no gritado.
+  var b = String(brand || '').trim();
+  if (b && b.indexOf(' ') === -1 && b.length >= 2 && b.length <= 6 &&
+      b === b.toUpperCase() && /^[A-Za-z]+$/.test(b)) {
+    out = out.replace(new RegExp('\\b' + b + '\\b', 'gi'), b);
+  }
+  return out;
 }
 
 function initPackWheel(currentPacks, ebayPricesObj, baseTitle, baseUPC, baseBrand) {
@@ -2630,7 +2676,7 @@ REGLAS CRÍTICAS DEL TÍTULO:
 6. Terminar con "New" (o "New Sealed" si aplica)
 7. NO usar emojis ni signos especiales (nada de !, *, |, ✓)
 8. NO REPETIR la misma palabra dos veces (no "Sunscreen ... Sunscreen")
-9. Cada palabra en Title Case (Primera Letra Mayúscula), NUNCA TODO EN MAYÚSCULAS
+9. Title Case del inglés: mayúscula inicial en las palabras importantes, pero las palabras cortas a media frase van en MINÚSCULA (in, of, for, with, and, the, a, to, on, at, by, from). Ejemplo correcto: "3 in 1", NO "3 In 1". Las marcas que se escriben en mayúsculas (LEGO, USB, JBL) se dejan tal cual. NUNCA TODO EL TÍTULO EN MAYÚSCULAS.
 10. Solo palabras REALES del producto — nunca inventes atributos que no tenga
 11. NUNCA incluyas fecha de expiración (Exp, Expires, fechas tipo 07/27 o 03/2028) en el título — la app la agrega automáticamente aparte. Si el nombre original trae una fecha de expiración, IGNÓRALA y NO la copies.
 
@@ -6653,7 +6699,7 @@ async function exportCSV(){
     else if (/\bmetamucil\b/.test(titleLower)) { brandFix = 'Metamucil'; }
     else if (/\bcentrum\b/.test(titleLower)) { brandFix = 'Centrum'; }
 
-    var cleanTitle = (it.title||'').replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}✳️⭐🔥💊📦✅❌⚠️🌟💰📊🏷️]/gu, '').replace(/\s+/g,' ').trim().substring(0,80);
+    var cleanTitle = psFixTitleCase((it.title||'').replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}✳️⭐🔥💊📦✅❌⚠️🌟💰📊🏷️]/gu, '').replace(/\s+/g,' ').trim(), it.brand).substring(0,80);
 
     // Model — required for Electronics & Appliances
     // ── Solo usamos el texto extraído del título como Model si el título
