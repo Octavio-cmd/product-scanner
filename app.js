@@ -5299,7 +5299,7 @@ async function psGenerateSpecifics(){
     }
 
     // Filtrar valores inventados antes de guardar (ver psScrubSpecs).
-    clean = psScrubSpecs(clean, catForAI, title);
+    clean = psScrubSpecs(clean, catForAI, titleForAI);
     cur._specifics = clean;
 
     renderSpecificsPreview(clean);
@@ -6901,7 +6901,13 @@ async function exportCSV(){
     if (!flavorVal && _ingestibleForm && _ingestibleForm !== 'Gummy') {
       flavorVal = 'Unflavored';
     }
-    var ageGroupVal   = _specForCol('C:Age Group') || psExtractDepartment(it.title);
+    // ⚠️ 15 ago 2026: aunque psScrubSpecs borre "Age Group" de los specifics,
+    // este respaldo lo volvía a inventar con psExtractDepartment(), que
+    // devuelve "Adult" por defecto. En juguetes se queda vacío.
+    var ageGroupVal = _specForCol('C:Age Group');
+    if (!ageGroupVal && PS_TOY_CATS.indexOf(String(_finalCat)) === -1) {
+      ageGroupVal = psExtractDepartment(it.title);
+    }
     var departmentVal = _specForCol('C:Department') || psExtractGenderDepartment(it.title);
 
     lines.push([
