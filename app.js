@@ -88,7 +88,7 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-17d';
+window.PS_BUILD = '2026-08-17e';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -5417,12 +5417,14 @@ function psScrubHealthSpecs(specs, category, title, upc) {
   //    del frasco (30, 60, 120). Si el título trae un tamaño real con unidad
   //    (5 g, 3 oz) se usa ese; si no, se etiqueta como conteo para que al
   //    menos se lea bien en la ficha.
-  var sz = String(specs['Size'] || '').trim();
+  // Las tres claves caen en la misma columna del CSV; se normaliza la que venga.
+  var _szKey = ['Size','Count','Unit Quantity'].filter(function(k){ return specs[k]; })[0] || 'Size';
+  var sz = String(specs[_szKey] || '').trim();
   if (/^\d+$/.test(sz)) {
     var real = String(title || '').match(/(\d+\.?\d*)\s*(g|oz|ml|fl oz|lb)\b/i);
-    if (real) specs['Size'] = real[1] + ' ' + real[2].toLowerCase();
-    else if (sz === '1') delete specs['Size'];
-    else specs['Size'] = sz + ' Count';
+    if (real) specs[_szKey] = real[1] + ' ' + real[2].toLowerCase();
+    else if (sz === '1') delete specs[_szKey];
+    else specs[_szKey] = sz + ' Count';
   }
 
   // 7) Marca "Generic" cuando el UPC sí la delata.
@@ -5441,7 +5443,11 @@ function psScrubSpecs(specs, category, title) {
 
   // "Size" no es un aspecto real en sets de construcción; es donde aterrizan
   // los conteos de piezas inventados.
-  delete specs['Size'];
+  // ⚠️ 17 ago 2026: hay que borrar las TRES claves que el SPEC_MAP manda a la
+  // columna C:Size ('Size', 'Count', 'Unit Quantity'). Borrando solo 'Size',
+  // el LEGO volvió a salir con C:Size = "Multiple Pieces" porque el valor
+  // venía por otra de las claves.
+  ['Size', 'Count', 'Unit Quantity'].forEach(function(k){ delete specs[k]; });
 
   // Age Group adivinado ("Adult" por defecto) saca al juguete de las
   // búsquedas de regalo para niños. Sin dato real, mejor no mandarlo.
