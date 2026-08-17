@@ -2089,7 +2089,7 @@ function clearExpDate() {
   }
   _dateSelected = false;
   if (window._packState) window._packState.expDate = '';
-  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; }
+  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; cur._countOK = false; cur._countConfirmed = null; }
   var el = document.getElementById('date-result-display');
   if (el) el.innerHTML = '';
   // Regenerar título sin fecha
@@ -3391,7 +3391,99 @@ window.psMayNeedExpDate = function(category, title) {
   return /\b(oxygen|supplement|vitamin|probiotic|collagen|melatonin|medicine|medication|tablet|capsule|softgel|gummies|gummy|lozenge|syrup|ointment|antiseptic|antibiotic|sunscreen|spf|eye drops|ear drops|nasal|inhaler|first aid|bandage|antacid|laxative|electrolyte|protein powder|meal replacement|baby formula|infant formula|test strips?|lancets?|glucose|peroxide|alcohol prep|contact lens|saline)\b/.test(t);
 };
 
+// ── CONFIRMACIÓN DE CONTEO ──────────────────────────────────────────────────
+// 17 ago 2026. QUN-898440001875 se publicó como "120ct" cuando la caja dice
+// 60 SOFTGELS. El número NO lo inventó la IA: viene del nombre que devuelve
+// la base de datos de UPC, que tiene registrada la presentación de 120 para
+// ese código. Qunol vende el mismo CoQ10 200mg en 60 y en 120.
+//
+// O sea que un dato malo de una fuente "confiable" contaminó el título Y el
+// item specific Size. El número correcto está impreso al frente de la caja
+// que la muchacha tiene en la mano — el sistema simplemente nunca se lo
+// preguntaba.
+//
+// Regla: si el título propone un conteo, hay que confirmarlo contra la caja
+// antes de guardar. Si no propone ninguno, no se estorba al almacén.
+
+// Unidades contables. NO incluye oz/ml/g/mg: esas son medidas de contenido
+// (3 oz de crema), no cantidades de piezas, y ahí no hay nada que contar.
+var PS_COUNT_UNITS = 'ct|count|softgels?|capsules?|caps|tablets?|tabs|gummies|gummy|pills?|lozenges?|packets?|sachets?|wipes?|strips?|patches?|pads?|bandages?|tests?|treatments?|doses?|servings?|pieces?|pcs';
+
+// Devuelve {num, unit, texto} si el título trae un conteo; null si no.
+function psDetectCount(title, category) {
+  var t = String(title || '');
+  // se ignora "Pack of N": esa es la cantidad de BULTOS del listado, no las
+  // piezas que trae adentro cada caja.
+  t = t.replace(/\bpack of\s+\d+/gi, ' ');
+
+  // a) número pegado a la unidad: "120ct", "8 Treatments"
+  var m = t.match(new RegExp('\\b(\\d{1,4})\\s*(' + PS_COUNT_UNITS + ')\\b', 'i'));
+  // b) con hasta dos palabras en medio: "30 Saline Packets", "8 foam Applicators"
+  if (!m) m = t.match(new RegExp('\\b(\\d{1,4})\\s+(?:[A-Za-z]+\\s+){1,2}(' + PS_COUNT_UNITS + ')\\b', 'i'));
+  if (m) return { num: parseInt(m[1], 10), unit: m[2], texto: m[0] };
+
+  // c) número suelto SIN unidad, solo en categorías de salud: "Test Booster 60 Exp".
+  //    Se excluye lo que claramente no es un conteo: dosis (200mg), medidas
+  //    (3 oz), fechas (04/29) y años. Fuera de salud no se aplica, porque un
+  //    número suelto en electrónica o juguetes casi nunca es cantidad.
+  var esSalud = (typeof PS_HEALTH_CATS !== 'undefined' && PS_HEALTH_CATS.indexOf(String(category || '')) !== -1);
+  if (esSalud) {
+    var limpio = t
+      .replace(/\d+\s*(?:mg|mcg|iu|ml|oz|fl oz|g|kg|lb|%)\b/gi, ' ')  // dosis y medidas
+      .replace(/\d{1,2}\s*\/\s*\d{2,4}/g, ' ')                        // fechas 04/29
+      .replace(/\bexp\b/gi, ' ');
+    var m3 = limpio.match(/\b(\d{2,4})\b/);
+    if (m3) {
+      var n3 = parseInt(m3[1], 10);
+      if (n3 >= 10 && n3 <= 1000) {
+        return { num: n3, unit: 'unidades', texto: m3[1], suelto: true };
+      }
+    }
+  }
+  return null;
+}
+
+// Reemplaza el conteo del título por el confirmado, respetando la unidad
+// que ya traía ("120ct" → "60ct", "120 Softgels" → "60 Softgels").
+function psApplyCount(title, nuevo, category) {
+  var det = psDetectCount(title, category);
+  if (!det || !nuevo) return title;
+  var reemplazo = det.texto.replace(/\d{1,4}/, String(nuevo));
+  return String(title).replace(det.texto, reemplazo);
+}
+
 async function _addBulkInternal() {
+  // ── Confirmar el conteo contra la caja ────────────────────────────────
+  var _tituloActual = (cur && (cur._selectedTitle || cur.title)) || '';
+  var _det = psDetectCount(_tituloActual, (cur && cur.category) || '');
+  if (_det && cur && !cur._countOK) {
+    var _resp = prompt(
+      '📦 CONFIRMA LA CANTIDAD\n\n' +
+      'El sistema propone:  ' + _det.num + ' ' + _det.unit + '\n\n' +
+      'Ese dato viene de la base de datos del UPC y NO siempre coincide\n' +
+      'con la caja. Lee el frente del empaque y escribe la cantidad real.\n\n' +
+      '(Deja el mismo número si está correcto)',
+      String(_det.num)
+    );
+    if (_resp === null) return;            // canceló: no se guarda nada
+    var _n = parseInt(String(_resp).replace(/[^0-9]/g, ''), 10);
+    if (!_n || _n < 1) { toast('⚠️ Cantidad inválida'); return; }
+
+    cur._countConfirmed = _n;
+    cur._countOK = true;
+    if (_n !== _det.num) {
+      var _nuevoTitulo = psApplyCount(_tituloActual, _n, (cur && cur.category) || '');
+      cur.title = _nuevoTitulo;
+      if (cur._selectedTitle) cur._selectedTitle = _nuevoTitulo;
+      // el Size del item specific sale del mismo número: se invalida para
+      // que se regenere con el valor corregido
+      if (cur._specifics) { delete cur._specifics['Size']; }
+      var _tEl = document.getElementById('title-input');
+      if (_tEl) { _tEl.value = _nuevoTitulo; if (_tEl.dataset) _tEl.dataset.val = _nuevoTitulo; }
+      toast('✅ Corregido: ' + _det.num + ' → ' + _n + ' ' + _det.unit);
+    }
+  }
+
   var EXP_REQ = window.PS_HEALTH_CATS;
   if (EXP_REQ.includes(String(cur.category||''))) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
@@ -5154,6 +5246,124 @@ function psPreFillSpecifics(title, category, brand) {
 // vacío: el comprador lo lee como cierto.
 var PS_TOY_CATS = ['19006','220','261068','2536','19169','233'];
 
+// ── LIMPIEZA DE SPECIFICS EN SALUD / SUPLEMENTOS ────────────────────────────
+// 17 ago 2026, del lote de 10. Cuatro problemas distintos, todos con la misma
+// raíz: cuando falta un dato, algo se lo inventa.
+//
+// El peor fue GNC-048107227494: salió publicado con
+//   Active Ingredients = "Tribulus Terrestris, Fenugreek, Saw Palmetto"
+// Nada de eso aparece en el título ni viene del UPC — lo inventó la IA. En un
+// suplemento eso no es SEO, es información falsa sobre algo que la gente
+// ingiere. Lo mismo en QUN-850052593452 ("Ubiquinol, Phosphatidylserine,
+// Ginkgo Biloba" sobre un título que solo dice "Brain Health Memory Plus").
+//
+// La regla: un ingrediente solo se publica si aparece en el título. Es
+// conservadora a propósito — puede tirar algún ingrediente real que venía de
+// buena fuente, pero prefiero un campo vacío que una etiqueta falsa.
+// Verificado contra este lote: CONSERVA "Ubiquinol CoQ10", "Benzocaine" y
+// "Magnesium" (los tres sí están en sus títulos) y DESCARTA los dos
+// inventados.
+
+// Prefijos GS1 → marca. Se usa solo cuando la marca llegó como "Generic":
+// MAG-850052593254 se publicó como Generic aunque su UPC arranca con 850052,
+// el mismo prefijo que dos Qunol del MISMO lote (850052593148 y 850052593452).
+// Es una lista, no magia: cuando aparezca un prefijo nuevo, se agrega aquí.
+var PS_UPC_BRANDS = {
+  '850052': 'Qunol',
+  '898440': 'Qunol'
+};
+
+function psBrandFromUPC(upc) {
+  var u = String(upc || '').replace(/[^0-9]/g, '');
+  if (u.length < 6) return '';
+  return PS_UPC_BRANDS[u.substring(0, 6)] || '';
+}
+
+// Formas ingeribles: el color de una pastilla no lo verifica nadie y no se
+// busca por él, así que un color inventado solo suma riesgo sin sumar ventas.
+var PS_INGESTIBLE_FORMS = ['tablet','capsule','softgel','caplet','gummy','pill','gel cap','soft gel'];
+
+// Categorías OTC que necesitan esta limpieza pero que NO deben entrar a
+// PS_HEALTH_CATS: esa lista además obliga fecha de expiración y Dosage, y
+// para un reliner de dentadura o un removedor de verrugas eso no aplica
+// igual. Lista aparte, mismo criterio de limpieza.
+var PS_OTC_EXTRA_CATS = ['48080','159882','29618','11780','67588','63514'];
+
+function psScrubHealthSpecs(specs, category, title, upc) {
+  if (!specs || typeof specs !== 'object') return specs;
+  var c = String(category || '');
+  var healthy = (typeof PS_HEALTH_CATS !== 'undefined' && PS_HEALTH_CATS.indexOf(c) !== -1) ||
+                PS_OTC_EXTRA_CATS.indexOf(c) !== -1;
+  if (!healthy) return specs;
+
+  var t = String(title || '').toLowerCase();
+
+  // 1) Ingredientes: solo los que aparecen en el título.
+  ['Active Ingredients', 'Ingredients'].forEach(function(k) {
+    if (!specs[k]) return;
+    var kept = String(specs[k]).split(/\s*,\s*/).filter(function(ing) {
+      var bare = ing.trim().toLowerCase();
+      if (!bare) return false;
+      // basta con que la primera palabra del ingrediente esté en el título
+      // ("Ubiquinol CoQ10" pasa si el título dice "Ubiquinol")
+      var first = bare.split(/\s+/)[0];
+      return t.indexOf(bare) !== -1 || (first.length >= 4 && t.indexOf(first) !== -1);
+    });
+    if (kept.length) specs[k] = kept.join(', ');
+    else delete specs[k];
+  });
+
+  // 2) Formulation e Item Form no pueden contradecirse. Gana la que aparezca
+  //    en el título; si ninguna aparece, gana Formulation.
+  var f = String(specs['Formulation'] || '').trim();
+  var itf = String(specs['Item Form'] || '').trim();
+  if (f && itf && f.toLowerCase() !== itf.toLowerCase()) {
+    var win = (t.indexOf(itf.toLowerCase()) !== -1 && t.indexOf(f.toLowerCase()) === -1) ? itf : f;
+    specs['Formulation'] = win;
+    specs['Item Form']   = win;
+  }
+
+  // 3) Color inventado en pastillas.
+  var formLower = String(specs['Item Form'] || specs['Formulation'] || '').toLowerCase();
+  if (specs['Color'] && PS_INGESTIBLE_FORMS.indexOf(formLower) !== -1) {
+    // solo se conserva si el título realmente menciona el color
+    if (t.indexOf(String(specs['Color']).toLowerCase()) === -1) delete specs['Color'];
+  }
+
+  // 4) "Period After Opening (PAO)" es un aspecto de cosméticos. En algo que
+  //    se ingiere manda la fecha de expiración, no el PAO.
+  delete specs['Period After Opening (PAO)'];
+
+  // 5) Dosage tiene que ser una dosis, no un conteo. CankerMelts salió con
+  //    Dosage = "20 Count", que es la cantidad de pastillas del frasco.
+  var dose = String(specs['Dosage'] || '').trim();
+  if (dose && /^\d+\s*(count|ct|pcs|pieces|tablets?|capsules?)$/i.test(dose)) {
+    var mg = t.match(/(\d+\.?\d*)\s*(mg|mcg|g|iu|ml)\b/);
+    if (mg) specs['Dosage'] = mg[1] + ' ' + mg[2];
+    else specs['Dosage'] = 'See product label';
+  }
+
+  // 6) Size con un número pelón es ambiguo: en este lote guardaba el conteo
+  //    del frasco (30, 60, 120). Si el título trae un tamaño real con unidad
+  //    (5 g, 3 oz) se usa ese; si no, se etiqueta como conteo para que al
+  //    menos se lea bien en la ficha.
+  var sz = String(specs['Size'] || '').trim();
+  if (/^\d+$/.test(sz)) {
+    var real = String(title || '').match(/(\d+\.?\d*)\s*(g|oz|ml|fl oz|lb)\b/i);
+    if (real) specs['Size'] = real[1] + ' ' + real[2].toLowerCase();
+    else if (sz === '1') delete specs['Size'];
+    else specs['Size'] = sz + ' Count';
+  }
+
+  // 7) Marca "Generic" cuando el UPC sí la delata.
+  var brandFromUpc = psBrandFromUPC(upc);
+  if (brandFromUpc && /^(generic|unknown|n\/a)$/i.test(String(specs['Brand'] || ''))) {
+    specs['Brand'] = brandFromUpc;
+  }
+
+  return specs;
+}
+
 function psScrubSpecs(specs, category, title) {
   if (!specs || typeof specs !== 'object') return specs;
   var cat = String(category || '');
@@ -5300,6 +5510,11 @@ async function psGenerateSpecifics(){
 
     // Filtrar valores inventados antes de guardar (ver psScrubSpecs).
     clean = psScrubSpecs(clean, catForAI, titleForAI);
+    // Para salud se usa el título COMPLETO (cur._selectedTitle/cur.title),
+    // no titleForAI, porque este último recorta "Pack of N" y podría
+    // esconder un tamaño o una unidad que sí queremos poder verificar.
+    var _fullTitle = (cur && (cur._selectedTitle || cur.title)) || titleForAI;
+    clean = psScrubHealthSpecs(clean, catForAI, _fullTitle, (cur && cur.upc) || '');
     cur._specifics = clean;
 
     renderSpecificsPreview(clean);
@@ -6737,6 +6952,7 @@ async function exportCSV(){
     // Segunda pasada: el export es el punto por donde cruzan TODOS los
     // caminos, incluidos productos guardados antes de este arreglo.
     _itSpecs = psScrubSpecs(_itSpecs, _finalCat, it.title);
+    _itSpecs = psScrubHealthSpecs(_itSpecs, _finalCat, it.title, it.upc || it.sku || '');
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
