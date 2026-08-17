@@ -88,7 +88,7 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-14c';
+window.PS_BUILD = '2026-08-17d';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2078,6 +2078,40 @@ function toggleExpDate() {
   }
 }
 
+// ── CÓDIGO DE MANUFACTURA / LOTE ────────────────────────────────────────────
+// Se guarda en cur._mfgCode. Nunca es obligatorio: es un respaldo para los
+// productos que no traen fecha impresa.
+function setMfgCode(v) {
+  var val = String(v || '').trim().toUpperCase();
+  if (cur) cur._mfgCode = val;
+  if (window._packState) window._packState.mfgCode = val;
+  var hint = document.getElementById('mfg-code-hint');
+  if (hint && cur) hint.innerHTML = psMfgHint(cur);
+}
+window.setMfgCode = setMfgCode;
+
+// Texto de ayuda que explica, en el momento, qué va a pasar con lo capturado.
+function psMfgHint(r) {
+  r = r || {};
+  var tieneFecha = !!String(r._expDate || '').trim();
+  var tieneCode  = !!String(r._mfgCode || '').trim();
+  if (tieneFecha && tieneCode) {
+    return 'eBay recibirá la <strong>fecha</strong>. El lote se agrega a la descripción.';
+  }
+  if (tieneFecha) return 'Hay fecha — el código no hace falta.';
+  if (tieneCode)  return '✅ Sin fecha: eBay recibirá este <strong>código</strong> y la descripción lo etiquetará como lote.';
+  return 'Si el producto no trae fecha, captura aquí el código del envase.';
+}
+window.psMfgHint = psMfgHint;
+
+// Valor que viaja a C:Expiration Date: la fecha manda; el código es respaldo.
+function psExpOrCode(it) {
+  var f = String((it && it.expDate) || '').trim();
+  if (f) return f;
+  return String((it && it.mfgCode) || '').trim();
+}
+window.psExpOrCode = psExpOrCode;
+
 function clearExpDate() {
   var picker = document.getElementById('exp-date-picker');
   var btn    = document.getElementById('exp-toggle-btn');
@@ -2089,7 +2123,7 @@ function clearExpDate() {
   }
   _dateSelected = false;
   if (window._packState) window._packState.expDate = '';
-  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; cur._countOK = false; cur._countConfirmed = null; }
+  if (cur) { cur._expDate = ''; cur._selectedTitle = ''; cur._countOK = false; cur._countConfirmed = null; cur._medidaOK = false; }
   var el = document.getElementById('date-result-display');
   if (el) el.innerHTML = '';
   // Regenerar título sin fecha
@@ -3453,6 +3487,38 @@ function psApplyCount(title, nuevo, category) {
 }
 
 async function _addBulkInternal() {
+  // ── Confirmar medidas que no se pueden verificar ──────────────────────
+  // ARN-723122200621 salió con C:Volume = "4 oz" y el título NO menciona
+  // ningún tamaño. Es el mismo caso del CoQ10 "120ct": un número que viene
+  // de la base de datos del UPC y que nadie contrastó contra el envase.
+  // Si el dato no aparece en el título, no hay forma de verificarlo desde
+  // el código — se le pregunta a quien tiene el producto en la mano.
+  if (cur && cur._specifics && !cur._medidaOK) {
+    var _tMed = String((cur._selectedTitle || cur.title) || '');
+    ['Volume', 'Size'].forEach(function(campo){
+      if (cur._medidaOK) return;
+      var v = String(cur._specifics[campo] || '').trim();
+      if (!v || !/\d/.test(v)) return;
+      var num = v.replace(/[^0-9.]/g, '');
+      if (!num || _tMed.indexOf(num) !== -1) return;   // sí está en el título: verificable
+      var r = prompt(
+        '📏 CONFIRMA LA MEDIDA (' + campo + ')\n\n' +
+        'El sistema propone:  ' + v + '\n\n' +
+        'Ese dato NO aparece en el título — viene de la base de datos del UPC\n' +
+        'y puede no coincidir con el envase. Lee el empaque y confirma.\n\n' +
+        '(Deja vacío si el envase no lo dice)',
+        v
+      );
+      if (r === null) { cur._medidaCancel = true; return; }
+      var lim = String(r).trim();
+      if (lim) cur._specifics[campo] = lim;
+      else delete cur._specifics[campo];
+      if (lim !== v) toast('✅ ' + campo + ': ' + v + ' → ' + (lim || 'vacío'));
+    });
+    if (cur._medidaCancel) { cur._medidaCancel = false; return; }
+    cur._medidaOK = true;
+  }
+
   // ── Confirmar el conteo contra la caja ────────────────────────────────
   var _tituloActual = (cur && (cur._selectedTitle || cur.title)) || '';
   var _det = psDetectCount(_tituloActual, (cur && cur.category) || '');
@@ -3485,7 +3551,9 @@ async function _addBulkInternal() {
   }
 
   var EXP_REQ = window.PS_HEALTH_CATS;
-  if (EXP_REQ.includes(String(cur.category||''))) {
+  // El código de manufactura cuenta como válido: si el envase no trae fecha
+  // pero sí lote, no tiene caso trabar al almacén pidiendo algo que no existe.
+  if (EXP_REQ.includes(String(cur.category||'')) && !String(cur._mfgCode || '').trim()) {
     // Check both cur._expDate and DOM display (in case _packState wasn't set)
     var expVal = cur._expDate || '';
     if (!expVal) {
@@ -3626,6 +3694,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     price:       usedPrice,
     shade:       shade,
     expDate:     expDate,
+    mfgCode:     (cur && cur._mfgCode) || '',
     upc:         (cur && cur.upc)         || '',
     brand:       (cur && cur.brand)       || 'Generic',
     category:    psSafeCategory(cur && cur.category),
@@ -4116,6 +4185,7 @@ async function addSplitPacksToCSV(){
       price:       price,
       shade:       shade,
       expDate:     expDate,
+      mfgCode:     (cur && cur._mfgCode) || '',
       upc:         cur.upc || '',
       brand:       cur.brand || 'Generic',
       category:    psSafeCategory(cur.category),
@@ -5689,7 +5759,7 @@ function renderResult(r){
 
   // ── EXPIRATION DATE (movido ANTES de las fotos también) ──
   // Duplicamos el picker aquí arriba para que Manuel lo llene antes de generar packs
-  var EXP_REQUIRED_CATS_TOP = ['67169','180959','75037','75038','51227','57041','2984','67167','105070'];
+  var EXP_REQUIRED_CATS_TOP = window.PS_HEALTH_CATS; // misma lista que el resto (antes estaba duplicada y corta)
   var needsExpTop = EXP_REQUIRED_CATS_TOP.includes(String(r.category||''));
   h+='<div class="card" style="border:1px solid ' + (needsExpTop?'rgba(231,76,60,.5)':'rgba(255,109,31,.35)') + ';background:' + (needsExpTop?'rgba(231,76,60,.05)':'rgba(255,109,31,.05)') + '">'
     + '<div class="lbl">📅 Expiration Date'
@@ -5700,6 +5770,27 @@ function renderResult(r){
   }
   h+='<div id="exp-toggle-btn" onclick="toggleExpDate()" style="display:inline-flex;align-items:center;gap:8px;background:var(--sf2);border:1.5px solid '+(needsExpTop?'#e74c3c':'var(--bd)')+';border-radius:10px;padding:10px 16px;cursor:pointer;margin-top:6px;font-size:13px;color:'+(needsExpTop?'#e74c3c':'var(--mu)')+'"><span>📅</span><span>'+(needsExpTop?'Ingresar fecha de expiración (REQUERIDO)':'This product has an expiration date')+'</span></div>';
   h+='<div id="exp-date-picker" style="display:none;margin-top:10px"><div class="extra-label">MONTH</div><div class="pack-chips" id="month-chips" style="gap:6px"></div><div class="extra-label" style="margin-top:10px">YEAR</div><div class="pack-chips" id="year-chips" style="gap:6px"></div><div class="date-result" id="date-result-display" style="text-align:left;margin-top:8px"></div><button onclick="clearExpDate()" style="background:none;border:none;color:var(--mu);font-size:12px;cursor:pointer;margin-top:4px">✕ Remove date</button></div>';
+
+  // ── CÓDIGO DE MANUFACTURA / LOTE (17 ago 2026) ────────────────────────────
+  // Muchos productos no traen fecha impresa pero sí un código de lote, y eBay
+  // exige algo en Expiration Date en las categorías de salud (error 21919303).
+  // Hasta ahora eso se resolvía a mano metiendo el código en el campo de la
+  // fecha — funciona, pero deja un dato raro sin explicación en la ficha.
+  //
+  // Ahora se captura por separado, NO es obligatorio, y se conecta así:
+  //   · Si hay fecha  → C:Expiration Date = la fecha
+  //   · Si no hay fecha pero sí código → C:Expiration Date = el código
+  //   · La descripción SIEMPRE lo muestra etiquetado como lote, para que el
+  //     comprador no lo confunda con una fecha.
+  h+='<div style="margin-top:12px;padding-top:10px;border-top:1px solid var(--bd)">'
+    + '<div class="lbl" style="font-size:12px">🏭 Código de manufactura / Lote '
+    + '<span style="color:var(--mu);font-size:11px;font-weight:400">(opcional — úsalo cuando NO haya fecha)</span></div>'
+    + '<input id="mfg-code-input" type="text" value="' + esc(r._mfgCode || '') + '" '
+    + 'placeholder="Ej. L4A0231" autocapitalize="characters" autocomplete="off" '
+    + 'oninput="setMfgCode(this.value)" '
+    + 'style="width:100%;margin-top:6px;background:var(--sf2);border:1.5px solid var(--bd);border-radius:10px;padding:10px 12px;color:var(--tx);font-size:14px;font-weight:700;box-sizing:border-box">'
+    + '<div id="mfg-code-hint" style="font-size:11px;color:var(--mu);margin-top:5px">' + psMfgHint(r) + '</div>'
+    + '</div>';
   h+='</div>';
 
   // ── 3. FRONT / BACK PHOTOS — Step 1: capture + remove background ──
@@ -6226,6 +6317,23 @@ function descForPack(desc, packs) {
 }
 
 // ── Convertir descripción (objeto de Claude o string) a HTML/texto ──────
+// Agrega el código de lote al final de la descripción, ETIQUETADO.
+// Importante que se vea como lote y no como fecha: cuando el producto no
+// trae fecha impresa, ese mismo código viaja en C:Expiration Date porque
+// eBay exige algo ahí. En la ficha, el comprador debe entender qué está
+// leyendo. (17 ago 2026)
+function psAppendLote(html, it) {
+  var code = String((it && it.mfgCode) || '').trim();
+  if (!code) return html;
+  var etiqueta = String((it && it.expDate) || '').trim()
+    ? '<p><strong>Lot / Manufacture Code:</strong> ' + code + '</p>'
+    : '<p><strong>Lot / Manufacture Code:</strong> ' + code +
+      '<br><span style="font-size:12px">This item does not display a printed expiration date. ' +
+      'The lot code above is shown in its place.</span></p>';
+  return String(html || '') + etiqueta;
+}
+window.psAppendLote = psAppendLote;
+
 function descToEbayHTML(d){
   if(!d) return '';
   if(typeof d === 'string') return d;
@@ -6866,6 +6974,10 @@ async function exportCSV(){
   // Validar categorías contra eBay ANTES de armar el CSV.
   // eBay elige la mejor categoría leaf real según el título de cada producto.
   // Esto elimina el Error 87 de raíz. Si el backend no responde, usamos psSafeCategory.
+  // La consola de debug (5 toques al logo) es incómoda de encontrar en medio
+  // del trabajo. El build se muestra también aquí, al exportar, porque es el
+  // momento en que sí importa saber qué versión generó el archivo.
+  toast('🏷️ Build ' + (window.PS_BUILD || '?') + ' — generando CSV');
   toast('🔎 Validando categorías con eBay...');
   var leafMap = await validateCategoriesWithEbay(bulk);
 
@@ -6944,7 +7056,10 @@ async function exportCSV(){
     var bookTitle = '';
     var authorVal = '';
     var isbnVal    = '';
-    var expDateVal = it.expDate || '';
+    // La fecha manda; si no hay, va el código de manufactura. eBay exige algo
+    // en este campo en categorías de salud (error 21919303) y el código es
+    // lo único verificable que trae el envase. Ver psExpOrCode().
+    var expDateVal = psExpOrCode(it);
     var dosageVal  = '';
     var connectivityVal = '';
     // ── IMPORTANTE: Definir _itSpecs aquí (ANTES de usarlo en lógica de colorVal) ──
@@ -6975,12 +7090,27 @@ async function exportCSV(){
     // Incluye vitaminas, suplementos Y productos de salud/analgésicos
     var _isSupplement = /vitamin|supplement|probiotic|omega|collagen|protein|melatonin|zinc|magnesium|calcium|iron|biotin|turmeric|elderberry|fish oil|gummy|gummies|capsule|tablet|softgel|multivitamin|pain reliev|pain relief|pain killer|arthritis|joint pain|muscle rub|muscle ache|sore muscle|backache|lidocaine|phenol|topical|analgesic|ibuprofen|acetaminophen|aspirin|naproxen|roll on|lotion|cream|gel|ointment|serum|absorbine|bengay|icy hot|biofreeze|antacid|heartburn|acid reducer|acid indigestion|\btums\b|rolaids|maalox|mylanta|pepcid|prilosec|nexium|zantac|famotidine|omeprazole|ranitidine|pepto|bismol|simethicone|gas relief|laxative|stool softener|fiber supplement|metamucil|dulcolax|miralax|imodium|anti.?diarrheal|electrolyte|rehydration|cold medicine|cough syrup|cough medicine|\bflu\b|decongestant|expectorant|antihistamine|dimetapp|robitussin|mucinex|delsym|dayquil|nyquil|benadryl|claritin|zyrtec|allegra|sudafed/i.test(it.title||'');
     if (EXP_CATS_D.includes(String(_finalCat)) || _isSupplement) {
-      var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|oz|g|ct|count|capsule|tablet|softgel|serving|gummy|gummies))/i);
+      // ⚠️ 17 ago 2026: el regex incluía ct/count/capsule/tablet/softgel, que
+      // son unidades de CANTIDAD, no de dosis. Por eso CankerMelts salió con
+      // Dosage = "20 Count" — que es cuántas pastillas trae el frasco, no
+      // cuánto benzocaína tiene cada una. Una dosis lleva unidad de masa o
+      // volumen; si el título no la trae, se remite a la etiqueta.
+      var doseMatch = (it.title||'').match(/(\d+\.?\d*\s*(?:mg|mcg|iu|ml|g)\b)/i);
       dosageVal = doseMatch ? doseMatch[0].replace(/(\d)([a-zA-Z])/, '$1 $2') : 'See product label';
     }
 
     // Auto-fix brand for known brands in title
     var brandFix = it.brand || 'Generic';
+    // ⚠️ 17 ago 2026: la corrección de marca por UPC la había puesto dentro de
+    // psScrubHealthSpecs, sobre el objeto de item specifics. Error de diseño:
+    // la columna *C:Brand del CSV NO lee de ahí, lee de it.brand. Por eso
+    // MAG-850052593254 volvió a salir como "Generic" aunque su UPC empieza con
+    // 850052 (Qunol). Se corrige en el punto por donde sí pasa el dato.
+    if (/^(generic|unknown|n\/a)$/i.test(String(brandFix))) {
+      var _bUpc = (typeof psBrandFromUPC === 'function')
+        ? psBrandFromUPC(it.upc || it.sku || '') : '';
+      if (_bUpc) brandFix = _bUpc;
+    }
     const titleLower = (it.title||'').toLowerCase();
     if (/\blego\b/.test(titleLower)) { brandFix = 'LEGO'; }
     else if (/\bdash\b/.test(titleLower) && /waffle|maker|blender|toaster/.test(titleLower)) { brandFix = 'Dash'; }
@@ -7132,7 +7262,7 @@ async function exportCSV(){
       _finalCat,
       cleanTitle,
       '1000',
-      descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'),
+      psAppendLote(descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'), it),
       pics,
       'FixedPrice','GTC',
       it.price||'9.99',
