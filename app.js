@@ -88,7 +88,8 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-17g';
+var _psSbInvVacio = {};
+window.PS_BUILD = '2026-08-17h';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -4311,6 +4312,7 @@ async function psCheckSellbrite(upc, brand){
       try { updateSplitCalc(); } catch(e) {}
     }
     _psSellbriteProducts = {}; // guardar info para el update por SKU
+    _psSbInvVacio = {};        // marca los SKU cuyo inventario vino vacío
     let html = '📦 <strong style="color:#00e676">En Sellbrite: ' + products.length + ' listado' + (products.length>1?'s':'') + '</strong>';
     products.forEach(function(p, idx){
       const inv = p.inventory || {};
@@ -4343,6 +4345,10 @@ async function psCheckSellbrite(upc, brand){
       // se vio un uuid válido, sirve para los productos sin existencia.
       if (!wh && window._psLastWarehouseUuid) wh = window._psLastWarehouseUuid;
       if (wh) window._psLastWarehouseUuid = wh;
+      // ¿Sellbrite devolvió datos de inventario, o vino vacío?
+      var _invVacio = !inv || Object.keys(inv).length === 0;
+      _psSbInvVacio = _psSbInvVacio || {};
+      _psSbInvVacio[idx] = _invVacio;
       // Deja la estructura cruda en la consola de debug (5 toques al logo)
       // para poder ver el nombre real del campo si esto vuelve a fallar.
       try { console.log('[Sellbrite] ' + p.sku + ' warehouse_uuid="' + wh + '" inventory=' + JSON.stringify(inv).substring(0,400)); } catch(e){}
@@ -4609,6 +4615,23 @@ async function psUpdateSellbriteInventory(idx){
   if (!p.warehouse_uuid && window._psLastWarehouseUuid) {
     p.warehouse_uuid = window._psLastWarehouseUuid;
   }
+  // ── PROTECCIÓN CONTRA BORRADO DE STOCK ────────────────────────────────
+  // 17 ago 2026: REP-742676961970-1 tiene 924 unidades en Sellbrite pero la
+  // app mostraba 0, porque el backend no está trayendo el inventario
+  // (inventory={} en el log). Si alguien le da a "Actualizar" con ese 0 en
+  // pantalla, le manda 0 a Sellbrite y BORRA las 924 unidades reales.
+  // Mientras el backend no devuelva inventario, no se deja mandar nada:
+  // no podemos escribir sobre un dato que no pudimos leer.
+  if (typeof _psSbInvVacio !== 'undefined' && _psSbInvVacio && _psSbInvVacio[idx]) {
+    if (confirmEl) confirmEl.innerHTML =
+      '<span style="color:#ff5252;font-weight:700">🛑 Bloqueado — Sellbrite no devolvió el inventario de este SKU.</span>' +
+      '<br><span style="font-size:11px;color:var(--mu)">La app no sabe cuántas unidades hay realmente, así que ' +
+      'mandar una cantidad podría <strong>borrar el stock verdadero</strong>. ' +
+      'Actualiza este producto directo en Sellbrite hasta que se arregle el backend.</span>';
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
+    return;
+  }
+
   if (!p.warehouse_uuid) {
     if (confirmEl) confirmEl.innerHTML =
       '<span style="color:#ff5252;font-weight:700">❌ Sellbrite no devolvió el almacén para este SKU.</span>' +
