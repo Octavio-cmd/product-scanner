@@ -88,7 +88,7 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-17e';
+window.PS_BUILD = '2026-08-17f';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -6986,6 +6986,41 @@ async function exportCSV(){
   toast('🏷️ Build ' + (window.PS_BUILD || '?') + ' — generando CSV');
   toast('🔎 Validando categorías con eBay...');
   var leafMap = await validateCategoriesWithEbay(bulk);
+
+  // ── MISMA CATEGORÍA PARA TODOS LOS PAQUETES DEL MISMO PRODUCTO ──────────
+  // 17 ago 2026: SAN-197638007751-1pk salió en categoría 82597 y su hermano
+  // -2pk en 69528. Mismo UPC, misma caja — lo único distinto es el título,
+  // porque el de paquete termina en "Pack of 2 New" en vez de "Makeup New",
+  // y la Taxonomy API de eBay contesta según el texto que le mandas.
+  //
+  // Un mismo producto no puede vivir en dos secciones de la tienda: una de
+  // las dos está mal por definición. Se toma la categoría del paquete más
+  // chico (el 1pk, cuyo título es el más limpio y descriptivo) y se aplica a
+  // todos los paquetes del mismo SKU base.
+  var _catPorBase = {};
+  bulk.forEach(function(it){
+    var base = String(it.sku || '').replace(/-\d+pk$/i, '');
+    if (!base) return;
+    var k  = String(it.category || '').trim() + '|' + String(it.title || '').trim();
+    var lc = leafMap[k] || leafMap[k.substring(0,120)];
+    if (!lc) return;
+    var packs = parseInt((String(it.sku).match(/-(\d+)pk$/i) || [])[1] || '1', 10);
+    if (!_catPorBase[base] || packs < _catPorBase[base].packs) {
+      _catPorBase[base] = { cat: lc, packs: packs };
+    }
+  });
+  bulk.forEach(function(it){
+    var base = String(it.sku || '').replace(/-\d+pk$/i, '');
+    var ref  = _catPorBase[base];
+    if (!ref) return;
+    var k = String(it.category || '').trim() + '|' + String(it.title || '').trim();
+    var actual = leafMap[k] || leafMap[k.substring(0,120)];
+    if (actual && actual !== ref.cat) {
+      leafMap[k] = ref.cat;
+      leafMap[k.substring(0,120)] = ref.cat;
+      console.log('[cat unificada] ' + it.sku + ': ' + actual + ' → ' + ref.cat);
+    }
+  });
 
   // ── RED DE SEGURIDAD: fecha de expiración faltante ────────────────────
   // El guardia de _addBulkInternal() solo cubre UN camino de entrada; el
