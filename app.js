@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-08-18a';
+window.PS_BUILD = '2026-08-18b';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -4364,7 +4364,11 @@ async function psCheckSellbrite(upc, brand){
         + '<input id="' + inputId + '" type="number" inputmode="numeric" value="' + totalOnHand + '" style="flex:1;min-width:0;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;padding:8px;color:var(--tx);font-size:15px;text-align:center">'
         + '<button onclick="psAdjustSbQty(\'' + inputId + '\',1)" style="width:32px;height:32px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-size:18px;cursor:pointer">+</button>'
         + '</div>'
-        + '<button id="ps-sbqty-btn-' + idx + '" onclick="psUpdateSellbriteInventory(' + idx + ')" style="width:100%;margin-top:6px;padding:10px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">✅ Actualizar inventario</button>'
+        + '<div style="display:flex;gap:6px;margin-top:6px">'
+        +   '<button id="ps-sbqty-btn-' + idx + '" onclick="psUpdateSellbriteInventory(' + idx + ',\'add\')" style="flex:1;padding:10px 6px;background:linear-gradient(135deg,#00c853,#00963f);border:none;border-radius:8px;color:#fff;font-weight:800;font-size:13px;cursor:pointer">➕ Sumar</button>'
+        +   '<button id="ps-sbqty-set-' + idx + '" onclick="psUpdateSellbriteInventory(' + idx + ',\'set\')" style="flex:1;padding:10px 6px;background:var(--sf2);border:1px solid var(--bd);border-radius:8px;color:var(--tx);font-weight:800;font-size:13px;cursor:pointer">🔄 Reemplazar</button>'
+        + '</div>'
+        + '<div id="ps-sbqty-preview-' + idx + '" style="margin-top:5px;font-size:11px;color:var(--mu);text-align:center">Actual: ' + totalQty + ' — escribe cuántas <strong>llegaron</strong> y toca Sumar</div>'
         + '<div id="ps-sbqty-confirm-' + idx + '" style="margin-top:6px;font-size:12px;text-align:center"></div>'
         + '</div>';
     });
@@ -4598,7 +4602,7 @@ function psAdjustSbQty(inputId, delta){
   input.value = Math.max(0, val);
 }
 
-async function psUpdateSellbriteInventory(idx){
+async function psUpdateSellbriteInventory(idx, modo){
   console.log('✅ psUpdateSellbriteInventory llamado, idx=' + idx);
   const p = (_psSellbriteProducts || {})[idx];
   const confirmEl = $('ps-sbqty-confirm-' + idx);
@@ -4648,7 +4652,8 @@ async function psUpdateSellbriteInventory(idx){
       body: JSON.stringify({
         sku: p.sku,
         warehouse_uuid: p.warehouse_uuid || '',
-        quantity: newQty
+        quantity: newQty,
+        mode: (modo === 'add' ? 'add' : 'set')
       })
     });
     console.log('📥 Respuesta /sb/update-inventory, status:', res.status);
@@ -4657,17 +4662,30 @@ async function psUpdateSellbriteInventory(idx){
     if(!res.ok || result.status === 'error'){
       throw new Error(result.error || ('HTTP ' + res.status));
     }
-    // Confirmación VISIBLE y PERMANENTE dentro de la tarjeta (no solo un toast que desaparece)
-    if(confirmEl) confirmEl.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Confirmado por Sellbrite — ahora en ' + newQty + ' unidades</span>';
+    // ── Confirmación con la OPERACIÓN completa ────────────────────────
+    // El total lo calcula y confirma el backend (result.available), no la
+    // app: cuando se suma, la cuenta se hace sobre el valor recién leído de
+    // Sellbrite, no sobre el que estaba en pantalla. Entre que se cargó la
+    // tarjeta y se presionó el botón pudo haberse vendido algo.
+    var _antes = (result.previous_available != null) ? result.previous_available : '?';
+    var _final = (result.available != null) ? result.available : newQty;
+    var _op = (result.mode === 'add')
+      ? (_antes + ' + ' + newQty + ' = <strong>' + _final + '</strong>')
+      : ('<strong>' + _final + '</strong> (reemplazado, antes ' + _antes + ')');
+    if(confirmEl) confirmEl.innerHTML = '<span style="color:#00e676;font-weight:700">✅ Confirmado por Sellbrite — ' + _op + '</span>';
     const availSpan = $('ps-sbqty-avail-' + idx);
-    if(availSpan) availSpan.textContent = newQty; // reflejar el nuevo número al instante
-    toast('✅ ' + p.sku + ' actualizado a ' + newQty + ' unidades', 3000);
+    if(availSpan) availSpan.textContent = _final;
+    var prevEl = $('ps-sbqty-preview-' + idx);
+    if(prevEl) prevEl.innerHTML = 'Actual: ' + _final + ' — escribe cuántas <strong>llegaron</strong> y toca Sumar';
+    // Dejar la casilla en 0 para que nadie repita la suma sin querer.
+    if(input) input.value = 0;
+    toast('✅ ' + p.sku + ' → ' + _final + ' unidades', 3000);
   }catch(err){
     console.error('❌ psUpdateSellbriteInventory error:', err.message, err);
     if(confirmEl) confirmEl.innerHTML = '<span style="color:#ff5252;font-weight:700">❌ No se pudo actualizar: ' + esc(err.message||String(err)) + '</span>';
     toast('❌ Error al actualizar: ' + (err.message||err));
   }finally{
-    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
+    if(btnEl){ btnEl.disabled = false; btnEl.textContent = '➕ Sumar'; }
   }
 }
 
