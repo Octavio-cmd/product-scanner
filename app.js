@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-08-17h';
+window.PS_BUILD = '2026-08-18a';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -4632,14 +4632,11 @@ async function psUpdateSellbriteInventory(idx){
     return;
   }
 
-  if (!p.warehouse_uuid) {
-    if (confirmEl) confirmEl.innerHTML =
-      '<span style="color:#ff5252;font-weight:700">❌ Sellbrite no devolvió el almacén para este SKU.</span>' +
-      '<br><span style="font-size:11px;color:var(--mu)">Pasa cuando el producto está en 0 y nunca ha tenido existencia. ' +
-      'Escanea primero un producto que SÍ tenga stock y vuelve a intentar — así la app aprende el almacén.</span>';
-    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
-    return;
-  }
+  // ⚠️ 18 ago 2026: ya NO se bloquea por falta de warehouse_uuid.
+  // El backend lo resuelve solo con el almacén de la cuenta cuando la app no
+  // se lo manda, así que trabar aquí era un obstáculo sin motivo. Lo que SÍ
+  // sigue bloqueando es no conocer la cantidad real (ver arriba), porque ahí
+  // el riesgo es borrar stock verdadero.
   console.log('📤 Enviando a /sb/update-inventory:', JSON.stringify({sku:p.sku, warehouse_uuid:p.warehouse_uuid, quantity:newQty}));
 
   if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳ Actualizando...'; }
