@@ -88,7 +88,7 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-window.PS_BUILD = '2026-08-17f';
+window.PS_BUILD = '2026-08-17g';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -4316,7 +4316,36 @@ async function psCheckSellbrite(upc, brand){
       const inv = p.inventory || {};
       const totalQty = inv.total_quantity || 0;
       const totalOnHand = inv.total_on_hand || 0;
-      const wh = (inv.channels||[])[0]?.warehouse_uuid || '';
+      // ── warehouse_uuid: buscar en varias formas ──────────────────────────
+      // ⚠️ 17 ago 2026: antes solo se leía de inv.channels[0].warehouse_uuid.
+      // Cuando el producto tiene 0 disponibles, Sellbrite devuelve ese arreglo
+      // VACÍO — así que el uuid salía en blanco y el backend contestaba
+      // "Falta sku o warehouse_uuid". Círculo vicioso: solo se podía
+      // actualizar el inventario de lo que YA tenía inventario, que es justo
+      // lo contrario de lo que se necesita al reponer stock.
+      // Ahora se intenta en el orden de lo más probable, y si no aparece se
+      // recuerda el último uuid conocido de la sesión.
+      var wh = '';
+      var _fuentes = [
+        (inv.channels    || [])[0],
+        (inv.warehouses  || [])[0],
+        (p.inventories   || [])[0],
+        (p.warehouses    || [])[0],
+        inv, p
+      ];
+      for (var _f = 0; _f < _fuentes.length && !wh; _f++) {
+        var o = _fuentes[_f];
+        if (o && typeof o === 'object') {
+          wh = o.warehouse_uuid || o.warehouseUuid || o.warehouse_id || '';
+        }
+      }
+      // Respaldo: el almacén es siempre el mismo, así que si en esta sesión ya
+      // se vio un uuid válido, sirve para los productos sin existencia.
+      if (!wh && window._psLastWarehouseUuid) wh = window._psLastWarehouseUuid;
+      if (wh) window._psLastWarehouseUuid = wh;
+      // Deja la estructura cruda en la consola de debug (5 toques al logo)
+      // para poder ver el nombre real del campo si esto vuelve a fallar.
+      try { console.log('[Sellbrite] ' + p.sku + ' warehouse_uuid="' + wh + '" inventory=' + JSON.stringify(inv).substring(0,400)); } catch(e){}
       const inputId = 'ps-sbqty-' + idx;
       _psSellbriteProducts[idx] = { sku: p.sku, name: p.name || p.sku, upc: upcClean, warehouse_uuid: wh, inputId: inputId };
 
@@ -4572,6 +4601,22 @@ async function psUpdateSellbriteInventory(idx){
   const input = $(p.inputId);
   const newQty = parseInt((input && input.value) || '0', 10);
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
+
+  // Último recurso antes de mandar: si este producto no traía uuid (típico
+  // cuando está en 0), se usa el del almacén visto en esta sesión. Y si de
+  // plano no hay ninguno, se dice QUÉ falta y qué hacer, en vez del mensaje
+  // críptico "Falta sku o warehouse_uuid" que devuelve el backend.
+  if (!p.warehouse_uuid && window._psLastWarehouseUuid) {
+    p.warehouse_uuid = window._psLastWarehouseUuid;
+  }
+  if (!p.warehouse_uuid) {
+    if (confirmEl) confirmEl.innerHTML =
+      '<span style="color:#ff5252;font-weight:700">❌ Sellbrite no devolvió el almacén para este SKU.</span>' +
+      '<br><span style="font-size:11px;color:var(--mu)">Pasa cuando el producto está en 0 y nunca ha tenido existencia. ' +
+      'Escanea primero un producto que SÍ tenga stock y vuelve a intentar — así la app aprende el almacén.</span>';
+    if (btnEl) { btnEl.disabled = false; btnEl.textContent = '✅ Actualizar inventario'; }
+    return;
+  }
   console.log('📤 Enviando a /sb/update-inventory:', JSON.stringify({sku:p.sku, warehouse_uuid:p.warehouse_uuid, quantity:newQty}));
 
   if(btnEl){ btnEl.disabled = true; btnEl.textContent = '⏳ Actualizando...'; }
