@@ -127,8 +127,68 @@ let DEFAULT_RBG_KEY = '';
 // KEY NUEVA fija — igual que en Clothing & Shoes.
 // ⛔ NO se sobreescribe desde Railway (línea comentada abajo).
 let DEFAULT_IMGBB_KEY = atob('MjljYjkyZDg5YTViZDM2Y2Y5YjkxOTc2ZDVhNDYzOWM=');
-let DEFAULT_CLAUDE_KEY = '';
 let _keysLoaded = false;
+
+// ══════════════════════════════════════════════════════════════
+// SESION DE USUARIO + PROXY DE CLAUDE  (Fase 2)
+// La clave de Anthropic ya no llega al navegador: vive solo en el
+// backend. Aqui solo viaja un token de sesion firmado.
+// ══════════════════════════════════════════════════════════════
+const SAVVY_API = 'https://savvy-ebay-prices-production.up.railway.app';
+const SAVVY_MODELO = 'claude-haiku-4-5-20251001';
+
+// sessionStorage y no localStorage: los iPhone del almacen son compartidos,
+// asi que la sesion debe morir al cerrar la pestana. Nunca se guarda la
+// contrasena, solo el token, que ademas caduca en el servidor.
+function savvyToken() {
+  try { return sessionStorage.getItem('savvy_session_token') || ''; } catch(e) { return ''; }
+}
+function savvyGuardarSesion(token, usuario) {
+  try {
+    sessionStorage.setItem('savvy_session_token', token);
+    sessionStorage.setItem('savvy_session_user', usuario);
+  } catch(e) {}
+  SAVVY_CURRENT_USER = usuario;
+}
+function savvyBorrarSesion() {
+  try {
+    sessionStorage.removeItem('savvy_session_token');
+    sessionStorage.removeItem('savvy_session_user');
+  } catch(e) {}
+  SAVVY_CURRENT_USER = null;
+}
+
+// Envia el cuerpo al proxy en vez de a api.anthropic.com. Devuelve la misma
+// Response que antes, para que el codigo existente siga tratando r.ok,
+// r.status y r.json() exactamente igual.
+async function savvyClaude(opciones) {
+  const token = savvyToken();
+  if (!token) { savvySesionCaducada(); return new Response('{}', { status: 401 }); }
+  const r = await fetch(SAVVY_API + '/api/claude', {
+    method: 'POST',
+    signal: opciones.signal,
+    headers: {
+      'Content-Type': 'application/json',
+      'Authorization': 'Bearer ' + token
+    },
+    body: opciones.body
+  });
+  if (r.status === 401) savvySesionCaducada();
+  else if (r.status === 429) { try { toast('\u23F3 Limite de uso alcanzado. Espera un momento.'); } catch(e) {} }
+  else if (r.status === 503) { try { toast('\u26A0\uFE0F El servicio de IA no esta configurado.'); } catch(e) {} }
+  return r;
+}
+
+function savvySesionCaducada() {
+  savvyBorrarSesion();
+  try { toast('\uD83D\uDD11 Tu sesion expiro. Vuelve a iniciar sesion.'); } catch(e) {}
+  try {
+    var scr = ensureLoginScreen();
+    scr.style.display = 'flex';
+    var err = document.getElementById('login-err');
+    if (err) { err.textContent = 'Tu sesion expiro. Vuelve a entrar.'; err.style.display = 'block'; }
+  } catch(e) {}
+}
 // Load keys from Railway on startup
 (async function loadKeys() {
   try {
@@ -137,7 +197,7 @@ let _keysLoaded = false;
       const d = await r.json();
       // ⛔ NUNCA sobrescribir DEFAULT_IMGBB_KEY desde Railway:
       // if (d.imgbb) DEFAULT_IMGBB_KEY = d.imgbb;  ← DESACTIVADO PERMANENTE
-      if (d.claude)     DEFAULT_CLAUDE_KEY = d.claude;
+      // d.claude ya no se lee: la clave vive solo en el backend (Fase 2).
       if (d.sheets_url) localStorage.setItem('cl_sheets_url', d.sheets_url);
       // drive_url: NO sobrescribir — usamos URL fija hardcodeada
     }
@@ -146,46 +206,53 @@ let _keysLoaded = false;
   localStorage.setItem('cl_drive_url', 'https://script.google.com/macros/s/AKfycbyVgEEID8dqZMymlqQMpjO7fLBMYkfj0mmcWk2ImudTy9evKGlOi4oHUc9vhcdmpFeDDQ/exec');
   _keysLoaded = true;
 })();
-// ── Login System ──────────────────────────────────────────────
-const SAVVY_USERS = {
-  "robles":  "cf7df3a0895be4d16e781d20ae0cd883a49ec76952d12cfc0c64e75265ee1eda",
-  "yazmin":  "67cba96e3aca1502869bfafc595eb3fbc8452a0be4c2dac3a205f0d2a988ce27",
-  "noelia":  "a8e030f97d4c339d60b842b472ac7b9ac600a135647e7eda88d4d24b301991b0",
-  "ana":     "e82827b00b2ca8620beb37f879778c082b292a52270390cff35b6fe3157f4e8b",
-  "irene":   "d5bd3bb7e0fd656483ed8de410ff706c50c0f69dd89f34718729c2094e3948fb",
-  "danny":   "a79938ab5392c8024dff98a44cf776f4cbbb47be9ff78e4997a4920ec262b320",
-  "angelo":  "5f20cd035f6330b88fdd8abd1455cf80493be4640912c35a00905c9d610cee9d",
-  "ernesto": "881b476539c517af8fbbaddb0d754fb50de8d43cf554d85bfb7e79c0e4bad8c3",
-  "nancy":   "9a7b416aa4edea520092d8c8fcbe82cd10c58b7df8f4ed414bcc251c1ae52669",
-};
+// ── Login System (Fase 2: la validacion ocurre en el servidor) ──
+// El diccionario de hashes se elimino: era publico en este repositorio.
 
 let SAVVY_CURRENT_USER = null;
-
-async function sha256(str) {
-  const buf = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(str));
-  return Array.from(new Uint8Array(buf)).map(b=>b.toString(16).padStart(2,'0')).join('');
-}
 
 async function doLogin() {
   const user = (document.getElementById('login-user')?.value||'').trim().toLowerCase();
   const pass = document.getElementById('login-pass')?.value||'';
   const errEl = document.getElementById('login-err');
-  if (!user || !pass) { if(errEl) errEl.style.display='block'; return; }
-  const hash = await sha256(pass);
-  if (SAVVY_USERS[user] && SAVVY_USERS[user] === hash) {
-    SAVVY_CURRENT_USER = user;
-    // sessionStorage: dura mientras la pestaña esté abierta.
-    // Al cerrar Safari/la pestaña se borra sola → vuelve a pedir login.
-    try { sessionStorage.setItem('savvy_session_user', user); } catch(e) {}
-    var scr = document.getElementById('login-screen');
-    if (scr) scr.style.display = 'none';
-    // Show username in header
-    const hdrUser = document.getElementById('hdr-user');
-    if (hdrUser) hdrUser.textContent = '👤 ' + user;
-  } else {
-    if(errEl) errEl.style.display='block';
-    document.getElementById('login-pass').value='';
+  const btn = document.getElementById('login-btn');
+  if (!user || !pass) {
+    if(errEl) { errEl.textContent='Escribe usuario y contraseña.'; errEl.style.display='block'; }
+    return;
   }
+  if (btn) { btn.disabled = true; btn.textContent = 'Entrando…'; }
+  let mensaje = 'Usuario o contraseña incorrectos.';
+  try {
+    // La contraseña viaja al servidor y no se guarda en ningún sitio del navegador.
+    const r = await fetch(SAVVY_API + '/auth/login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ usuario: user, password: pass })
+    });
+    if (r.ok) {
+      const d = await r.json();
+      if (d && d.token) {
+        savvyGuardarSesion(d.token, d.usuario || user);
+        if (errEl) errEl.style.display='none';
+        var scr = document.getElementById('login-screen');
+        if (scr) scr.style.display = 'none';
+        const hdrUser = document.getElementById('hdr-user');
+        if (hdrUser) hdrUser.textContent = '👤 ' + (d.usuario || user);
+        document.getElementById('login-pass').value='';
+        if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+        return;
+      }
+    } else if (r.status === 429) {
+      mensaje = 'Demasiados intentos. Espera un minuto.';
+    } else if (r.status >= 500) {
+      mensaje = 'El servidor no responde. Inténtalo de nuevo.';
+    }
+  } catch(e) {
+    mensaje = 'Sin conexión con el servidor.';
+  }
+  if (btn) { btn.disabled = false; btn.textContent = 'Entrar'; }
+  if(errEl) { errEl.textContent = mensaje; errEl.style.display='block'; }
+  document.getElementById('login-pass').value='';
 }
 
 // Crea la pantalla de login dinámicamente (el HTML de Product Scanner no la trae)
@@ -216,7 +283,8 @@ function checkLogin() {
   // Al cerrar Safari/la pestaña, iOS borra sessionStorage → pide login otra vez.
   var u = null;
   try { u = sessionStorage.getItem('savvy_session_user'); } catch(e) {}
-  if (u && SAVVY_USERS[u]) {
+  // Ahora la sesion la respalda un token firmado por el servidor.
+  if (u && savvyToken()) {
     SAVVY_CURRENT_USER = u;
     const hdrUser = document.getElementById('hdr-user');
     if (hdrUser) hdrUser.textContent = '👤 ' + u;
@@ -230,9 +298,8 @@ function checkLogin() {
 }
 
 function doLogout() {
-  try { sessionStorage.removeItem('savvy_session_user'); } catch(e) {}
+  savvyBorrarSesion();
   localStorage.removeItem('savvy_user');
-  SAVVY_CURRENT_USER = null;
   var scr = ensureLoginScreen();
   scr.style.display = 'flex';
   var ui = document.getElementById('login-user'); if (ui) ui.value = '';
@@ -564,12 +631,12 @@ function catId(n){
 const catNm=id=>({'31786':'Skin Care','60496':'Makeup','180959':'Vitamins & Supplements','67602':'Dental Care','36870':'Lip Care','11854':'Hair Care','131689':'Shampoo & Conditioner','32062':'Face Moisturizers','75655':'Yoga & Pilates','31085':'Hair Color','45258':'Hair Styling','11838':'Deodorant','11840':'Body Wash','26683':'Shaving','180345':'Fragrances','67169':'OTC Medicine','51227':'First Aid','67167':'Feminine Care','105070':'Incontinence','36478':'Nail Care','57041':'Eye & Ear Care','48619':'Batteries','44867':'Phone Cables','112529':'Headphones','14969':'Speakers','9394':'Phone Cases','293':'Consumer Electronics','20625':'Home & Garden','14308':'Food & Beverages','1281':'Pet Supplies','2984':'Baby','6000':'Automotive','888':'Sporting Goods','220':'Toys & Hobbies','19006':'LEGO Building Sets','261186':'Books','20695':'Mugs','177005':'Kitchen Knives','20654':'Cookware','20650':'Dinnerware','261068':'Toys','31788':'Body Lotions','168763':'Small Kitchen Appliances','16486':'Office Supplies','19264':'Braces & Supports','181':'Sporting Goods','1232':'Insect Repellent','261844':'Insect Repellent','26677':'BBQ & Grill Tools','20725':'Outdoor Cooking'}[id]||'Skin Care');
 
 // Settings
-function saveKey(){const v=$('keyIn').value.trim();if(!v)return;localStorage.setItem('savvy_api_key',v);renderSt();toast('✅ API Key saved');setTimeout(closeCfg,700);}
+function saveKey(){ toast('\u2139\uFE0F La clave de Claude ya la gestiona el servidor. No hace falta configurarla aqui.'); }
 function saveEbay(){const v=$('ebayIn').value.trim();if(!v)return;localStorage.setItem('savvy_ebay_id',v);renderSt();toast('✅ eBay ID saved');setTimeout(closeCfg,700);}
 function renderSt(){
-  const k=(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY),e=localStorage.getItem('savvy_ebay_id');
-  $('stSt').innerHTML=`<div class="str"><div class="sd ${k?'ok':'no'}"></div><span>Claude API: ${k?'✓ Configurado':'✗ No configurado'}</span></div><div class="str"><div class="sd ${e?'ok':'no'}"></div><span>eBay App ID: ${e?'✓ Configurado':'✗ No configurado'}</span></div>`;
-  if(k)$('keyIn').placeholder='••••••••••••'+k.slice(-6);
+  const k=!!savvyToken(),e=localStorage.getItem('savvy_ebay_id');
+  $('stSt').innerHTML=`<div class="str"><div class="sd ${k?'ok':'no'}"></div><span>Sesión Claude: ${k?'✓ Activa':'✗ Inicia sesión'}</span></div><div class="str"><div class="sd ${e?'ok':'no'}"></div><span>eBay App ID: ${e?'✓ Configurado':'✗ No configurado'}</span></div>`;
+  if($('keyIn'))$('keyIn').placeholder='Ya no se usa: la gestiona el servidor';
   if(e)$('ebayIn').value=e;
 }
 // Settings PIN Protection (1977)
@@ -2600,8 +2667,7 @@ function buildSmartTitle(prod, packs) {
 // Claude
 async function callClaude(upc,prod,ebay){
   stat('Analyzing with Claude...');
-  const key=(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY);
-  if(!key)return fallback(upc,prod,ebay);
+  if(!savvyToken())return fallback(upc,prod,ebay);
 
   const low     = ebay?.prices?.low || ebay?.pricing?.active?.low || 0;
   const avg     = ebay?.prices?.avg || ebay?.pricing?.active?.avg || 0;
@@ -2729,15 +2795,8 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
     const ctrl = new AbortController();
     const timer = setTimeout(()=>ctrl.abort(), 15000);
     stat('Analyzing with Claude AI...');
-    const r=await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
+    const r=await savvyClaude({
       signal: ctrl.signal,
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
       body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:500,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
     });
     clearTimeout(timer);
@@ -2777,15 +2836,8 @@ Para el precio: usa (precio_min_ebay × packSize × 0.92) si hay datos. Si no ha
         // 15s (antes 8s) — con señal débil 8s a veces no alcanzaba y el
         // reintento fallaba en silencio, dejando el título corto sin avisar.
         const timer2 = setTimeout(function(){ ctrl2.abort(); }, 15000);
-        const r2 = await fetch('https://api.anthropic.com/v1/messages',{
-          method:'POST',
+        const r2 = await savvyClaude({
           signal: ctrl2.signal,
-          headers:{
-            'Content-Type':'application/json',
-            'x-api-key':key,
-            'anthropic-version':'2023-06-01',
-            'anthropic-dangerous-direct-browser-access':'true'
-          },
           body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:150,messages:[{role:'user',content:expandPrompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
         });
         clearTimeout(timer2);
@@ -3261,8 +3313,8 @@ function renderAnalyzeError(step, e, upc, prod, ebay){
       <div class="val">${ebay.found?'✅ '+ebay.activeListings+' listings':'❌ No data'}</div>
     </div>
     <div class="card">
-      <div class="lbl">Claude API Key</div>
-      <div class="val">${(localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY)?'✅ Configurada':'❌ Not configured'}</div>
+      <div class="lbl">Sesión Claude</div>
+      <div class="val">${savvyToken()?'✅ Activa':'❌ Inicia sesión'}</div>
     </div>
     <button class="ag-btn" id="agBtn" style="margin-top:10px">🔄 TRY AGAIN</button>`;
   $('agBtn').addEventListener('touchend',e=>{e.preventDefault();scanAnother();});
@@ -4724,8 +4776,7 @@ async function psAutoGenerateDescription(){
   if(!cur){ return; }
   const out = $('ps-desc-result');
   if(!out){ return; }
-  const key = (localStorage.getItem('savvy_api_key') || DEFAULT_CLAUDE_KEY);
-  if(!key){ console.warn('Claude API key no configurada'); return; }
+  if(!savvyToken()){ console.warn('Sin sesion activa: inicia sesion para usar Claude'); return; }
 
   const packs = cur.packSize || 1;
   const title = cur.title || cur.prod && cur.prod.title || '';
@@ -4764,15 +4815,8 @@ Rules:
   try{
     const ctrl = new AbortController();
     const timer = setTimeout(function(){ ctrl.abort(); }, 20000);
-    const r = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
+    const r = await savvyClaude({
       signal: ctrl.signal,
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
       body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:800,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
     });
     clearTimeout(timer);
@@ -5575,8 +5619,7 @@ function psScrubSpecs(specs, category, title) {
 // Guarda el resultado en cur._specifics (un objeto {nombre: valor}).
 async function psGenerateSpecifics(){
   if(!cur) { toast('⚠️ Escanea un producto primero'); return; }
-  var key = (localStorage.getItem('savvy_api_key') || (typeof DEFAULT_CLAUDE_KEY !== 'undefined' ? DEFAULT_CLAUDE_KEY : ''));
-  if(!key){ toast('⚠️ Falta API key de Anthropic'); return; }
+  if(!savvyToken()){ toast('\uD83D\uDD11 Inicia sesion para usar Claude'); return; }
 
   var btn = document.getElementById('specifics-btn');
   var origBtnHtml = btn ? btn.innerHTML : '';
@@ -5628,15 +5671,8 @@ async function psGenerateSpecifics(){
   try{
     var ctrl = new AbortController();
     var timer = setTimeout(function(){ ctrl.abort(); }, 20000);
-    var r = await fetch('https://api.anthropic.com/v1/messages',{
-      method:'POST',
+    var r = await savvyClaude({
       signal: ctrl.signal,
-      headers:{
-        'Content-Type':'application/json',
-        'x-api-key':key,
-        'anthropic-version':'2023-06-01',
-        'anthropic-dangerous-direct-browser-access':'true'
-      },
       body:JSON.stringify({model:'claude-haiku-4-5-20251001',max_tokens:600,messages:[{role:'user',content:prompt}]}) // ⚠️ HAIKU LOCKED - NEVER CHANGE
     });
     clearTimeout(timer);
