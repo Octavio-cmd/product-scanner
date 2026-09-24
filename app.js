@@ -179,6 +179,15 @@ async function savvyClaude(opciones) {
   return r;
 }
 
+// Cabeceras de /sb/update-inventory: la misma sesion que /api/claude. El
+// token va solo en la cabecera Authorization, nunca en la URL ni en el body.
+function savvyInventoryHeaders() {
+  const h = { 'Content-Type': 'application/json' };
+  const token = savvyToken();
+  if (token) h['Authorization'] = 'Bearer ' + token;
+  return h;
+}
+
 function savvySesionCaducada() {
   savvyBorrarSesion();
   try { toast('\uD83D\uDD11 Tu sesion expiro. Vuelve a iniciar sesion.'); } catch(e) {}
@@ -4583,13 +4592,14 @@ async function psPersistLocation(idx, location){
   try{
     const sbRes = await fetch(RAILWAY_SB + '/sb/update-inventory', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: savvyInventoryHeaders(),
       body: JSON.stringify({
         sku: p.sku,
         warehouse_uuid: p.warehouse_uuid || '',
         bin_location: location
       })
     });
+    if(sbRes.status === 401) savvySesionCaducada();
     const sbResult = await sbRes.json();
     console.log('📥 Sellbrite bin_location:', sbRes.status, JSON.stringify(sbResult).substring(0,200));
     sbOk = sbRes.ok && sbResult.status !== 'error';
@@ -4700,7 +4710,7 @@ async function psUpdateSellbriteInventory(idx, modo){
   try{
     const res = await fetch(RAILWAY_SB + '/sb/update-inventory', {
       method: 'POST',
-      headers: {'Content-Type': 'application/json'},
+      headers: savvyInventoryHeaders(),
       body: JSON.stringify({
         sku: p.sku,
         warehouse_uuid: p.warehouse_uuid || '',
@@ -4709,6 +4719,7 @@ async function psUpdateSellbriteInventory(idx, modo){
       })
     });
     console.log('📥 Respuesta /sb/update-inventory, status:', res.status);
+    if(res.status === 401) savvySesionCaducada();
     const result = await res.json();
     console.log('📥 Body:', JSON.stringify(result));
     if(!res.ok || result.status === 'error'){
