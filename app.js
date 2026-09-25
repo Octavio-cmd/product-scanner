@@ -188,6 +188,20 @@ function savvyInventoryHeaders() {
   return h;
 }
 
+// /ss/location y /ss/create-product: la misma sesion que /sb/update-inventory.
+// Sin sesion no se hace la peticion (el llamador muestra su error de siempre);
+// un 401 pide volver a entrar. El token va solo en la cabecera Authorization,
+// nunca en la URL ni en el body.
+async function savvyLocationFetch(url, opts) {
+  const token = savvyToken();
+  if (!token) throw new Error('Sin sesion');
+  opts = Object.assign({}, opts || {});
+  opts.headers = Object.assign({}, opts.headers || {}, { 'Authorization': 'Bearer ' + token });
+  const r = await fetch(url, opts);
+  if (r.status === 401) savvySesionCaducada();
+  return r;
+}
+
 function savvySesionCaducada() {
   savvyBorrarSesion();
   try { toast('\uD83D\uDD11 Tu sesion expiro. Vuelve a iniciar sesion.'); } catch(e) {}
@@ -4326,7 +4340,7 @@ async function psCheckSellbrite(upc, brand){
       // No está en Sellbrite — consultar ShipStation por UPC de todas formas
       statusEl.innerHTML = '🆕 <strong style="color:#ff9800">No existe en Sellbrite todavía</strong><br><span id="ps-ss-upc-status" style="font-size:12px;color:var(--mu)">🔍 Consultando ShipStation...</span>';
       try {
-        const ssRes = await fetch(RAILWAY_SB + '/ss/location?upc=' + encodeURIComponent(upcClean));
+        const ssRes = await savvyLocationFetch(RAILWAY_SB + '/ss/location?upc=' + encodeURIComponent(upcClean));
         const ssData = await ssRes.json();
         const ssEl = $('ps-ss-upc-status');
         if (ssEl) {
@@ -4457,7 +4471,7 @@ async function psCheckShipStationLocation(sku, idx){
   if(!el) return;
   const RAILWAY_SB = 'https://savvy-ebay-prices-production.up.railway.app';
   try{
-    const res = await fetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
+    const res = await savvyLocationFetch(RAILWAY_SB + '/ss/location?sku=' + encodeURIComponent(sku));
     const data = await res.json();
     const loc = data.exists ? (data.warehouse_location || '') : '';
     if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"/borrar
@@ -4608,7 +4622,7 @@ async function psPersistLocation(idx, location){
 
   if(confirmEl) confirmEl.innerHTML = '<span style="color:var(--mu)">📤 2/2 Guardando en ShipStation (pick ticket)...</span>';
   try{
-    const res = await fetch(RAILWAY_SB + '/ss/create-product', {
+    const res = await savvyLocationFetch(RAILWAY_SB + '/ss/create-product', {
       method: 'POST',
       headers: {'Content-Type': 'application/json'},
       body: JSON.stringify({

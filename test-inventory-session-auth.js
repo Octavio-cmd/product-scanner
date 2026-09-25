@@ -51,7 +51,7 @@ function makeSandbox({ token = TOKEN, status = 200, body = { status: 'success', 
   };
   sb.ensureLoginScreen = () => { sb.loginShown++; return { style: {} }; };
   vm.createContext(sb);
-  const code = ['savvyToken', 'savvyBorrarSesion', 'savvyInventoryHeaders', 'savvySesionCaducada',
+  const code = ['savvyToken', 'savvyBorrarSesion', 'savvyInventoryHeaders', 'savvySesionCaducada', 'savvyLocationFetch',
     'psPersistLocation', 'psUpdateSellbriteInventory'].map(n => extract(n)).join('\n');
   vm.runInContext(code + '\nthis._psSellbriteProducts = { 0: { sku: "IRW-710363598525-2", warehouse_uuid: "wh-1", inputId: "qty-0" } };', sb);
   vm.runInContext('var _psSellbriteProducts = this._psSellbriteProducts;', sb);
@@ -71,8 +71,9 @@ const invCalls = sb => sb.calls.filter(c => c.url.endsWith('/sb/update-inventory
   ok(c && c.opts.method === 'POST' && c.opts.headers['Content-Type'] === 'application/json', '1b psPersistLocation method/Content-Type unchanged');
   ok(c && c.url === URL, '3a psPersistLocation URL unchanged');
   ok(c && c.opts.body === JSON.stringify({ sku: 'IRW-710363598525-2', warehouse_uuid: 'wh-1', bin_location: 'E/P1' }), '4a psPersistLocation body unchanged');
-  ok(!('Authorization' in (s.calls.find(x => x.url.endsWith('/ss/create-product')) || { opts: { headers: {} } }).opts.headers),
-     '1c /ss/create-product call untouched (out of scope)');
+  // #21F-A: /ss/create-product now sends the same session.
+  ok((s.calls.find(x => x.url.endsWith('/ss/create-product')) || { opts: { headers: {} } }).opts.headers['Authorization'] === 'Bearer ' + TOKEN,
+     '1c /ss/create-product sends the session (#21F-A)');
 
   // 2. psUpdateSellbriteInventory sends Bearer (add + set)
   for (const modo of ['add', 'set']) {
@@ -107,7 +108,10 @@ const invCalls = sb => sb.calls.filter(c => c.url.endsWith('/sb/update-inventory
   s = makeSandbox({ status: 401, body: { error: 'no_autorizado' } });
   await s.psPersistLocation(0, 'E/P1');
   ok(s.loginShown === 1 && !('savvy_session_token' in s.store), '7c location 401 → savvySesionCaducada');
-  ok(s.toasts.some(t => t.includes('ShipStation (Sellbrite falló)')), '7d location 401 → Sellbrite reported as failed (sbOk=false)');
+  // #21F-A: /ss/create-product also needs the session now — after the 401 the
+  // session is gone, so the ShipStation write is not attempted either.
+  ok(s.toasts.some(t => t.includes('ShipStation (Sellbrite falló)') || t.includes('No se pudo guardar la ubicación'))
+     && !s.calls.some(k => k.url.includes('/ss/create-product')), '7d location 401 → Sellbrite reported as failed (sbOk=false), no write without session');
   // Non-401 errors do NOT log the user out.
   s = makeSandbox({ status: 409, body: { status: 'error', error: 'current_quantity_unavailable' } });
   await s.psUpdateSellbriteInventory(0, 'add');
