@@ -3036,7 +3036,8 @@ async function _doAnalyze(upc){
         name:  rwData.name || '',
         brand: rwData.brand || '',
         found: true,
-        source: rwData.data_source || 'railway'
+        source: rwData.data_source || 'railway',
+        aspects: Array.isArray(rwData.aspects) ? rwData.aspects : []
       };
       $('lp').textContent = prod.name.substring(0, 50);
 
