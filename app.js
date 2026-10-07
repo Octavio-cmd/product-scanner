@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v3';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v4';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -7451,8 +7451,24 @@ async function exportCSV(){
     // caminos, incluidos productos guardados antes de este arreglo.
     _itSpecs = psScrubSpecs(_itSpecs, _finalCat, it.title);
     _itSpecs = psScrubHealthSpecs(_itSpecs, _finalCat, it.title, it.upc || it.sku || '');
-    var typeVal   = ''; // Será definido después de poblar _itSpecs
-    var modelVal  = ''; // Será definido después de poblar _itSpecs
+
+    // ── Build _specByCol and _specForCol IMMEDIATELY after _itSpecs is ready ──
+    // This must happen BEFORE any Model/Type extraction logic uses _specForCol()
+    var _specByCol = {};
+    for (var _sk in _itSpecs) {
+      if (!_itSpecs.hasOwnProperty(_sk)) continue;
+      var _col = SPEC_COL_MAP[_sk];
+      if (_col && _itSpecs[_sk] && !_specByCol[_col]) {
+        _specByCol[_col] = String(_itSpecs[_sk]).trim();
+      }
+    }
+    function _specForCol(col){ return _specByCol[col] || ''; }
+
+    // ── Type & Model: precedencia estructurada → fallback ──
+    var _structuredType = _specForCol('C:Type');
+    var _structuredModel = _specForCol('C:Model');
+    var typeVal   = _structuredType ? _structuredType : detectType(String(it.category), it.title);
+    var modelVal  = '';
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
@@ -7521,7 +7537,6 @@ async function exportCSV(){
     // "Model" (ej. "Bluetooth Portable Speaker Wireless Audio Player Pack
     // of 2 New"). Si no hay modelo real identificable, usamos el estándar
     // de eBay "Does Not Apply" — honesto y aceptado para productos sin MPN. ──
-    var _structuredModel = _specForCol('C:Model');
     if (!_structuredModel && APPLIANCE_C.includes(String(it.category))) {
       var titleHadDelim = /,/.test(it.title || '');
       var titleWords = (it.title||'').split(/,/)[0].trim();
@@ -7589,21 +7604,6 @@ async function exportCSV(){
     // eBay solo acepta UPCs de 12-14 dígitos. Si no hay UPC válido, va vacío
     // (eBay permite "Does not apply" pero preferimos dejarlo vacío que inventar).
     var upcVal = '';
-    // ── Helper: obtiene el valor de un specific de IA para una columna dada.
-    // Recorre cur._specifics del producto y mapea cada nombre a su columna.
-    var _specByCol = {};
-    for (var _sk in _itSpecs) {
-      if (!_itSpecs.hasOwnProperty(_sk)) continue;
-      var _col = SPEC_COL_MAP[_sk];
-      if (_col && _itSpecs[_sk] && !_specByCol[_col]) {
-        _specByCol[_col] = String(_itSpecs[_sk]).trim();
-      }
-    }
-    function _specForCol(col){ return _specByCol[col] || ''; }
-
-    // ── Type: precedencia: structured specifics → legacy detectType() ──
-    var _structuredType = _specForCol('C:Type');
-    typeVal = _structuredType ? _structuredType : detectType(String(it.category), it.title);
 
     var _rawUpc = String((it.upc || '')).replace(/[^0-9]/g, '');
     if (!_rawUpc && it.sku) {
@@ -7715,15 +7715,18 @@ async function exportCSV(){
     }
 
     // ── CSV Precedence Test: verify Model and Type use correct sources ──
-    var csvModelCol = 19; // C:Model is at index 19 in row (0-indexed, counting from 'Add')
-    var csvTypeCol = 17;  // C:Type is at index 17 in row
-    var testModelVal = csvRow[csvModelCol];
-    var testTypeVal = csvRow[csvTypeCol];
-    if (_structuredModel && testModelVal !== _structuredModel) {
-      console.warn('Model precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredModel + ', got ' + testModelVal);
-    }
-    if (_structuredType && testTypeVal !== _structuredType) {
-      console.warn('Type precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredType + ', got ' + testTypeVal);
+    // Dynamic column indices (not hardcoded)
+    var csvModelCol = HDR.indexOf('C:Model');
+    var csvTypeCol = HDR.indexOf('C:Type');
+    if (csvModelCol >= 0 && csvTypeCol >= 0) {
+      var testModelVal = csvRow[csvModelCol];
+      var testTypeVal = csvRow[csvTypeCol];
+      if (_structuredModel && testModelVal !== _structuredModel) {
+        console.warn('Model precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredModel + ', got ' + testModelVal);
+      }
+      if (_structuredType && testTypeVal !== _structuredType) {
+        console.warn('Type precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredType + ', got ' + testTypeVal);
+      }
     }
 
     lines.push(csvRow.map(q).join(','));
