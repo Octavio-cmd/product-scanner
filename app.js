@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v2';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v3';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -6861,9 +6861,11 @@ async function exportCSV(){
     'Suitable For':'C:Suitable For', 'For Pet Type':'C:Suitable For', 'Hair Type':'C:Suitable For', 'Skin Type':'C:Suitable For',
     'Fragrance':'C:Fragrance',
     'Country/Region of Manufacture':'C:Country/Region of Manufacture', 'Country of Origin':'C:Country/Region of Manufacture',
-    'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose', 'Type of Product':'C:Main Purpose',
+    'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose',
+    'Type':'C:Type', 'Type of Product':'C:Type',
     'Age Group':'C:Age Group',
     'Department':'C:Department',
+    'Model':'C:Model', 'Model Number':'C:Model', 'Item Model Number':'C:Model',
     'MPN':'C:MPN',
     'Period After Opening (PAO)':'C:Period After Opening (PAO)', 'PAO':'C:Period After Opening (PAO)',
     'Styling Effect':'C:Styling Effect',
@@ -7431,9 +7433,7 @@ async function exportCSV(){
       return;
     }
     var pics = it.bundleImg || it.photo || it.imgUrl || '';
-    var typeVal   = detectType(String(it.category), it.title);
     var epaVal    = getEpaNumber(String(it.category), it.title);
-    var modelVal  = '';
     var colorVal  = '';
     var langVal   = '';
     var bookTitle = '';
@@ -7451,6 +7451,8 @@ async function exportCSV(){
     // caminos, incluidos productos guardados antes de este arreglo.
     _itSpecs = psScrubSpecs(_itSpecs, _finalCat, it.title);
     _itSpecs = psScrubHealthSpecs(_itSpecs, _finalCat, it.title, it.upc || it.sku || '');
+    var typeVal   = ''; // Será definido después de poblar _itSpecs
+    var modelVal  = ''; // Será definido después de poblar _itSpecs
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
@@ -7511,24 +7513,28 @@ async function exportCSV(){
     var cleanTitle = psFixTitleCase((it.title||'').replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}✳️⭐🔥💊📦✅❌⚠️🌟💰📊🏷️]/gu, '').replace(/\s+/g,' ').trim(), it.brand).substring(0,80);
 
     // Model — required for Electronics & Appliances
-    // ── Solo usamos el texto extraído del título como Model si el título
+    // ── Precedencia: structured specifics → title regex → "Does Not Apply"
+    // Solo usamos el texto extraído del título como Model si el título
     // REALMENTE tenía un delimitador (coma/guión) separando un segmento
     // corto tipo modelo. Nuestros títulos SEO son texto corrido sin comas,
     // así que sin esta protección se copiaba el título casi completo como
     // "Model" (ej. "Bluetooth Portable Speaker Wireless Audio Player Pack
     // of 2 New"). Si no hay modelo real identificable, usamos el estándar
     // de eBay "Does Not Apply" — honesto y aceptado para productos sin MPN. ──
-    if (APPLIANCE_C.includes(String(it.category))) {
+    var _structuredModel = _specForCol('C:Model');
+    if (!_structuredModel && APPLIANCE_C.includes(String(it.category))) {
       var titleHadDelim = /,/.test(it.title || '');
       var titleWords = (it.title||'').split(/,/)[0].trim();
       var candidateApplModel = brandFix ? titleWords.replace(new RegExp('^'+brandFix+'\\s*','i'),'').trim() : titleWords.trim();
       modelVal = (titleHadDelim && candidateApplModel && candidateApplModel.length <= 40)
         ? candidateApplModel.substring(0,65)
         : 'Does Not Apply';
+    } else if (_structuredModel) {
+      modelVal = _structuredModel;
     }
 
     // Model — también requerido para electrónicos (cualquier producto con Connectivity)
-    if (!modelVal && connectivityVal) {
+    if (!modelVal && connectivityVal && !_structuredModel) {
       var titleHadDelim2 = /[,\-|]/.test(it.title || '');
       var titleParts = (it.title || '').split(/[,\-|]/)[0].trim();
       var candidateModel = brandFix
@@ -7537,6 +7543,8 @@ async function exportCSV(){
       modelVal = (titleHadDelim2 && candidateModel && candidateModel.length <= 40)
         ? candidateModel.substring(0, 65)
         : 'Does Not Apply';
+    } else if (!modelVal && _structuredModel) {
+      modelVal = _structuredModel;
     }
 
     // Color — required for mugs, kitchenware
@@ -7593,6 +7601,10 @@ async function exportCSV(){
     }
     function _specForCol(col){ return _specByCol[col] || ''; }
 
+    // ── Type: precedencia: structured specifics → legacy detectType() ──
+    var _structuredType = _specForCol('C:Type');
+    typeVal = _structuredType ? _structuredType : detectType(String(it.category), it.title);
+
     var _rawUpc = String((it.upc || '')).replace(/[^0-9]/g, '');
     if (!_rawUpc && it.sku) {
       // SKU formato BRAND-UPC-Npk → sacar el bloque de dígitos más largo
@@ -7639,7 +7651,8 @@ async function exportCSV(){
     }
     var departmentVal = _specForCol('C:Department') || psExtractGenderDepartment(it.title);
 
-    lines.push([
+    // ── Test: CSV column alignment and precedence validation ──
+    var csvRow = [
       'Add',
       it.sku||'',
       _finalCat,
@@ -7694,7 +7707,26 @@ async function exportCSV(){
       _specForCol('C:When to Take'),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
-    ].map(q).join(','));
+    ];
+
+    // ── CSV Column Alignment Test: ensure row has same number of columns as header ──
+    if (csvRow.length !== HDR.length) {
+      console.warn('CSV alignment mismatch for SKU ' + (it.sku||'') + ': HDR=' + HDR.length + ' row=' + csvRow.length);
+    }
+
+    // ── CSV Precedence Test: verify Model and Type use correct sources ──
+    var csvModelCol = 19; // C:Model is at index 19 in row (0-indexed, counting from 'Add')
+    var csvTypeCol = 17;  // C:Type is at index 17 in row
+    var testModelVal = csvRow[csvModelCol];
+    var testTypeVal = csvRow[csvTypeCol];
+    if (_structuredModel && testModelVal !== _structuredModel) {
+      console.warn('Model precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredModel + ', got ' + testModelVal);
+    }
+    if (_structuredType && testTypeVal !== _structuredType) {
+      console.warn('Type precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredType + ', got ' + testTypeVal);
+    }
+
+    lines.push(csvRow.map(q).join(','));
   });
 
   var csv  = lines.join('\r\n');
