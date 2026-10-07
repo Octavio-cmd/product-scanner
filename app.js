@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v5';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v6';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -3121,7 +3121,7 @@ async function analyzeEbayUrl(urlStr){
     step = 'ebay_item';
     stat('Loading eBay item ' + itemId + '...');
     $('lp').textContent = 'Item: ' + itemId;
-    const itemRes = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
+    const itemRes = await fetch(SAVVY_API + '/ebay-item?item_id=' + encodeURIComponent(itemId));
     if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('res'); return; }
     const json = await itemRes.json();
     if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('res'); return; }
