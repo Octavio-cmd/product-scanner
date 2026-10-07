@@ -5659,6 +5659,21 @@ async function psGenerateSpecifics(){
   var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI);
   console.log('🔍 Pre-parsed specifics:', prefilled);
 
+  // PHASE 2: Build authoritative eBay aspect map from localizedAspects
+  // This enables protecting eBay-provided fields from Claude overrides
+  var ebayAspectMap = {};
+  if (cur.prod && cur.prod.aspects) {
+    var aspectsArray = Array.isArray(cur.prod.aspects) ? cur.prod.aspects : [];
+    for (var ai = 0; ai < aspectsArray.length; ai++) {
+      var asp = aspectsArray[ai];
+      if (asp && asp.name && asp.value) {
+        var aspNameNorm = String(asp.name).toLowerCase().trim();
+        ebayAspectMap[aspNameNorm] = asp.value;
+      }
+    }
+  }
+  console.log('🔷 eBay aspect map:', ebayAspectMap);
+
   // Lista de specifics que el CSV soporta (columnas comunes ampliadas).
   // Claude llena SOLO los que apliquen al producto; deja el resto fuera.
   var SUPPORTED = [
@@ -5719,14 +5734,46 @@ async function psGenerateSpecifics(){
       }
     }
     
-    // Luego agregar/sobreescribir con respuesta de Claude (excepto los que ya están en prefilled)
+    // Luego agregar/sobreescribir con respuesta de Claude (excepto los que ya están en prefilled o son eBay-provided)
     for(var k in parsed){
       if(!parsed.hasOwnProperty(k)) continue;
       if(prefilled.hasOwnProperty(k)) continue; // Skip si ya fue pre-parsed
+
+      // PHASE 2: Protect eBay-provided fields from Claude override
+      var kNorm = k.toLowerCase().trim();
+      if (ebayAspectMap.hasOwnProperty(kNorm)) {
+        continue; // Skip Claude value: eBay value is authoritative
+      }
+
+      // Special rule: reject Claude's Product Line if eBay didn't provide one
+      if (k === 'Product Line' && !ebayAspectMap['product line']) {
+        continue; // eBay didn't provide Product Line, reject Claude's attempt
+      }
+
       var val = String(parsed[k] == null ? '' : parsed[k]).trim();
       if(val && SUPPORTED.indexOf(k) !== -1){
         clean[k] = val.substring(0, 65); // eBay limita valores de specifics
         count++;
+      }
+    }
+
+    // PHASE 2: Restoration phase - restore eBay-provided values if not already in clean
+    for(var eBayNormKey in ebayAspectMap){
+      if(!ebayAspectMap.hasOwnProperty(eBayNormKey)) continue;
+      // Find the actual SUPPORTED field name that matches this eBay aspect
+      var found = false;
+      for(var i = 0; i < SUPPORTED.length; i++){
+        if(SUPPORTED[i].toLowerCase() === eBayNormKey){
+          if(!clean.hasOwnProperty(SUPPORTED[i])){
+            clean[SUPPORTED[i]] = String(ebayAspectMap[eBayNormKey]).substring(0, 65);
+          }
+          found = true;
+          break;
+        }
+      }
+      if(!found && eBayNormKey === 'type' && !clean['Type of Product']){
+        // Type alias: eBay "Type" maps to "Type of Product"
+        clean['Type of Product'] = String(ebayAspectMap[eBayNormKey]).substring(0, 65);
       }
     }
     // ── RESPALDO DETERMINÍSTICO: "Dosage" es OBLIGATORIO en eBay para
