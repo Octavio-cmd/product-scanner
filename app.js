@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-08-18c';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v1';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -134,7 +134,7 @@ let _keysLoaded = false;
 // La clave de Anthropic ya no llega al navegador: vive solo en el
 // backend. Aqui solo viaja un token de sesion firmado.
 // ══════════════════════════════════════════════════════════════
-const SAVVY_API = 'https://savvy-ebay-prices-production.up.railway.app';
+const SAVVY_API = 'https://savvy-ebay-prices-product-scanner-staging.up.railway.app';
 const SAVVY_MODELO = 'claude-haiku-4-5-20251001';
 
 // sessionStorage y no localStorage: los iPhone del almacen son compartidos,
