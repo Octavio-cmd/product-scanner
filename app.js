@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v4';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v5';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -5366,6 +5366,28 @@ function psStripDosageFromIngredient(val) {
   return String(val).replace(/\s*\d+\.?\d*\s?(mg|mcg|iu|ml|oz|g)\b\.?\s*$/i, '').trim();
 }
 
+// Normalize image URLs to HTTPS for Railway staging backend
+function psNormalizeImageUrl(url) {
+  var s = String(url || '').trim();
+  // Convert http:// to https:// for Railway staging image URLs
+  if (/^http:\/\/savvy-ebay-prices-product-scanner-staging\.up\.railway\.app\//i.test(s)) {
+    return s.replace(/^http:\/\//i, 'https://');
+  }
+  return s;
+}
+
+// Normalize multiple pipe-separated image URLs
+function psNormalizeImageUrls(urls) {
+  if (!urls) return '';
+  var s = String(urls).trim();
+  if (s.indexOf('|') >= 0) {
+    return s.split('|').map(function(url) {
+      return psNormalizeImageUrl(url.trim());
+    }).join('|');
+  }
+  return psNormalizeImageUrl(s);
+}
+
 // PHASE 4 FIX: Extract structured Model from product aspects (eBay data)
 function psExtractStructuredModel(prodAspects) {
   if (!prodAspects) return '';
@@ -7659,7 +7681,7 @@ async function exportCSV(){
       cleanTitle,
       '1000',
       psAppendLote(descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'), it),
-      pics,
+      psNormalizeImageUrls(pics),
       'FixedPrice','GTC',
       it.price||'9.99',
       String(it.quantity||1),'1',
