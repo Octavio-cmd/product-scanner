@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v1';
+window.PS_BUILD = '2026-10-07-converged-staging-preview-v2';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -1423,7 +1423,11 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
 // Sustituye a ImgBB como destino principal de las fotos. ImgBB tiene un
 // limite de subidas por hora que se comparte entre TODOS los usuarios y
 // tumbaba la bodega a media jornada. El bucket no tiene ese limite.
-var SAVVY_BUCKET_UPLOAD = 'https://savvy-ebay-prices-production.up.railway.app/img-upload';
+// Dynamically constructed from SAVVY_API (supports staging/production environments)
+var SAVVY_BUCKET_UPLOAD = null;
+(function() {
+  SAVVY_BUCKET_UPLOAD = SAVVY_API + '/img-upload';
+})();
 
 // Sube una data URL al bucket. Devuelve la URL publica permanente, o null
 // si algo falla (para que el llamador caiga a ImgBB).
@@ -3018,8 +3022,7 @@ async function _doAnalyze(upc){
     // Railway /search-upc cascades: eBay official API → Algopix → UPCitemdb → OpenFoodFacts
     step='railway_search';
     stat('Querying eBay via Railway...');
-    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
-    const rwRes = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
+    const rwRes = await fetch(SAVVY_API + '/search-upc?upc=' + encodeURIComponent(upc));
     let rwData = null;
     if (rwRes.ok) {
       const rwJson = await rwRes.json();
@@ -3074,7 +3077,6 @@ async function analyzeEbayUrl(urlStr){
   urlStr = urlStr.trim();
   showLoadingInline('Resolving eBay link...');
 
-  const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
   let itemId = null;
   let step = 'resolve_url';
 
@@ -3083,7 +3085,7 @@ async function analyzeEbayUrl(urlStr){
     if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//)) {
       try {
         stat('Resolving short link...');
-        const resolveRes = await fetch(RAILWAY_URL + '/resolve-url?url=' + encodeURIComponent(urlStr));
+        const resolveRes = await fetch(SAVVY_API + '/resolve-url?url=' + encodeURIComponent(urlStr));
         if (resolveRes.ok) {
           const resolveData = await resolveRes.json();
           if (resolveData.status === 'success' && resolveData.item_id) {
@@ -5364,7 +5366,71 @@ function psStripDosageFromIngredient(val) {
   return String(val).replace(/\s*\d+\.?\d*\s?(mg|mcg|iu|ml|oz|g)\b\.?\s*$/i, '').trim();
 }
 
-function psPreFillSpecifics(title, category, brand) {
+// PHASE 4 FIX: Extract structured Model from product aspects (eBay data)
+function psExtractStructuredModel(prodAspects) {
+  if (!prodAspects) return '';
+
+  var aspectsArray = Array.isArray(prodAspects)
+    ? prodAspects
+    : Object.keys(prodAspects).map(function(k) {
+        return { name: k, value: prodAspects[k] };
+      });
+
+  var modelAspectNames = ['Model', 'Model Number', 'Manufacturer Model Code', 'Model Code'];
+
+  for (var i = 0; i < aspectsArray.length; i++) {
+    var aspect = aspectsArray[i];
+    if (!aspect || !aspect.name || !aspect.value) continue;
+
+    var aspName = String(aspect.name).trim();
+    var aspValue = String(aspect.value).trim();
+    var aspNameNorm = aspName.toLowerCase();
+
+    for (var j = 0; j < modelAspectNames.length; j++) {
+      if (aspNameNorm === modelAspectNames[j].toLowerCase()) {
+        if (aspValue && aspValue !== '' && aspValue !== 'Does Not Apply') {
+          return aspValue;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+// PHASE 4 FIX: Extract structured Product Line from product aspects (eBay data)
+function psExtractStructuredProductLine(prodAspects) {
+  if (!prodAspects) return '';
+
+  var aspectsArray = Array.isArray(prodAspects)
+    ? prodAspects
+    : Object.keys(prodAspects).map(function(k) {
+        return { name: k, value: prodAspects[k] };
+      });
+
+  var lineAspectNames = ['Product Line', 'Product Family', 'Line', 'Collection'];
+
+  for (var i = 0; i < aspectsArray.length; i++) {
+    var aspect = aspectsArray[i];
+    if (!aspect || !aspect.name || !aspect.value) continue;
+
+    var aspName = String(aspect.name).trim();
+    var aspValue = String(aspect.value).trim();
+    var aspNameNorm = aspName.toLowerCase();
+
+    for (var j = 0; j < lineAspectNames.length; j++) {
+      if (aspNameNorm === lineAspectNames[j].toLowerCase()) {
+        if (aspValue && aspValue !== '') {
+          return aspValue;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+function psPreFillSpecifics(title, category, brand, prod) {
   var prefilled = {};
   
   var setInc = psParseSetIncludes(title);
@@ -5376,7 +5442,15 @@ function psPreFillSpecifics(title, category, brand) {
   
   var typeVal = psExtractTypeFromTitle(title, category, brand);
   if (typeVal) prefilled['Type'] = typeVal;
-  
+
+  // PHASE 4 FIX: Extract structured Model and Product Line from eBay aspects (before Claude)
+  var prodAspects = prod && prod.aspects ? prod.aspects : null;
+  var structuredModel = psExtractStructuredModel(prodAspects);
+  if (structuredModel) prefilled['Model'] = structuredModel;
+
+  var structuredProductLine = psExtractStructuredProductLine(prodAspects);
+  if (structuredProductLine) prefilled['Product Line'] = structuredProductLine;
+
   var flavor = psExtractFlavorFromTitle(title);
   if (flavor) {
     prefilled['Flavor'] = flavor;
@@ -5682,7 +5756,8 @@ async function psGenerateSpecifics(){
   var catForAI   = String(cur.category || '');
   
   // ✨ FASE 1: PRE-PARSE local fields sin APIs (Set Includes, Type, Flavor)
-  var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI);
+  // PHASE 4 FIX: Also pass cur.prod to extract structured Model/Product Line from eBay aspects
+  var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI, cur.prod);
   console.log('🔍 Pre-parsed specifics:', prefilled);
 
   // PHASE 2: Build authoritative eBay aspect map from localizedAspects
@@ -6688,7 +6763,7 @@ async function validateCategoriesWithEbay(items) {
     });
     if (!payload.length) return map;
 
-    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
+    var r = await fetch(SAVVY_API + '/leaf-category', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: payload })
@@ -7210,7 +7285,7 @@ async function exportCSV(){
   var _skusToCheck = bulk.map(function(it){ return it.sku || ''; }).filter(Boolean);
   var _existingSkus = {};
   try {
-    var _skuRes = await fetch('https://savvy-ebay-prices-production.up.railway.app/check-skus', {
+    var _skuRes = await fetch(SAVVY_API + '/check-skus', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skus: _skusToCheck })
