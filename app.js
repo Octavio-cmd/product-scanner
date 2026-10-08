@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v13';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v14';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -6612,6 +6612,10 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
+  // ── 3.2 CONDITION (PHASE 3 v13+) ─────────────────────────
+  // Dynamic row that shows state: resolving → loading → ready/error
+  h+=`<div class="card" id="condition-row"><div class="lbl">Condition</div><div class="val" style="color:var(--mu)">—</div></div>`;
+
   // ── 3.5 DESCRIPCIÓN eBay (generada automáticamente con Claude) ──────────────
   h+=`<div class="card" style="border-left:3px solid #7c4dff">
     <div class="lbl" style="color:#b388ff">📄 eBay Description</div>
@@ -6767,6 +6771,9 @@ function renderResult(r){
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
+
+  // Refresh condition display to show current state (resolving/loading/ready/error)
+  psRefreshConditionDisplay();
 
   const addB=$('addBtn');
   if(addB){
