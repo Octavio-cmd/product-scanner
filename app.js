@@ -2315,16 +2315,35 @@ async function psLoadCategoryConditions(finalCategoryId) {
       headers: { 'Authorization': 'Bearer ' + token }
     });
 
-    if (!response || response.status === 'error') {
-      cur._conditionError = response?.error || 'Unable to fetch conditions';
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      cur._conditionError = errorData.error || 'Unable to fetch conditions';
       console.error('[COND] Error: ' + cur._conditionError);
+      cur._conditionLoaded = true;
+      return;
+    }
+
+    const data = await response.json();
+
+    if (data.status === 'error') {
+      cur._conditionError = data.error || 'Unable to fetch conditions';
+      console.error('[COND] Error: ' + cur._conditionError);
+      cur._conditionLoaded = true;
+      return;
+    }
+
+    // Verify categoryId matches requested category (cache safety)
+    if (String(data.categoryId).trim() !== String(finalCategoryId).trim()) {
+      cur._conditionError = 'Category mismatch in response';
+      console.error('[COND] Category mismatch: requested ' + finalCategoryId + ', got ' + data.categoryId);
+      cur._conditionLoaded = true;
       return;
     }
 
     // Store conditions data
-    cur._conditionRequired = response.conditionRequired || false;
-    cur._availableConditions = response.conditions || [];
-    cur._conditionCategoryId = response.categoryId;
+    cur._conditionRequired = data.conditionRequired || false;
+    cur._availableConditions = data.conditions || [];
+    cur._conditionCategoryId = data.categoryId;
 
     console.log('[COND] Loaded ' + cur._availableConditions.length + ' conditions');
 
@@ -2345,17 +2364,26 @@ async function psLoadCategoryConditions(finalCategoryId) {
     }
 
     cur._conditionLoaded = true;
+    psRefreshConditionDisplay(); // Update UI after load
   } catch (err) {
     console.error('[COND] Error:', err);
     cur._conditionError = err.message || 'Fetch failed';
+    cur._conditionLoaded = true;
+    psRefreshConditionDisplay(); // Update UI with error state
   }
 }
 window.psLoadCategoryConditions = psLoadCategoryConditions;
 
-// Open condition wheel picker for an item
-function psOpenConditionWheel(itemIndex) {
-  const item = bulk[itemIndex];
-  if (!item) return;
+// Open condition wheel picker for CURRENT PRODUCT (before adding to bulk)
+function psOpenConditionWheelForCurrent() {
+  if (!cur || !cur._availableConditions || cur._availableConditions.length === 0) {
+    toast('❌ No conditions available for this category');
+    return;
+  }
+
+  const conditions = cur._availableConditions;
+  let tempSelectedId = cur._conditionId; // Temporary selection during scroll
+  let tempSelectedIndex = -1;
 
   // Create wheel picker overlay
   const overlay = document.createElement('div');
@@ -2367,13 +2395,26 @@ function psOpenConditionWheel(itemIndex) {
   // Header
   const header = document.createElement('div');
   header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--bd);background:var(--sf)';
-  header.innerHTML = '<button onclick="this.closest(\'[data-picker]\').remove()" style="background:none;border:none;color:var(--sv);font-size:14px;cursor:pointer">Cancel</button>'
-    + '<div style="font-weight:800;color:var(--sv)">Condition</div>'
-    + '<button onclick="document.querySelector(\'[data-picker-done]\').click()" style="background:none;border:none;color:var(--ac);font-size:14px;cursor:pointer;font-weight:800">Done</button>';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'background:none;border:none;color:var(--sv);font-size:14px;cursor:pointer;padding:4px';
+  cancelBtn.onclick = () => overlay.remove();
+
+  const titleDiv = document.createElement('div');
+  titleDiv.style.cssText = 'font-weight:800;color:var(--sv);font-size:16px';
+  titleDiv.textContent = 'Condition';
+
+  const doneBtn = document.createElement('button');
+  doneBtn.textContent = 'Done';
+  doneBtn.style.cssText = 'background:none;border:none;color:var(--ac);font-size:14px;cursor:pointer;font-weight:800;padding:4px';
+
+  header.appendChild(cancelBtn);
+  header.appendChild(titleDiv);
+  header.appendChild(doneBtn);
 
   // Wheel container
   const wheelContainer = document.createElement('div');
-  wheelContainer.style.cssText = 'flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column';
+  wheelContainer.style.cssText = 'flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;position:relative';
 
   // Add spacer top
   const spacerTop = document.createElement('div');
@@ -2381,28 +2422,24 @@ function psOpenConditionWheel(itemIndex) {
   wheelContainer.appendChild(spacerTop);
 
   // Add condition options
-  const conditions = item.availableConditions || [];
+  const options = [];
   conditions.forEach((cond, idx) => {
     const option = document.createElement('div');
     option.style.cssText = 'flex:0 0 var(--ch, 44px);display:flex;align-items:center;justify-content:center;'
-      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent';
+      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent;opacity:0.6;transition:opacity .2s,border-color .2s';
     option.textContent = cond.conditionDisplayName;
-    option.onclick = () => {
-      document.querySelectorAll('[data-picker-option]').forEach(o => o.style.opacity = '0.6');
+    option.setAttribute('data-cond-id', cond.conditionId);
+    option.setAttribute('data-idx', idx);
+
+    // Highlight if already selected
+    if (cur._conditionId === cond.conditionId) {
       option.style.opacity = '1';
       option.style.fontWeight = '800';
       option.style.borderColor = 'var(--ac)';
-      option.dataset.selected = cond.conditionId;
-    };
-    if (item.conditionId === cond.conditionId) {
-      option.style.opacity = '1';
-      option.style.fontWeight = '800';
-      option.style.borderColor = 'var(--ac)';
-      option.dataset.selected = cond.conditionId;
-    } else {
-      option.style.opacity = '0.6';
+      tempSelectedIndex = idx;
     }
-    option.setAttribute('data-picker-option', '');
+
+    options.push(option);
     wheelContainer.appendChild(option);
   });
 
@@ -2411,43 +2448,98 @@ function psOpenConditionWheel(itemIndex) {
   spacerBottom.style.height = 'calc(var(--ch, 44px) * 2)';
   wheelContainer.appendChild(spacerBottom);
 
-  // Done button (hidden, triggered via header)
-  const doneBtn = document.createElement('button');
-  doneBtn.setAttribute('data-picker-done', '');
-  doneBtn.style.display = 'none';
-  doneBtn.onclick = () => {
-    const selected = document.querySelector('[data-picker-option][data-selected]');
-    if (selected) {
-      const condId = selected.dataset.selected;
-      const cond = conditions.find(c => String(c.conditionId) === String(condId));
-      if (cond) {
-        item.conditionId = cond.conditionId;
-        item.conditionDisplayName = cond.conditionDisplayName;
+  // Center highlight band
+  const centerBand = document.createElement('div');
+  centerBand.style.cssText = 'position:absolute;top:50%;left:0;right:0;height:var(--ch, 44px);'
+    +'border-top:1px solid var(--ac);border-bottom:1px solid var(--ac);pointer-events:none;'
+    +'opacity:0.3;z-index:1;transform:translateY(-50%)';
+  wheelContainer.appendChild(centerBand);
+
+  // Track scroll to determine centered option
+  const updateCenteredOption = () => {
+    const containerRect = wheelContainer.getBoundingClientRect();
+    const containerCenter = containerRect.height / 2;
+
+    options.forEach((opt, idx) => {
+      const optRect = opt.getBoundingClientRect();
+      const optCenter = optRect.top + optRect.height / 2 - containerRect.top;
+      const distance = Math.abs(optCenter - containerCenter);
+
+      if (distance < 30) {
+        // This option is centered
+        tempSelectedIndex = idx;
+        tempSelectedId = conditions[idx].conditionId;
+        opt.style.opacity = '1';
+        opt.style.fontWeight = '800';
+        opt.style.borderColor = 'var(--ac)';
+      } else {
+        opt.style.opacity = '0.6';
+        opt.style.fontWeight = '400';
+        opt.style.borderColor = 'transparent';
       }
+    });
+  };
+
+  wheelContainer.addEventListener('scroll', updateCenteredOption, false);
+
+  // Done button handler
+  doneBtn.onclick = () => {
+    if (tempSelectedIndex >= 0 && tempSelectedIndex < conditions.length) {
+      const selected = conditions[tempSelectedIndex];
+      cur._conditionId = selected.conditionId;
+      cur._conditionDisplayName = selected.conditionDisplayName;
+      console.log('[COND] Selected: ' + cur._conditionDisplayName + ' (' + cur._conditionId + ')');
     }
     overlay.remove();
+    psRefreshConditionDisplay(); // Refresh the condition row
   };
 
   sheet.appendChild(header);
   sheet.appendChild(wheelContainer);
-  sheet.appendChild(doneBtn);
   overlay.appendChild(sheet);
   overlay.setAttribute('data-picker', '');
 
   document.body.appendChild(overlay);
 
-  // Scroll to current selection
-  const options = wheelContainer.querySelectorAll('[data-picker-option]');
-  if (item.conditionId && options.length > 0) {
-    const selectedIdx = conditions.findIndex(c => c.conditionId === item.conditionId);
-    if (selectedIdx >= 0) {
-      setTimeout(() => {
-        options[selectedIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      }, 100);
-    }
+  // Auto-scroll to current selection if exists
+  if (tempSelectedIndex >= 0) {
+    setTimeout(() => {
+      options[tempSelectedIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      updateCenteredOption();
+    }, 100);
   }
 }
-window.psOpenConditionWheel = psOpenConditionWheel;
+window.psOpenConditionWheelForCurrent = psOpenConditionWheelForCurrent;
+
+// Refresh condition display row
+function psRefreshConditionDisplay() {
+  const condRow = document.getElementById('condition-row');
+  if (!condRow) return;
+
+  if (!cur._conditionLoaded) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Loading conditions...</div>';
+  } else if (cur._conditionError) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw)">⚠ Unable to load conditions</div>'
+      + '<div style="font-size:12px;color:var(--mu);margin-top:4px;cursor:pointer" onclick="psRetryConditionLoad()">↻ Retry</div>';
+  } else if (cur._conditionRequired && !cur._conditionId) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + '⚠ Select condition (REQUIRED) ›</div>';
+  } else if (cur._conditionId) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + (cur._conditionDisplayName || 'Selected') + ' ›</div>';
+  } else {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + 'Select condition ›</div>';
+  }
+}
+window.psRefreshConditionDisplay = psRefreshConditionDisplay;
+
+function psRetryConditionLoad() {
+  if (cur && cur._conditionCategoryId) {
+    psLoadCategoryConditions(cur._conditionCategoryId);
+  }
+}
+window.psRetryConditionLoad = psRetryConditionLoad;
 
 // ── RECONSTRUIR TÍTULO CON TODOS LOS CAMPOS ──────────────────
 function rebuildAndApplyTitle(n) {
@@ -3468,6 +3560,10 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     _lastBundleUrl = '';
     try {
       renderResult(res);
+      // PHASE 3: Load conditions for final category
+      if (cur && cur.category) {
+        psLoadCategoryConditions(cur.category);
+      }
       screen('res');
     } catch(renderErr) {
       console.error('renderResult error:', renderErr);
@@ -3597,16 +3693,26 @@ async function addBulk() {
 
   // PHASE 3: Validar condición si es requerida
   if (cur._conditionRequired && !cur._conditionId) {
-    toast('❌ FALTA CONDITION - Campo obligatorio para esta categoría\n\nToca para seleccionar una condición.');
+    toast('❌ FALTA CONDITION - Campo obligatorio para esta categoría');
     var addBtn = document.getElementById('addBtn');
     if (addBtn) {
       addBtn.disabled = false;
       addBtn.textContent = '➕ ADD TO CSV';
       addBtn.style.background = '';
     }
-    // Auto-open condition wheel
-    if (cur._conditionWheelIndex !== undefined) {
-      setTimeout(() => psOpenConditionWheel(cur._conditionWheelIndex), 300);
+    // Auto-open condition wheel for current product
+    setTimeout(() => psOpenConditionWheelForCurrent(), 300);
+    return;
+  }
+
+  // Also block if condition metadata could not be loaded
+  if (!cur._conditionLoaded && cur._conditionError) {
+    toast('❌ Unable to load condition options. Retry and try again.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
     }
     return;
   }
