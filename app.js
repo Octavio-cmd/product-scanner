@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v16';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v17';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2446,15 +2446,31 @@ async function psLoadCategoryConditions(finalCategoryId) {
     if (cur._availableConditions.length === 1) {
       cur._conditionId = cur._availableConditions[0].conditionId;
       cur._conditionDisplayName = cur._availableConditions[0].conditionDisplayName;
-      console.log('[COND] Auto-selected: ' + cur._conditionDisplayName);
+      console.log('[COND] Auto-selected only option: ' + cur._conditionDisplayName);
     } else {
-      // If condition previously selected but no longer valid, clear it
+      // Multiple conditions available
+      // First, check if a previous selection is still valid
+      var previousStillValid = false;
       if (cur._conditionId) {
-        const stillValid = cur._availableConditions.find(c => c.conditionId === cur._conditionId);
-        if (!stillValid) {
-          console.log('[COND] Previous selection no longer valid in new category, clearing');
+        previousStillValid = cur._availableConditions.find(c => c.conditionId === cur._conditionId);
+      }
+
+      if (previousStillValid) {
+        // Keep the previously selected condition
+        console.log('[COND] Keeping previous selection: ' + cur._conditionDisplayName);
+      } else {
+        // Previous selection not valid or none exists
+        // Check if NEW (conditionId 1000) is available
+        var newCondition = cur._availableConditions.find(c => c.conditionId === 1000);
+        if (newCondition) {
+          cur._conditionId = newCondition.conditionId;
+          cur._conditionDisplayName = newCondition.conditionDisplayName;
+          console.log('[COND] Auto-selected NEW: ' + cur._conditionDisplayName);
+        } else {
+          // No NEW available, clear selection and let employee choose
           cur._conditionId = null;
           cur._conditionDisplayName = '';
+          console.log('[COND] No NEW condition available, requiring manual selection');
         }
       }
     }
