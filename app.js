@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v9';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v10';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2287,6 +2287,20 @@ function updateDateDisplay() {
   }
 }
 
+// ── PHASE 3: Shared Category Resolver ─────────────────────────────
+// Used by both condition loading and CSV export to ensure consistency
+function psResolveFinalCategory(item) {
+  if (!item) return '31786';
+  var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
+  var keyTrim = key.substring(0, 120);
+  return (
+    leafMap[key] ||
+    leafMap[keyTrim] ||
+    psSafeCategory(item.category, '31786')
+  );
+}
+window.psResolveFinalCategory = psResolveFinalCategory;
+
 // ── PHASE 3: eBay CONDITION WHEEL PICKER ──────────────────────────
 // Load conditions from backend /api/category-conditions endpoint
 async function psLoadCategoryConditions(finalCategoryId) {
@@ -2331,6 +2345,15 @@ async function psLoadCategoryConditions(finalCategoryId) {
     }
 
     const data = await response.json();
+
+    // [SAFETY] Check if this response is still relevant (user may have changed category)
+    if (
+      !cur ||
+      String(cur._conditionRequestedCategoryId) !== String(finalCategoryId)
+    ) {
+      console.warn('[COND] Stale response ignored for category ' + finalCategoryId);
+      return;
+    }
 
     if (data.status === 'error') {
       cur._conditionState = 'error';
@@ -2536,12 +2559,16 @@ function psRefreshConditionDisplay() {
   } else if (state === 'error') {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw)">⚠ Unable to load conditions</div>'
       + '<div style="font-size:12px;color:var(--mu);margin-top:4px;cursor:pointer" onclick="psRetryConditionLoad()">↻ Retry</div>';
+  } else if (state === 'not_required') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Not required for this category</div>';
   } else if (state === 'ready' && cur._conditionRequired && !cur._conditionId) {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
       + '⚠ Select condition (REQUIRED) ›</div>';
   } else if (state === 'ready' && cur._conditionId) {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
       + (cur._conditionDisplayName || 'Selected') + ' ›</div>';
+  } else if (state === 'idle' || !state) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">—</div>';
   } else {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
       + 'Select condition ›</div>';
@@ -3575,9 +3602,11 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     _lastBundleUrl = '';
     try {
       renderResult(res);
-      // PHASE 3: Load conditions for final category
-      if (cur && cur.category) {
-        psLoadCategoryConditions(cur.category);
+      // PHASE 3: Load conditions for final category (using same resolver as CSV export)
+      if (cur) {
+        var finalCatId = psResolveFinalCategory(cur);
+        cur._finalCategoryId = String(finalCatId);
+        psLoadCategoryConditions(finalCatId);
       }
       screen('res');
     } catch(renderErr) {
@@ -3706,8 +3735,32 @@ async function addBulk() {
     }
   }
 
-  // PHASE 3: Validar condición - state machine checks
+  // PHASE 3: Validar condición - state machine checks + category consistency
   const condState = cur._conditionState || 'idle';
+  const currentFinalCategory = psResolveFinalCategory(cur);
+
+  // [COND] Detect category change - reload conditions if final category changed
+  if (
+    cur._finalCategoryId &&
+    String(cur._finalCategoryId) !== String(currentFinalCategory)
+  ) {
+    console.log('[COND] Category changed from ' + cur._finalCategoryId + ' to ' + currentFinalCategory + ', reloading');
+    cur._finalCategoryId = String(currentFinalCategory);
+    psLoadCategoryConditions(currentFinalCategory);
+    // Don't block - loading will be shown
+  }
+
+  // [COND] Block if in idle state (conditions never loaded or cleared)
+  if (condState === 'idle') {
+    toast('❌ CONDICIÓN - Las opciones no están cargadas. Intenta nuevamente.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
 
   // [COND] Block if conditions are still loading
   if (condState === 'loading') {
@@ -4113,10 +4166,8 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     conditionId:        (cur && cur._conditionId) || null,
     conditionDisplayName: (cur && cur._conditionDisplayName) || '',
     conditionRequired:   (cur && cur._conditionRequired) || false,
-    availableConditions: (cur && cur._availableConditions) || [],
-    conditionCategoryId: (cur && cur._conditionCategoryId) || '',
-    conditionState:      (cur && cur._conditionState) || 'idle',
-    conditionError:      (cur && cur._conditionError) || ''
+    conditionCategoryId: (cur && cur._finalCategoryId) || '',
+    conditionState:      (cur && cur._conditionState) || 'idle'
   });
   saveBulkToStorage();
   updateFAB();
@@ -4617,10 +4668,8 @@ async function addSplitPacksToCSV(){
       conditionId:        (cur && cur._conditionId) || null,
       conditionDisplayName: (cur && cur._conditionDisplayName) || '',
       conditionRequired:   (cur && cur._conditionRequired) || false,
-      availableConditions: (cur && cur._availableConditions) || [],
-      conditionCategoryId: (cur && cur._conditionCategoryId) || '',
-      conditionState:      (cur && cur._conditionState) || 'idle',
-      conditionError:      (cur && cur._conditionError) || ''
+      conditionCategoryId: (cur && cur._finalCategoryId) || '',
+      conditionState:      (cur && cur._conditionState) || 'idle'
     });
     added++;
   }
@@ -7804,17 +7853,19 @@ async function exportCSV(){
 
   bulk.forEach(function(it) {
     // ── CATEGORÍA FINAL, CALCULADA AL PRINCIPIO DEL CICLO ──────────────────
-    // Antes esto se calculaba hasta abajo (justo antes de armar la fila), pero
-    // toda la lógica de item specifics de arriba usaba it.category — que es la
-    // categoría ADIVINADA localmente, no la que eBay asigna y que realmente
-    // viaja en el CSV. Por eso el Dosage no se llenaba: TUM-307667388107 salió
-    // en 75039 y NAT-074312014024 en 11776, pero la lógica estaba comparando
-    // contra otra categoría. Se calcula UNA vez aquí y se reutiliza en todo
-    // el ciclo. (Corregido 14 ago 2026 — misma clase de bug que la fecha de
-    // expiración.)
-    var _catKey     = String(it.category || '').trim() + '|' + String(it.title || '').trim();
-    var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
-    var _finalCat   = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
+    // Usa el mismo resolver que la carga de condiciones para garantizar coherencia
+    var _finalCat = psResolveFinalCategory(it);
+
+    // [SAFETY] PHASE 3: Verificar coherencia de categoría de condición
+    if (it.conditionState && it.conditionState !== 'idle' && it.conditionCategoryId) {
+      if (String(it.conditionCategoryId) !== String(_finalCat)) {
+        console.warn('[CSV] Condición fue cargada para categoría ' + it.conditionCategoryId + ' pero se exportará en ' + _finalCat);
+        console.warn('[CSV] SKU: ' + (it.sku || it.title));
+        skipped++;
+        toast('⚠️ ' + (it.sku || it.title || '?') + ' — categoría de condición no coincide, omitido');
+        return;
+      }
+    }
 
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
