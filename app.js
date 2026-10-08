@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v7';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v8';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2287,7 +2287,167 @@ function updateDateDisplay() {
   }
 }
 
+// ── PHASE 3: eBay CONDITION WHEEL PICKER ──────────────────────────
+// Load conditions from backend /api/category-conditions endpoint
+async function psLoadCategoryConditions(finalCategoryId) {
+  if (!cur || !finalCategoryId) return;
 
+  // Mark as loading
+  cur._conditionLoaded = false;
+  cur._conditionError = '';
+  cur._availableConditions = [];
+
+  try {
+    const token = savvyToken();
+    if (!token) {
+      cur._conditionError = 'No session';
+      console.error('[COND] No session token available');
+      return;
+    }
+
+    const SAVVY_API = (window.SAVVY_API || 'https://savvy-ebay-prices-product-scanner-staging.up.railway.app');
+    const url = SAVVY_API + '/api/category-conditions?category_id=' + encodeURIComponent(finalCategoryId);
+
+    console.log('[COND] Loading conditions for category: ' + finalCategoryId);
+
+    const response = await savvyLocationFetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+
+    if (!response || response.status === 'error') {
+      cur._conditionError = response?.error || 'Unable to fetch conditions';
+      console.error('[COND] Error: ' + cur._conditionError);
+      return;
+    }
+
+    // Store conditions data
+    cur._conditionRequired = response.conditionRequired || false;
+    cur._availableConditions = response.conditions || [];
+    cur._conditionCategoryId = response.categoryId;
+
+    console.log('[COND] Loaded ' + cur._availableConditions.length + ' conditions');
+
+    // Auto-select if only one option
+    if (cur._availableConditions.length === 1) {
+      cur._conditionId = cur._availableConditions[0].conditionId;
+      cur._conditionDisplayName = cur._availableConditions[0].conditionDisplayName;
+      console.log('[COND] Auto-selected: ' + cur._conditionDisplayName);
+    } else {
+      // If condition previously selected but no longer valid, clear it
+      if (cur._conditionId) {
+        const stillValid = cur._availableConditions.find(c => c.conditionId === cur._conditionId);
+        if (!stillValid) {
+          cur._conditionId = null;
+          cur._conditionDisplayName = '';
+        }
+      }
+    }
+
+    cur._conditionLoaded = true;
+  } catch (err) {
+    console.error('[COND] Error:', err);
+    cur._conditionError = err.message || 'Fetch failed';
+  }
+}
+window.psLoadCategoryConditions = psLoadCategoryConditions;
+
+// Open condition wheel picker for an item
+function psOpenConditionWheel(itemIndex) {
+  const item = bulk[itemIndex];
+  if (!item) return;
+
+  // Create wheel picker overlay
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;flex-direction:column;justify-content:flex-end';
+
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'background:var(--bg);border-radius:16px 16px 0 0;overflow:hidden;max-height:80vh;display:flex;flex-direction:column';
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--bd);background:var(--sf)';
+  header.innerHTML = '<button onclick="this.closest(\'[data-picker]\').remove()" style="background:none;border:none;color:var(--sv);font-size:14px;cursor:pointer">Cancel</button>'
+    + '<div style="font-weight:800;color:var(--sv)">Condition</div>'
+    + '<button onclick="document.querySelector(\'[data-picker-done]\').click()" style="background:none;border:none;color:var(--ac);font-size:14px;cursor:pointer;font-weight:800">Done</button>';
+
+  // Wheel container
+  const wheelContainer = document.createElement('div');
+  wheelContainer.style.cssText = 'flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column';
+
+  // Add spacer top
+  const spacerTop = document.createElement('div');
+  spacerTop.style.height = 'calc(var(--ch, 44px) * 2)';
+  wheelContainer.appendChild(spacerTop);
+
+  // Add condition options
+  const conditions = item.availableConditions || [];
+  conditions.forEach((cond, idx) => {
+    const option = document.createElement('div');
+    option.style.cssText = 'flex:0 0 var(--ch, 44px);display:flex;align-items:center;justify-content:center;'
+      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent';
+    option.textContent = cond.conditionDisplayName;
+    option.onclick = () => {
+      document.querySelectorAll('[data-picker-option]').forEach(o => o.style.opacity = '0.6');
+      option.style.opacity = '1';
+      option.style.fontWeight = '800';
+      option.style.borderColor = 'var(--ac)';
+      option.dataset.selected = cond.conditionId;
+    };
+    if (item.conditionId === cond.conditionId) {
+      option.style.opacity = '1';
+      option.style.fontWeight = '800';
+      option.style.borderColor = 'var(--ac)';
+      option.dataset.selected = cond.conditionId;
+    } else {
+      option.style.opacity = '0.6';
+    }
+    option.setAttribute('data-picker-option', '');
+    wheelContainer.appendChild(option);
+  });
+
+  // Add spacer bottom
+  const spacerBottom = document.createElement('div');
+  spacerBottom.style.height = 'calc(var(--ch, 44px) * 2)';
+  wheelContainer.appendChild(spacerBottom);
+
+  // Done button (hidden, triggered via header)
+  const doneBtn = document.createElement('button');
+  doneBtn.setAttribute('data-picker-done', '');
+  doneBtn.style.display = 'none';
+  doneBtn.onclick = () => {
+    const selected = document.querySelector('[data-picker-option][data-selected]');
+    if (selected) {
+      const condId = selected.dataset.selected;
+      const cond = conditions.find(c => String(c.conditionId) === String(condId));
+      if (cond) {
+        item.conditionId = cond.conditionId;
+        item.conditionDisplayName = cond.conditionDisplayName;
+      }
+    }
+    overlay.remove();
+  };
+
+  sheet.appendChild(header);
+  sheet.appendChild(wheelContainer);
+  sheet.appendChild(doneBtn);
+  overlay.appendChild(sheet);
+  overlay.setAttribute('data-picker', '');
+
+  document.body.appendChild(overlay);
+
+  // Scroll to current selection
+  const options = wheelContainer.querySelectorAll('[data-picker-option]');
+  if (item.conditionId && options.length > 0) {
+    const selectedIdx = conditions.findIndex(c => c.conditionId === item.conditionId);
+    if (selectedIdx >= 0) {
+      setTimeout(() => {
+        options[selectedIdx].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      }, 100);
+    }
+  }
+}
+window.psOpenConditionWheel = psOpenConditionWheel;
 
 // ── RECONSTRUIR TÍTULO CON TODOS LOS CAMPOS ──────────────────
 function rebuildAndApplyTitle(n) {
@@ -3435,6 +3595,22 @@ async function addBulk() {
     }
   }
 
+  // PHASE 3: Validar condición si es requerida
+  if (cur._conditionRequired && !cur._conditionId) {
+    toast('❌ FALTA CONDITION - Campo obligatorio para esta categoría\n\nToca para seleccionar una condición.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    // Auto-open condition wheel
+    if (cur._conditionWheelIndex !== undefined) {
+      setTimeout(() => psOpenConditionWheel(cur._conditionWheelIndex), 300);
+    }
+    return;
+  }
+
   toast('🟢 Agregando al CSV...');
 
   // TIMEOUT GLOBAL de 45 segundos — si tarda más, restaurar botón y avisar
@@ -3796,7 +3972,15 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     photo:       photoUrl,
     bundleImg:   photoUrl,
     _specifics:  (cur && cur._specifics) || {},
-    scannedBy:   SAVVY_CURRENT_USER || 'unknown'
+    scannedBy:   SAVVY_CURRENT_USER || 'unknown',
+    // PHASE 3: eBay Condition System (inherit from cur)
+    conditionId:        (cur && cur._conditionId) || null,
+    conditionDisplayName: (cur && cur._conditionDisplayName) || '',
+    conditionRequired:   (cur && cur._conditionRequired) || false,
+    availableConditions: (cur && cur._availableConditions) || [],
+    conditionCategoryId: (cur && cur._conditionCategoryId) || '',
+    conditionLoaded:     (cur && cur._conditionLoaded) || false,
+    conditionError:      (cur && cur._conditionError) || ''
   });
   saveBulkToStorage();
   updateFAB();
@@ -4292,7 +4476,15 @@ async function addSplitPacksToCSV(){
       weightMajor: _wMajor,
       weightMinor: _wMinor,
       truck:       window._truckNumber || '',
-      scannedBy:   SAVVY_CURRENT_USER || 'unknown'
+      scannedBy:   SAVVY_CURRENT_USER || 'unknown',
+      // PHASE 3: eBay Condition System (inherit from cur)
+      conditionId:        (cur && cur._conditionId) || null,
+      conditionDisplayName: (cur && cur._conditionDisplayName) || '',
+      conditionRequired:   (cur && cur._conditionRequired) || false,
+      availableConditions: (cur && cur._availableConditions) || [],
+      conditionCategoryId: (cur && cur._conditionCategoryId) || '',
+      conditionLoaded:     (cur && cur._conditionLoaded) || false,
+      conditionError:      (cur && cur._conditionError) || ''
     });
     added++;
   }
@@ -7692,7 +7884,7 @@ async function exportCSV(){
       it.sku||'',
       _finalCat,
       cleanTitle,
-      '1000',
+      it.conditionId ? String(it.conditionId) : '',
       psAppendLote(descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'), it),
       psNormalizeImageUrls(pics),
       'FixedPrice','GTC',
