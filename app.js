@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v12';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v13';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2309,6 +2309,46 @@ function psResolveFinalCategory(item) {
 }
 window.psResolveFinalCategory = psResolveFinalCategory;
 
+// ── PHASE 3: ASYNC Leaf Category Resolver for Condition Lookup ──────
+// Resolve REAL eBay leaf category (not provisional) BEFORE loading conditions
+// Uses same validateCategoriesWithEbay() backend as CSV export
+async function psResolveFinalCategoryForCurrent(item) {
+  if (!item) {
+    throw new Error('No current item');
+  }
+
+  var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
+  var keyTrim = key.substring(0, 120);
+
+  // [OPTIMIZATION] Check shared cache first (may have previous results)
+  var cached = window._psLeafCategoryMap[key] || window._psLeafCategoryMap[keyTrim];
+  if (cached) {
+    console.log('[CAT] Using cached leaf category: ' + cached);
+    return String(cached);
+  }
+
+  // [REQUIRED] Validate current item's category with eBay backend
+  console.log('[CAT] Resolving real leaf category for: ' + item.title + ' (provisional: ' + item.category + ')');
+  var resultMap = await validateCategoriesWithEbay([item]);
+
+  if (resultMap && Object.keys(resultMap).length) {
+    // Merge into global cache for future operations
+    Object.assign(window._psLeafCategoryMap, resultMap);
+
+    var resolved = resultMap[key] || resultMap[keyTrim];
+    if (resolved) {
+      console.log('[CAT] Resolved real leaf category: ' + resolved + ' (was provisional: ' + item.category + ')');
+      return String(resolved);
+    }
+  }
+
+  // If eBay validation fails, throw error (don't fallback silently)
+  throw new Error(
+    'eBay category validation failed - unable to resolve condition category for condition lookup'
+  );
+}
+window.psResolveFinalCategoryForCurrent = psResolveFinalCategoryForCurrent;
+
 // ── PHASE 3: eBay CONDITION WHEEL PICKER ──────────────────────────
 // Load conditions from backend /api/category-conditions endpoint
 async function psLoadCategoryConditions(finalCategoryId) {
@@ -2574,10 +2614,12 @@ function psRefreshConditionDisplay() {
   const condRow = document.getElementById('condition-row');
   if (!condRow) return;
 
-  // [COND] State machine: idle | loading | ready | error | not_required
+  // [COND] State machine: idle | resolving | loading | ready | error | not_required
   const state = cur._conditionState || 'idle';
 
-  if (state === 'loading') {
+  if (state === 'resolving') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Resolving category...</div>';
+  } else if (state === 'loading') {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Loading conditions...</div>';
   } else if (state === 'error') {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw)">⚠ Unable to load conditions</div>'
@@ -3625,11 +3667,43 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     _lastBundleUrl = '';
     try {
       renderResult(res);
-      // PHASE 3: Load conditions for final category (using same resolver as CSV export)
+      // PHASE 3: Resolve real eBay leaf category BEFORE loading conditions
+      // This ensures condition metadata is fetched for the correct validated category
       if (cur) {
-        var finalCatId = psResolveFinalCategory(cur);
-        cur._finalCategoryId = String(finalCatId);
-        psLoadCategoryConditions(finalCatId);
+        var startCur = cur;
+
+        // Show "Resolving category..." while eBay validation runs
+        startCur._conditionState = 'resolving';
+        startCur._conditionError = '';
+        psRefreshConditionDisplay();
+
+        try {
+          // Async validation with eBay backend - this is REQUIRED, not optional
+          var finalCatId = await psResolveFinalCategoryForCurrent(startCur);
+
+          // [SAFETY] Check if product was swapped during async operation
+          if (cur !== startCur) {
+            console.log('[CAT] Product changed during category resolution, skipping condition load');
+            return;
+          }
+
+          // Store resolved category for CSV consistency checks
+          startCur._finalCategoryId = String(finalCatId);
+
+          // Now load conditions for the validated category
+          await psLoadCategoryConditions(finalCatId);
+        } catch (catErr) {
+          // [SAFETY] Check if product was swapped during error
+          if (cur !== startCur) {
+            console.log('[CAT] Product changed during error handling, skipping error state');
+            return;
+          }
+
+          console.error('[CAT] Category resolution failed:', catErr.message);
+          cur._conditionState = 'error';
+          cur._conditionError = catErr.message || 'Unable to resolve eBay category for conditions';
+          psRefreshConditionDisplay();
+        }
       }
       screen('res');
     } catch(renderErr) {
@@ -3783,6 +3857,30 @@ async function addBulk() {
 
   // [SAFETY] NOW safe to read current condition state (after category validated)
   const condState = cur._conditionState || 'idle';
+
+  // [COND] Block if category resolution is still in progress
+  if (condState === 'resolving') {
+    toast('❌ CONDICIÓN - Todavía se está resolviendo la categoría. Espera un momento...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if category resolution FAILED
+  if (condState === 'error' && !cur._finalCategoryId) {
+    toast('❌ CONDICIÓN - No se pudo resolver la categoría de eBay. Toca ↻ Retry.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
 
   // [COND] Block if in idle state (conditions never loaded or cleared)
   if (condState === 'idle') {
@@ -7889,21 +7987,43 @@ async function exportCSV(){
     return;
   }
 
+  // [SAFETY] PHASE 3 v13: Check for category mismatches BEFORE export
+  // If conditions were loaded for a different category than final CSV category, BLOCK entire export
+  var _catMismatches = bulk.filter(function(it) {
+    if (!it.conditionCategoryId) return false; // Not validated yet, will be shown as 'idle' error above
+
+    var _finalCat = psResolveFinalCategory(it);
+    return String(it.conditionCategoryId) !== String(_finalCat);
+  });
+
+  if (_catMismatches.length) {
+    var _catMismatchList = _catMismatches.map(function(it) {
+      var _finalCat = psResolveFinalCategory(it);
+      return '• ' + (it.sku || it.title || '?') +
+             ' (condición para ' + it.conditionCategoryId +
+             ', pero CSV exportará ' + _finalCat + ')';
+    }).join('\n');
+
+    window._exportLock = false;
+    if (expBtnEl) {
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }
+    alert(
+      '🚫 EXPORT DETENIDO\n\n' + _catMismatches.length + ' producto(s) con MISMATCH de categoría de condición:\n\n' +
+      _catMismatchList +
+      '\n\nLa condición fue cargada para una categoría diferente de la que se va a exportar.\n\n' +
+      'Abre cada producto, deja que resuelva la categoría de eBay, y selecciona una condición para la categoría correcta. Después exporta otra vez.'
+    );
+    toast('🚫 Export detenido — ' + _catMismatches.length + ' producto(s) con mismatch de categoría');
+    return;
+  }
+
   bulk.forEach(function(it) {
     // ── CATEGORÍA FINAL, CALCULADA AL PRINCIPIO DEL CICLO ──────────────────
     // Usa el mismo resolver que la carga de condiciones para garantizar coherencia
     var _finalCat = psResolveFinalCategory(it);
-
-    // [SAFETY] PHASE 3: Verificar coherencia de categoría de condición
-    if (it.conditionState && it.conditionState !== 'idle' && it.conditionCategoryId) {
-      if (String(it.conditionCategoryId) !== String(_finalCat)) {
-        console.warn('[CSV] Condición fue cargada para categoría ' + it.conditionCategoryId + ' pero se exportará en ' + _finalCat);
-        console.warn('[CSV] SKU: ' + (it.sku || it.title));
-        skipped++;
-        toast('⚠️ ' + (it.sku || it.title || '?') + ' — categoría de condición no coincide, omitido');
-        return;
-      }
-    }
 
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
