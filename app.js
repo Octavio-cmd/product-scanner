@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v11';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v12';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2289,13 +2289,21 @@ function updateDateDisplay() {
 
 // ── PHASE 3: Shared Category Resolver ─────────────────────────────
 // Used by both condition loading and CSV export to ensure consistency
+// ── PHASE 3: Shared Leaf Category Cache ──────────────────────────
+// Global cache for validated eBay leaf categories (populated by exportCSV validation)
+window._psLeafCategoryMap = window._psLeafCategoryMap || {};
+
+// Resolve final leaf category using shared validated cache
 function psResolveFinalCategory(item) {
   if (!item) return '31786';
+
+  var map = window._psLeafCategoryMap || {};
   var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
   var keyTrim = key.substring(0, 120);
+
   return (
-    leafMap[key] ||
-    leafMap[keyTrim] ||
+    map[key] ||
+    map[keyTrim] ||
     psSafeCategory(item.category, '31786')
   );
 }
@@ -7768,6 +7776,10 @@ async function exportCSV(){
   toast('🏷️ Build ' + (window.PS_BUILD || '?') + ' — generando CSV');
   toast('🔎 Validando categorías con eBay...');
   var leafMap = await validateCategoriesWithEbay(bulk);
+
+  // [SAFETY] Merge validated leaf categories into shared global cache
+  // This allows psResolveFinalCategory() to use validated mappings for future operations
+  Object.assign(window._psLeafCategoryMap, leafMap);
 
   // ── MISMA CATEGORÍA PARA TODOS LOS PAQUETES DEL MISMO PRODUCTO ──────────
   // 17 ago 2026: SAN-197638007751-1pk salió en categoría 82597 y su hermano
