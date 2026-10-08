@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v10';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v11';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2306,6 +2306,9 @@ window.psResolveFinalCategory = psResolveFinalCategory;
 async function psLoadCategoryConditions(finalCategoryId) {
   if (!cur || !finalCategoryId) return;
 
+  // [SAFETY] Capture object identity to prevent mutations after product swap
+  var startCur = cur;
+
   // Store requested category for retry
   cur._conditionRequestedCategoryId = String(finalCategoryId).trim();
 
@@ -2346,6 +2349,12 @@ async function psLoadCategoryConditions(finalCategoryId) {
 
     const data = await response.json();
 
+    // [SAFETY] Check if product was changed while fetch was in flight
+    if (cur !== startCur) {
+      console.warn('[COND] Product changed during fetch, ignoring response for category ' + finalCategoryId);
+      return;
+    }
+
     // [SAFETY] Check if this response is still relevant (user may have changed category)
     if (
       !cur ||
@@ -2369,6 +2378,12 @@ async function psLoadCategoryConditions(finalCategoryId) {
       cur._conditionError = 'Category mismatch: requested ' + finalCategoryId + ', got ' + data.categoryId;
       console.error('[COND] ' + cur._conditionError);
       psRefreshConditionDisplay();
+      return;
+    }
+
+    // [SAFETY] Final identity check before storing data
+    if (cur !== startCur) {
+      console.warn('[COND] Product changed before storing condition data, discarding response');
       return;
     }
 
@@ -3735,20 +3750,31 @@ async function addBulk() {
     }
   }
 
-  // PHASE 3: Validar condición - state machine checks + category consistency
-  const condState = cur._conditionState || 'idle';
+  // PHASE 3: Validar condición - category consistency FIRST
   const currentFinalCategory = psResolveFinalCategory(cur);
 
-  // [COND] Detect category change - reload conditions if final category changed
+  // [SAFETY] Detect category change - MUST BLOCK ADD immediately
+  // Do not snapshot condState before checking category
   if (
-    cur._finalCategoryId &&
-    String(cur._finalCategoryId) !== String(currentFinalCategory)
+    !cur._finalCategoryId ||
+    String(cur._finalCategoryId) !== String(currentFinalCategory) ||
+    String(cur._conditionRequestedCategoryId || '') !== String(currentFinalCategory)
   ) {
-    console.log('[COND] Category changed from ' + cur._finalCategoryId + ' to ' + currentFinalCategory + ', reloading');
+    console.log('[COND] Category requires condition reload: ' + (cur._finalCategoryId || 'none') + ' -> ' + currentFinalCategory);
     cur._finalCategoryId = String(currentFinalCategory);
     psLoadCategoryConditions(currentFinalCategory);
-    // Don't block - loading will be shown
+    toast('⏳ Cargando condiciones para la categoría correcta...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;  // BLOCK - must wait for reload
   }
+
+  // [SAFETY] NOW safe to read current condition state (after category validated)
+  const condState = cur._conditionState || 'idle';
 
   // [COND] Block if in idle state (conditions never loaded or cleared)
   if (condState === 'idle') {
@@ -4166,7 +4192,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     conditionId:        (cur && cur._conditionId) || null,
     conditionDisplayName: (cur && cur._conditionDisplayName) || '',
     conditionRequired:   (cur && cur._conditionRequired) || false,
-    conditionCategoryId: (cur && cur._finalCategoryId) || '',
+    conditionCategoryId: (cur && cur._conditionCategoryId) || '',
     conditionState:      (cur && cur._conditionState) || 'idle'
   });
   saveBulkToStorage();
@@ -4668,7 +4694,7 @@ async function addSplitPacksToCSV(){
       conditionId:        (cur && cur._conditionId) || null,
       conditionDisplayName: (cur && cur._conditionDisplayName) || '',
       conditionRequired:   (cur && cur._conditionRequired) || false,
-      conditionCategoryId: (cur && cur._finalCategoryId) || '',
+      conditionCategoryId: (cur && cur._conditionCategoryId) || '',
       conditionState:      (cur && cur._conditionState) || 'idle'
     });
     added++;
