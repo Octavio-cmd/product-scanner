@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-08-18c';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v17';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -134,7 +134,7 @@ let _keysLoaded = false;
 // La clave de Anthropic ya no llega al navegador: vive solo en el
 // backend. Aqui solo viaja un token de sesion firmado.
 // ══════════════════════════════════════════════════════════════
-const SAVVY_API = 'https://savvy-ebay-prices-production.up.railway.app';
+const SAVVY_API = 'https://savvy-ebay-prices-product-scanner-staging.up.railway.app';
 const SAVVY_MODELO = 'claude-haiku-4-5-20251001';
 
 // sessionStorage y no localStorage: los iPhone del almacen son compartidos,
@@ -1423,7 +1423,11 @@ async function _compressForImgBB(dataUrl, maxSizeKB) {
 // Sustituye a ImgBB como destino principal de las fotos. ImgBB tiene un
 // limite de subidas por hora que se comparte entre TODOS los usuarios y
 // tumbaba la bodega a media jornada. El bucket no tiene ese limite.
-var SAVVY_BUCKET_UPLOAD = 'https://savvy-ebay-prices-production.up.railway.app/img-upload';
+// Dynamically constructed from SAVVY_API (supports staging/production environments)
+var SAVVY_BUCKET_UPLOAD = null;
+(function() {
+  SAVVY_BUCKET_UPLOAD = SAVVY_API + '/img-upload';
+})();
 
 // Sube una data URL al bucket. Devuelve la URL publica permanente, o null
 // si algo falla (para que el llamador caiga a ImgBB).
@@ -2283,7 +2287,444 @@ function updateDateDisplay() {
   }
 }
 
+// ── PHASE 3: Shared Category Resolver ─────────────────────────────
+// Used by both condition loading and CSV export to ensure consistency
+// ── PHASE 3: Shared Leaf Category Cache ──────────────────────────
+// Global cache for validated eBay leaf categories (populated by exportCSV validation)
+window._psLeafCategoryMap = window._psLeafCategoryMap || {};
 
+// Resolve final leaf category using shared validated cache
+function psResolveFinalCategory(item) {
+  if (!item) return '31786';
+
+  var map = window._psLeafCategoryMap || {};
+  var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
+  var keyTrim = key.substring(0, 120);
+
+  return (
+    map[key] ||
+    map[keyTrim] ||
+    psSafeCategory(item.category, '31786')
+  );
+}
+window.psResolveFinalCategory = psResolveFinalCategory;
+
+// ── PHASE 3: ASYNC Leaf Category Resolver for Condition Lookup ──────
+// Resolve REAL eBay leaf category (not provisional) BEFORE loading conditions
+// Uses same validateCategoriesWithEbay() backend as CSV export
+async function psResolveFinalCategoryForCurrent(item) {
+  if (!item) {
+    throw new Error('No current item');
+  }
+
+  var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
+  var keyTrim = key.substring(0, 120);
+
+  // [OPTIMIZATION] Check shared cache first (may have previous results)
+  var cached = window._psLeafCategoryMap[key] || window._psLeafCategoryMap[keyTrim];
+  if (cached) {
+    console.log('[CAT] Using cached leaf category: ' + cached);
+    return String(cached);
+  }
+
+  // [REQUIRED] Validate current item's category with eBay backend
+  console.log('[CAT] Resolving real leaf category for: ' + item.title + ' (provisional: ' + item.category + ')');
+  var resultMap = await validateCategoriesWithEbay([item]);
+
+  if (resultMap && Object.keys(resultMap).length) {
+    // Merge into global cache for future operations
+    Object.assign(window._psLeafCategoryMap, resultMap);
+
+    var resolved = resultMap[key] || resultMap[keyTrim];
+    if (resolved) {
+      console.log('[CAT] Resolved real leaf category: ' + resolved + ' (was provisional: ' + item.category + ')');
+      return String(resolved);
+    }
+  }
+
+  // If eBay validation fails, throw error (don't fallback silently)
+  throw new Error(
+    'eBay category validation failed - unable to resolve condition category for condition lookup'
+  );
+}
+window.psResolveFinalCategoryForCurrent = psResolveFinalCategoryForCurrent;
+
+// ── PHASE 3: eBay CONDITION WHEEL PICKER ──────────────────────────
+// Load conditions from backend /api/category-conditions endpoint
+async function psLoadCategoryConditions(finalCategoryId) {
+  if (!cur || !finalCategoryId) return;
+
+  // [SAFETY] Capture object identity to prevent mutations after product swap
+  var startCur = cur;
+
+  // Store requested category for retry
+  cur._conditionRequestedCategoryId = String(finalCategoryId).trim();
+
+  // Mark as loading (state machine)
+  cur._conditionState = 'loading';
+  cur._conditionError = '';
+  cur._availableConditions = [];
+  psRefreshConditionDisplay(); // Show loading state immediately
+
+  try {
+    const token = savvyToken();
+    if (!token) {
+      cur._conditionState = 'error';
+      cur._conditionError = 'No session token available';
+      console.error('[COND] ' + cur._conditionError);
+      psRefreshConditionDisplay();
+      return;
+    }
+
+    const SAVVY_API = (window.SAVVY_API || 'https://savvy-ebay-prices-product-scanner-staging.up.railway.app');
+    const url = SAVVY_API + '/api/category-conditions?category_id=' + encodeURIComponent(finalCategoryId);
+
+    console.log('[COND] Loading conditions for category: ' + finalCategoryId);
+
+    const response = await savvyLocationFetch(url, {
+      method: 'GET',
+      headers: { 'Authorization': 'Bearer ' + token }
+    });
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      cur._conditionState = 'error';
+      cur._conditionError = errorData.error || ('HTTP ' + response.status);
+      console.error('[COND] HTTP Error: ' + cur._conditionError);
+      psRefreshConditionDisplay();
+      return;
+    }
+
+    const data = await response.json();
+
+    // [SAFETY] Check if product was changed while fetch was in flight
+    if (cur !== startCur) {
+      console.warn('[COND] Product changed during fetch, ignoring response for category ' + finalCategoryId);
+      return;
+    }
+
+    // [SAFETY] Check if this response is still relevant (user may have changed category)
+    if (
+      !cur ||
+      String(cur._conditionRequestedCategoryId) !== String(finalCategoryId)
+    ) {
+      console.warn('[COND] Stale response ignored for category ' + finalCategoryId);
+      return;
+    }
+
+    if (data.status === 'error') {
+      cur._conditionState = 'error';
+      cur._conditionError = data.error || 'API error';
+      console.error('[COND] API Error: ' + cur._conditionError);
+      psRefreshConditionDisplay();
+      return;
+    }
+
+    // Verify categoryId matches requested category (cache safety)
+    if (String(data.categoryId).trim() !== String(finalCategoryId).trim()) {
+      cur._conditionState = 'error';
+      cur._conditionError = 'Category mismatch: requested ' + finalCategoryId + ', got ' + data.categoryId;
+      console.error('[COND] ' + cur._conditionError);
+      psRefreshConditionDisplay();
+      return;
+    }
+
+    // [SAFETY] Final identity check before storing data
+    if (cur !== startCur) {
+      console.warn('[COND] Product changed before storing condition data, discarding response');
+      return;
+    }
+
+    // Store conditions data
+    cur._conditionRequired = data.conditionRequired || false;
+    cur._availableConditions = data.conditions || [];
+    cur._conditionCategoryId = data.categoryId;
+
+    console.log('[COND] Loaded ' + cur._availableConditions.length + ' conditions');
+
+    // Auto-select if only one option
+    if (cur._availableConditions.length === 1) {
+      cur._conditionId = cur._availableConditions[0].conditionId;
+      cur._conditionDisplayName = cur._availableConditions[0].conditionDisplayName;
+      console.log('[COND] Auto-selected only option: ' + cur._conditionDisplayName);
+    } else {
+      // Multiple conditions available
+      // First, check if a previous selection is still valid
+      var previousStillValid = false;
+      if (cur._conditionId) {
+        previousStillValid = cur._availableConditions.find(c => c.conditionId === cur._conditionId);
+      }
+
+      if (previousStillValid) {
+        // Keep the previously selected condition
+        console.log('[COND] Keeping previous selection: ' + cur._conditionDisplayName);
+      } else {
+        // Previous selection not valid or none exists
+        // Check if NEW (conditionId 1000) is available
+        var newCondition = cur._availableConditions.find(c => c.conditionId === 1000);
+        if (newCondition) {
+          cur._conditionId = newCondition.conditionId;
+          cur._conditionDisplayName = newCondition.conditionDisplayName;
+          console.log('[COND] Auto-selected NEW: ' + cur._conditionDisplayName);
+        } else {
+          // No NEW available, clear selection and let employee choose
+          cur._conditionId = null;
+          cur._conditionDisplayName = '';
+          console.log('[COND] No NEW condition available, requiring manual selection');
+        }
+      }
+    }
+
+    // Set final state based on whether condition is required
+    cur._conditionState = cur._conditionRequired ? 'ready' : 'not_required';
+    cur._conditionError = '';
+    psRefreshConditionDisplay(); // Update UI after load
+  } catch (err) {
+    console.error('[COND] Fetch error:', err);
+    cur._conditionState = 'error';
+    cur._conditionError = err.message || 'Network error';
+    psRefreshConditionDisplay(); // Update UI with error state
+  }
+}
+window.psLoadCategoryConditions = psLoadCategoryConditions;
+
+// Open condition wheel picker for CURRENT PRODUCT (before adding to bulk)
+function psOpenConditionWheelForCurrent() {
+  if (!cur || !cur._availableConditions || cur._availableConditions.length === 0) {
+    toast('❌ No conditions available for this category');
+    return;
+  }
+
+  const conditions = cur._availableConditions;
+  let tempSelectedId = cur._conditionId; // Temporary selection during scroll
+  let tempSelectedIndex = -1;
+
+  // Create wheel picker overlay
+  const overlay = document.createElement('div');
+  overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;flex-direction:column;justify-content:flex-end';
+
+  const sheet = document.createElement('div');
+  sheet.style.cssText = 'background:var(--bg);border-radius:16px 16px 0 0;overflow:hidden;max-height:80vh;display:flex;flex-direction:column';
+
+  // Header
+  const header = document.createElement('div');
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--bd);background:var(--sf)';
+  const cancelBtn = document.createElement('button');
+  cancelBtn.textContent = 'Cancel';
+  cancelBtn.style.cssText = 'background:none;border:none;color:var(--sv);font-size:14px;cursor:pointer;padding:4px';
+  cancelBtn.onclick = () => overlay.remove();
+
+  const titleDiv = document.createElement('div');
+  titleDiv.style.cssText = 'font-weight:800;color:var(--sv);font-size:16px';
+  titleDiv.textContent = 'Condition';
+
+  const doneBtn = document.createElement('button');
+  doneBtn.textContent = 'Done';
+  doneBtn.style.cssText = 'background:none;border:none;color:var(--ac);font-size:14px;cursor:pointer;font-weight:800;padding:4px';
+
+  header.appendChild(cancelBtn);
+  header.appendChild(titleDiv);
+  header.appendChild(doneBtn);
+
+  // Wheel container
+  const wheelContainer = document.createElement('div');
+  wheelContainer.style.cssText = 'flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;position:relative';
+
+  // Add spacer top
+  const spacerTop = document.createElement('div');
+  spacerTop.style.height = 'calc(var(--ch, 44px) * 2)';
+  wheelContainer.appendChild(spacerTop);
+
+  // Add condition options
+  const options = [];
+  conditions.forEach((cond, idx) => {
+    const option = document.createElement('div');
+    option.style.cssText = 'flex:0 0 var(--ch, 44px);display:flex;align-items:center;justify-content:center;'
+      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent;opacity:0.6;transition:opacity .2s,border-color .2s;font-weight:400';
+    option.textContent = cond.conditionDisplayName;
+    option.setAttribute('data-cond-id', cond.conditionId);
+    option.setAttribute('data-idx', idx);
+
+    // Highlight if already selected
+    if (cur._conditionId === cond.conditionId) {
+      option.style.opacity = '1';
+      option.style.fontWeight = '800';
+      option.style.borderColor = 'var(--ac)';
+      tempSelectedIndex = idx;
+      tempSelectedId = cond.conditionId;
+    }
+
+    // [FIX v15] Add click/tap handler to make options selectable
+    option.addEventListener('click', function() {
+      tempSelectedIndex = idx;
+      tempSelectedId = cond.conditionId;
+
+      // Update visual highlighting for all options
+      options.forEach(function(o, i) {
+        var selected = i === idx;
+        o.style.opacity = selected ? '1' : '0.6';
+        o.style.fontWeight = selected ? '800' : '400';
+        o.style.borderColor = selected ? 'var(--ac)' : 'transparent';
+      });
+
+      // Scroll selected option to center
+      option.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    });
+
+    options.push(option);
+    wheelContainer.appendChild(option);
+  });
+
+  // Initialize tempSelectedIndex to first option if nothing selected yet
+  if (tempSelectedIndex < 0 && options.length > 0) {
+    tempSelectedIndex = 0;
+    tempSelectedId = conditions[0].conditionId;
+    setTimeout(() => {
+      options[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      updateCenteredOption();
+    }, 100);
+  }
+
+  // Add spacer bottom
+  const spacerBottom = document.createElement('div');
+  spacerBottom.style.height = 'calc(var(--ch, 44px) * 2)';
+  wheelContainer.appendChild(spacerBottom);
+
+  // Center highlight band
+  const centerBand = document.createElement('div');
+  centerBand.style.cssText = 'position:absolute;top:50%;left:0;right:0;height:var(--ch, 44px);'
+    +'border-top:1px solid var(--ac);border-bottom:1px solid var(--ac);pointer-events:none;'
+    +'opacity:0.3;z-index:1;transform:translateY(-50%)';
+  wheelContainer.appendChild(centerBand);
+
+  // Track scroll to determine centered option
+  const updateCenteredOption = () => {
+    const containerRect = wheelContainer.getBoundingClientRect();
+    const containerCenter = containerRect.height / 2;
+
+    options.forEach((opt, idx) => {
+      const optRect = opt.getBoundingClientRect();
+      const optCenter = optRect.top + optRect.height / 2 - containerRect.top;
+      const distance = Math.abs(optCenter - containerCenter);
+
+      if (distance < 30) {
+        // This option is centered
+        tempSelectedIndex = idx;
+        tempSelectedId = conditions[idx].conditionId;
+        opt.style.opacity = '1';
+        opt.style.fontWeight = '800';
+        opt.style.borderColor = 'var(--ac)';
+      } else {
+        opt.style.opacity = '0.6';
+        opt.style.fontWeight = '400';
+        opt.style.borderColor = 'transparent';
+      }
+    });
+  };
+
+  wheelContainer.addEventListener('scroll', updateCenteredOption, false);
+
+  // Done button handler
+  doneBtn.onclick = () => {
+    if (tempSelectedIndex >= 0 && tempSelectedIndex < conditions.length) {
+      const selected = conditions[tempSelectedIndex];
+      cur._conditionId = selected.conditionId;
+      cur._conditionDisplayName = selected.conditionDisplayName;
+      console.log('[COND] Selected: ' + cur._conditionDisplayName + ' (' + cur._conditionId + ')');
+    }
+    overlay.remove();
+    psRefreshConditionDisplay(); // Refresh the condition row
+  };
+
+  sheet.appendChild(header);
+  sheet.appendChild(wheelContainer);
+  overlay.appendChild(sheet);
+  overlay.setAttribute('data-picker', '');
+
+  document.body.appendChild(overlay);
+
+  // Auto-scroll to current selection if exists
+  if (tempSelectedIndex >= 0) {
+    setTimeout(() => {
+      options[tempSelectedIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      updateCenteredOption();
+    }, 100);
+  }
+}
+window.psOpenConditionWheelForCurrent = psOpenConditionWheelForCurrent;
+
+// Refresh condition display row
+function psRefreshConditionDisplay() {
+  const condRow = document.getElementById('condition-row');
+  if (!condRow) return;
+
+  // [COND] State machine: idle | resolving | loading | ready | error | not_required
+  const state = cur._conditionState || 'idle';
+
+  if (state === 'resolving') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Resolving category...</div>';
+  } else if (state === 'loading') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Loading conditions...</div>';
+  } else if (state === 'error') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw)">⚠ Unable to load conditions</div>'
+      + '<div style="font-size:12px;color:var(--mu);margin-top:4px;cursor:pointer" onclick="psRetryConditionLoad()">↻ Retry</div>';
+  } else if (state === 'not_required') {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Not required for this category</div>';
+  } else if (state === 'ready' && cur._conditionRequired && !cur._conditionId) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + '⚠ Select condition (REQUIRED) ›</div>';
+  } else if (state === 'ready' && cur._conditionId) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + (cur._conditionDisplayName || 'Selected') + ' ›</div>';
+  } else if (state === 'idle' || !state) {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">—</div>';
+  } else {
+    condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
+      + 'Select condition ›</div>';
+  }
+}
+window.psRefreshConditionDisplay = psRefreshConditionDisplay;
+
+// ── Refresh visible category display to show actual final leaf category ────
+// This ensures the visible category matches the category used for condition lookup
+function psRefreshFinalCategoryDisplay() {
+  // Find the category card in the rendered result
+  // It's the one that contains "Category" label
+  var cards = document.querySelectorAll('.card');
+  var catCard = null;
+
+  for (var i = 0; i < cards.length; i++) {
+    var lbl = cards[i].querySelector('.lbl');
+    if (lbl && lbl.textContent && lbl.textContent.includes('Category')) {
+      catCard = cards[i];
+      break;
+    }
+  }
+
+  if (!catCard || !cur || !cur._finalCategoryId) return;
+
+  var finalCatId = String(cur._finalCategoryId).trim();
+  var valDiv = catCard.querySelector('.val');
+  if (!valDiv) return;
+
+  // [SAFETY v16] Only display the final leaf category ID
+  // Do NOT pair cur.categoryName (provisional name) with final leaf ID
+  // If we later have a verified final category name from backend metadata, we can add it
+  valDiv.innerHTML = '<span style="color:var(--mu)">ID ' + esc(finalCatId) + '</span>';
+
+  console.log('[CAT DISPLAY] Updated visible category to final leaf: ' + finalCatId);
+}
+window.psRefreshFinalCategoryDisplay = psRefreshFinalCategoryDisplay;
+
+function psRetryConditionLoad() {
+  if (cur && cur._conditionRequestedCategoryId) {
+    psLoadCategoryConditions(cur._conditionRequestedCategoryId);
+  }
+}
+window.psRetryConditionLoad = psRetryConditionLoad;
 
 // ── RECONSTRUIR TÍTULO CON TODOS LOS CAMPOS ──────────────────
 function rebuildAndApplyTitle(n) {
@@ -3018,8 +3459,7 @@ async function _doAnalyze(upc){
     // Railway /search-upc cascades: eBay official API → Algopix → UPCitemdb → OpenFoodFacts
     step='railway_search';
     stat('Querying eBay via Railway...');
-    const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
-    const rwRes = await fetch(RAILWAY_URL + '/search-upc?upc=' + encodeURIComponent(upc));
+    const rwRes = await fetch(SAVVY_API + '/search-upc?upc=' + encodeURIComponent(upc));
     let rwData = null;
     if (rwRes.ok) {
       const rwJson = await rwRes.json();
@@ -3036,7 +3476,8 @@ async function _doAnalyze(upc){
         name:  rwData.name || '',
         brand: rwData.brand || '',
         found: true,
-        source: rwData.data_source || 'railway'
+        source: rwData.data_source || 'railway',
+        aspects: Array.isArray(rwData.aspects) ? rwData.aspects : []
       };
       $('lp').textContent = prod.name.substring(0, 50);
 
@@ -3073,16 +3514,25 @@ async function analyzeEbayUrl(urlStr){
   urlStr = urlStr.trim();
   showLoadingInline('Resolving eBay link...');
 
-  const RAILWAY_URL = 'https://savvy-ebay-prices-production.up.railway.app';
   let itemId = null;
   let step = 'resolve_url';
 
   try {
-    // Short links (ebay.io) or any URL without /itm/ — resolve via Railway
-    if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//)) {
+    // Check for valid session token
+    const token = savvyToken();
+    if (!token) {
+      savvySesionCaducada();
+      return;
+    }
+
+    // Short links (ebay.io, ebay.to, etc.) or any URL without /itm/ — resolve via API
+    if (urlStr.includes('ebay.io') || urlStr.includes('ebay.to') || !urlStr.match(/\/itm\//)) {
       try {
         stat('Resolving short link...');
-        const resolveRes = await fetch(RAILWAY_URL + '/resolve-url?url=' + encodeURIComponent(urlStr));
+        const resolveRes = await savvyLocationFetch(
+          SAVVY_API + '/api/resolve-url?url=' + encodeURIComponent(urlStr),
+          { method: 'GET' }
+        );
         if (resolveRes.ok) {
           const resolveData = await resolveRes.json();
           if (resolveData.status === 'success' && resolveData.item_id) {
@@ -3118,7 +3568,10 @@ async function analyzeEbayUrl(urlStr){
     step = 'ebay_item';
     stat('Loading eBay item ' + itemId + '...');
     $('lp').textContent = 'Item: ' + itemId;
-    const itemRes = await fetch(RAILWAY_URL + '/ebay-item?item_id=' + encodeURIComponent(itemId));
+    const itemRes = await savvyLocationFetch(
+      SAVVY_API + '/api/ebay-item?item_id=' + encodeURIComponent(itemId),
+      { method: 'GET' }
+    );
     if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('res'); return; }
     const json = await itemRes.json();
     if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('res'); return; }
@@ -3292,6 +3745,47 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
     _lastBundleUrl = '';
     try {
       renderResult(res);
+      // PHASE 3: Resolve real eBay leaf category BEFORE loading conditions
+      // This ensures condition metadata is fetched for the correct validated category
+      if (cur) {
+        var startCur = cur;
+
+        // Show "Resolving category..." while eBay validation runs
+        startCur._conditionState = 'resolving';
+        startCur._conditionError = '';
+        psRefreshConditionDisplay();
+
+        try {
+          // Async validation with eBay backend - this is REQUIRED, not optional
+          var finalCatId = await psResolveFinalCategoryForCurrent(startCur);
+
+          // [SAFETY] Check if product was swapped during async operation
+          if (cur !== startCur) {
+            console.log('[CAT] Product changed during category resolution, skipping condition load');
+            return;
+          }
+
+          // Store resolved category for CSV consistency checks
+          startCur._finalCategoryId = String(finalCatId);
+
+          // [FIX v15] Update visible category display to show the actual final leaf category
+          psRefreshFinalCategoryDisplay();
+
+          // Now load conditions for the validated category
+          await psLoadCategoryConditions(finalCatId);
+        } catch (catErr) {
+          // [SAFETY] Check if product was swapped during error
+          if (cur !== startCur) {
+            console.log('[CAT] Product changed during error handling, skipping error state');
+            return;
+          }
+
+          console.error('[CAT] Category resolution failed:', catErr.message);
+          cur._conditionState = 'error';
+          cur._conditionError = catErr.message || 'Unable to resolve eBay category for conditions';
+          psRefreshConditionDisplay();
+        }
+      }
       screen('res');
     } catch(renderErr) {
       console.error('renderResult error:', renderErr);
@@ -3417,6 +3911,106 @@ async function addBulk() {
       }
       return;
     }
+  }
+
+  // PHASE 3: Validar condición - category consistency FIRST
+  const currentFinalCategory = psResolveFinalCategory(cur);
+
+  // [SAFETY] Detect category change - MUST BLOCK ADD immediately
+  // Do not snapshot condState before checking category
+  if (
+    !cur._finalCategoryId ||
+    String(cur._finalCategoryId) !== String(currentFinalCategory) ||
+    String(cur._conditionRequestedCategoryId || '') !== String(currentFinalCategory)
+  ) {
+    console.log('[COND] Category requires condition reload: ' + (cur._finalCategoryId || 'none') + ' -> ' + currentFinalCategory);
+    cur._finalCategoryId = String(currentFinalCategory);
+    psLoadCategoryConditions(currentFinalCategory);
+    toast('⏳ Cargando condiciones para la categoría correcta...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;  // BLOCK - must wait for reload
+  }
+
+  // [SAFETY] NOW safe to read current condition state (after category validated)
+  const condState = cur._conditionState || 'idle';
+
+  // [COND] Block if category resolution is still in progress
+  if (condState === 'resolving') {
+    toast('❌ CONDICIÓN - Todavía se está resolviendo la categoría. Espera un momento...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if category resolution FAILED
+  if (condState === 'error' && !cur._finalCategoryId) {
+    toast('❌ CONDICIÓN - No se pudo resolver la categoría de eBay. Toca ↻ Retry.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if in idle state (conditions never loaded or cleared)
+  if (condState === 'idle') {
+    toast('❌ CONDICIÓN - Las opciones no están cargadas. Intenta nuevamente.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if conditions are still loading
+  if (condState === 'loading') {
+    toast('❌ CONDICIÓN - Las opciones aún se están cargando...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if conditions failed to load AND user must retry
+  if (condState === 'error') {
+    toast('❌ CONDICIÓN - No se cargaron las opciones. Toca ↻ Retry antes de continuar.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if condition REQUIRED but not selected (state must be 'ready')
+  if (condState === 'ready' && cur._conditionRequired && !cur._conditionId) {
+    toast('❌ FALTA CONDITION - Campo obligatorio para esta categoría');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    // Auto-open condition wheel for current product
+    setTimeout(() => psOpenConditionWheelForCurrent(), 300);
+    return;
   }
 
   toast('🟢 Agregando al CSV...');
@@ -3780,7 +4374,13 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     photo:       photoUrl,
     bundleImg:   photoUrl,
     _specifics:  (cur && cur._specifics) || {},
-    scannedBy:   SAVVY_CURRENT_USER || 'unknown'
+    scannedBy:   SAVVY_CURRENT_USER || 'unknown',
+    // PHASE 3: eBay Condition System (inherit from cur)
+    conditionId:        (cur && cur._conditionId) || null,
+    conditionDisplayName: (cur && cur._conditionDisplayName) || '',
+    conditionRequired:   (cur && cur._conditionRequired) || false,
+    conditionCategoryId: (cur && cur._conditionCategoryId) || '',
+    conditionState:      (cur && cur._conditionState) || 'idle'
   });
   saveBulkToStorage();
   updateFAB();
@@ -4276,7 +4876,13 @@ async function addSplitPacksToCSV(){
       weightMajor: _wMajor,
       weightMinor: _wMinor,
       truck:       window._truckNumber || '',
-      scannedBy:   SAVVY_CURRENT_USER || 'unknown'
+      scannedBy:   SAVVY_CURRENT_USER || 'unknown',
+      // PHASE 3: eBay Condition System (inherit from cur)
+      conditionId:        (cur && cur._conditionId) || null,
+      conditionDisplayName: (cur && cur._conditionDisplayName) || '',
+      conditionRequired:   (cur && cur._conditionRequired) || false,
+      conditionCategoryId: (cur && cur._conditionCategoryId) || '',
+      conditionState:      (cur && cur._conditionState) || 'idle'
     });
     added++;
   }
@@ -5363,7 +5969,93 @@ function psStripDosageFromIngredient(val) {
   return String(val).replace(/\s*\d+\.?\d*\s?(mg|mcg|iu|ml|oz|g)\b\.?\s*$/i, '').trim();
 }
 
-function psPreFillSpecifics(title, category, brand) {
+// Normalize image URLs to HTTPS for Railway staging backend
+function psNormalizeImageUrl(url) {
+  var s = String(url || '').trim();
+  // Convert http:// to https:// for Railway staging image URLs
+  if (/^http:\/\/savvy-ebay-prices-product-scanner-staging\.up\.railway\.app\//i.test(s)) {
+    return s.replace(/^http:\/\//i, 'https://');
+  }
+  return s;
+}
+
+// Normalize multiple pipe-separated image URLs
+function psNormalizeImageUrls(urls) {
+  if (!urls) return '';
+  var s = String(urls).trim();
+  if (s.indexOf('|') >= 0) {
+    return s.split('|').map(function(url) {
+      return psNormalizeImageUrl(url.trim());
+    }).join('|');
+  }
+  return psNormalizeImageUrl(s);
+}
+
+// PHASE 4 FIX: Extract structured Model from product aspects (eBay data)
+function psExtractStructuredModel(prodAspects) {
+  if (!prodAspects) return '';
+
+  var aspectsArray = Array.isArray(prodAspects)
+    ? prodAspects
+    : Object.keys(prodAspects).map(function(k) {
+        return { name: k, value: prodAspects[k] };
+      });
+
+  var modelAspectNames = ['Model', 'Model Number', 'Manufacturer Model Code', 'Model Code'];
+
+  for (var i = 0; i < aspectsArray.length; i++) {
+    var aspect = aspectsArray[i];
+    if (!aspect || !aspect.name || !aspect.value) continue;
+
+    var aspName = String(aspect.name).trim();
+    var aspValue = String(aspect.value).trim();
+    var aspNameNorm = aspName.toLowerCase();
+
+    for (var j = 0; j < modelAspectNames.length; j++) {
+      if (aspNameNorm === modelAspectNames[j].toLowerCase()) {
+        if (aspValue && aspValue !== '' && aspValue !== 'Does Not Apply') {
+          return aspValue;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+// PHASE 4 FIX: Extract structured Product Line from product aspects (eBay data)
+function psExtractStructuredProductLine(prodAspects) {
+  if (!prodAspects) return '';
+
+  var aspectsArray = Array.isArray(prodAspects)
+    ? prodAspects
+    : Object.keys(prodAspects).map(function(k) {
+        return { name: k, value: prodAspects[k] };
+      });
+
+  var lineAspectNames = ['Product Line', 'Product Family', 'Line', 'Collection'];
+
+  for (var i = 0; i < aspectsArray.length; i++) {
+    var aspect = aspectsArray[i];
+    if (!aspect || !aspect.name || !aspect.value) continue;
+
+    var aspName = String(aspect.name).trim();
+    var aspValue = String(aspect.value).trim();
+    var aspNameNorm = aspName.toLowerCase();
+
+    for (var j = 0; j < lineAspectNames.length; j++) {
+      if (aspNameNorm === lineAspectNames[j].toLowerCase()) {
+        if (aspValue && aspValue !== '') {
+          return aspValue;
+        }
+      }
+    }
+  }
+
+  return '';
+}
+
+function psPreFillSpecifics(title, category, brand, prod) {
   var prefilled = {};
   
   var setInc = psParseSetIncludes(title);
@@ -5375,7 +6067,15 @@ function psPreFillSpecifics(title, category, brand) {
   
   var typeVal = psExtractTypeFromTitle(title, category, brand);
   if (typeVal) prefilled['Type'] = typeVal;
-  
+
+  // PHASE 4 FIX: Extract structured Model and Product Line from eBay aspects (before Claude)
+  var prodAspects = prod && prod.aspects ? prod.aspects : null;
+  var structuredModel = psExtractStructuredModel(prodAspects);
+  if (structuredModel) prefilled['Model'] = structuredModel;
+
+  var structuredProductLine = psExtractStructuredProductLine(prodAspects);
+  if (structuredProductLine) prefilled['Product Line'] = structuredProductLine;
+
   var flavor = psExtractFlavorFromTitle(title);
   if (flavor) {
     prefilled['Flavor'] = flavor;
@@ -5637,6 +6337,32 @@ function psScrubSpecs(specs, category, title) {
   return specs;
 }
 
+// PHASE 4: Check if Model value matches a structurally-verified Product Line
+// ONLY delete Model if there is explicit relational conflict with structured Product Line
+// NO word-shape guessing, NO hardcoded lists
+function shouldDeleteModel(model, productLine, structuredProductLine) {
+  if (!model) return false;
+
+  var modelNorm = String(model).toLowerCase().trim();
+  var productLineNorm = productLine ? String(productLine).toLowerCase().trim() : '';
+  var structuredLineNorm = structuredProductLine ? String(structuredProductLine).toLowerCase().trim() : '';
+
+  // ONLY delete Model if it equals a VERIFIED structured Product Line
+  // This means the model value is the same as an explicit, verified Product Line from eBay data
+  if (structuredLineNorm && modelNorm === structuredLineNorm) {
+    return true; // Model is duplicate of verified Product Line
+  }
+
+  // ONLY delete if Model == prefilled/structured Product Line AND no structured Model exists
+  // (structured Model would have priority via pre-fill)
+  if (productLineNorm && modelNorm === productLineNorm && structuredLineNorm) {
+    return true; // Clear duplicate when both Model and PL refer to same value
+  }
+
+  // Otherwise: preserve Model. Do NOT guess based on word format, length, or hardcoded lists
+  return false;
+}
+
 // Le pregunta a Claude los item specifics correctos para el producto,
 // según su título, marca y categoría. Claude CONOCE los productos (ej: sabe
 // que Advantage II = Imidacloprid 9.1%) y qué specifics pide cada categoría
@@ -5655,8 +6381,24 @@ async function psGenerateSpecifics(){
   var catForAI   = String(cur.category || '');
   
   // ✨ FASE 1: PRE-PARSE local fields sin APIs (Set Includes, Type, Flavor)
-  var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI);
+  // PHASE 4 FIX: Also pass cur.prod to extract structured Model/Product Line from eBay aspects
+  var prefilled = psPreFillSpecifics(titleForAI, catForAI, brandForAI, cur.prod);
   console.log('🔍 Pre-parsed specifics:', prefilled);
+
+  // PHASE 2: Build authoritative eBay aspect map from localizedAspects
+  // This enables protecting eBay-provided fields from Claude overrides
+  var ebayAspectMap = {};
+  if (cur.prod && cur.prod.aspects) {
+    var aspectsArray = Array.isArray(cur.prod.aspects) ? cur.prod.aspects : [];
+    for (var ai = 0; ai < aspectsArray.length; ai++) {
+      var asp = aspectsArray[ai];
+      if (asp && asp.name && asp.value) {
+        var aspNameNorm = String(asp.name).toLowerCase().trim();
+        ebayAspectMap[aspNameNorm] = asp.value;
+      }
+    }
+  }
+  console.log('🔷 eBay aspect map:', ebayAspectMap);
 
   // Lista de specifics que el CSV soporta (columnas comunes ampliadas).
   // Claude llena SOLO los que apliquen al producto; deja el resto fuera.
@@ -5688,7 +6430,11 @@ async function psGenerateSpecifics(){
     + '- For beauty/haircare products without a visible color: use "Clear", "Colorless", or "Translucent" as Color value.\n'
     + '- For gels/creams/mousses: always specify Formulation (e.g., "Gel", "Mousse", "Lightweight Gel", "Styling Mousse").\n'
     + '- For Country/Region of Manufacture: use common knowledge (e.g., USA for Hollywood Beauty, Germany for many European brands, Japan for many beauty brands). If genuinely unknown, use the brand origin country.\n'
-    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "When to Take" (vitamins/supplements ONLY: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — use the well-known instructions if confident. If NOT confident, use the literal value "As Directed" instead of omitting it — never leave this blank for a vitamin/supplement product).\n'
+    + '- CRITICAL DISTINCTION — "Model" vs "Product Line" (PHASE 4 CORRECTED):\n'
+    + '  * "Model" = Manufacturer\'s specific model identifier for the exact product. Examples: FN103A, AD150A, MW9255B, A50-BK, "Aura", "Studio Pro". Model may be alphanumeric, may be word-based. Do NOT infer whether a value is Model solely from its character format. Only fill if a real, specific model identifier exists. If uncertain, leave empty.\n'
+    + '  * "Product Line" = Marketed family/series/collection name. Examples: "CRISPi" in "Ninja CRISPi", "FOODI" in "Ninja Foodi", "Pure Honey", "Aquafresh Complete Care". Only fill if a real collection/sub-brand name is explicitly stated, not the base brand itself.\n'
+    + '  * If the same value appears to be BOTH a potential Model AND Product Line (e.g., "FOODI" in title), and a verified Product Line is provided in pre-parsed fields, omit Model rather than duplicating Product Line into Model. If a real Model is provided in pre-parsed fields, ALWAYS use it for Model.\n'
+    + '- NEW FIELDS to fill when they apply: "Product Line" (the sub-brand/collection name, often visible in the title, e.g. "Pure Honey", "Aquafresh Complete Care", "Simply Nourish" — only fill if a real collection name is stated, not the base brand itself). "Styling Effect" (haircare only: e.g. "Curl Enhancing", "Nourishing", "Volumizing", "Smoothing" — infer from the product\'s stated purpose). "Item Weight" (the dry/solid weight in oz or g, when the product has one SEPARATE from a liquid Volume — e.g. a toothpaste tube net weight; skip if Volume already covers it). "Size Type" (simple category: "Standard Size", "Travel Size", "Trial Size" — infer from title/size only if clearly one of these). "Period After Opening (PAO)" (cosmetics/skincare/oral-care industry standard, format like "12M" or "24M" for months — only use a value if it is a reasonably standard, well-known convention for that PRODUCT TYPE, e.g. most toothpaste/cosmetics are commonly 12M-24M; if you are not reasonably confident, LEAVE THIS FIELD OUT rather than guessing). "MPN" (Manufacturer Part Number — only fill if you genuinely know the real MPN for that exact product; if unknown, use the literal value "Does Not Apply", which is the standard eBay-accepted convention for unknown/non-applicable MPNs — never invent a fake part number). "Model" (Manufacturer model identifier — alphanumeric code like FN103A, AD150A. Do NOT invent; if not in title or pre-parsed, leave empty. DO NOT use commercial line names as Model). "When to Take" (vitamins/supplements ONLY: e.g. "After Meal", "Before Meal", "With Food", "Morning", "Before Bed" — use the well-known instructions if confident. If NOT confident, use the literal value "As Directed" instead of omitting it — never leave this blank for a vitamin/supplement product).\n'
     + '- Values must be short and eBay-friendly (a few words max).\n'
     + '- Do NOT include Brand, Type, UPC, or EPA (already handled).\n'
     + '- Return ONLY the JSON, no preamble, no markdown.';
@@ -5718,15 +6464,70 @@ async function psGenerateSpecifics(){
       }
     }
     
-    // Luego agregar/sobreescribir con respuesta de Claude (excepto los que ya están en prefilled)
+    // Luego agregar/sobreescribir con respuesta de Claude (excepto los que ya están en prefilled o son eBay-provided)
     for(var k in parsed){
       if(!parsed.hasOwnProperty(k)) continue;
       if(prefilled.hasOwnProperty(k)) continue; // Skip si ya fue pre-parsed
+
+      // PHASE 2: Protect eBay-provided fields from Claude override
+      var kNorm = k.toLowerCase().trim();
+      if (ebayAspectMap.hasOwnProperty(kNorm)) {
+        continue; // Skip Claude value: eBay value is authoritative
+      }
+
+      // Special rule: reject Claude's Product Line if eBay didn't provide one
+      if (k === 'Product Line' && !ebayAspectMap['product line']) {
+        continue; // eBay didn't provide Product Line, reject Claude's attempt
+      }
+
       var val = String(parsed[k] == null ? '' : parsed[k]).trim();
       if(val && SUPPORTED.indexOf(k) !== -1){
         clean[k] = val.substring(0, 65); // eBay limita valores de specifics
         count++;
       }
+    }
+
+    // PHASE 2: Restoration phase - restore eBay-provided values if not already in clean
+    for(var eBayNormKey in ebayAspectMap){
+      if(!ebayAspectMap.hasOwnProperty(eBayNormKey)) continue;
+      // Find the actual SUPPORTED field name that matches this eBay aspect
+      var found = false;
+      for(var i = 0; i < SUPPORTED.length; i++){
+        if(SUPPORTED[i].toLowerCase() === eBayNormKey){
+          if(!clean.hasOwnProperty(SUPPORTED[i])){
+            clean[SUPPORTED[i]] = String(ebayAspectMap[eBayNormKey]).substring(0, 65);
+          }
+          found = true;
+          break;
+        }
+      }
+      if(!found && eBayNormKey === 'type' && !clean['Type of Product']){
+        // Type alias: eBay "Type" maps to "Type of Product"
+        clean['Type of Product'] = String(ebayAspectMap[eBayNormKey]).substring(0, 65);
+      }
+    }
+
+    // PHASE 4: Post-Claude validation for Model vs Product Line
+    // ONLY delete Model if there is relational conflict (Model == verified structured Product Line)
+    // Preserve Model if it's word-only with no conflicting structured Product Line
+    var modelVal = clean['Model'];
+    var productLineVal = clean['Product Line'];
+    var structuredModel = prefilled['Model'] || '';
+    var structuredProductLine = prefilled['Product Line'] || '';
+
+    // Only delete Model if it conflicts with structurally-verified Product Line
+    if (shouldDeleteModel(modelVal, productLineVal, structuredProductLine)) {
+      delete clean['Model'];
+    }
+
+    // Ensure structured Model (highest confidence) is always preserved
+    if (structuredModel) {
+      clean['Model'] = structuredModel;
+    }
+
+    // Ensure structured Product Line (highest confidence) is always preserved
+    if (structuredProductLine) {
+      clean['Product Line'] = structuredProductLine;
     }
     // ── RESPALDO DETERMINÍSTICO: "Dosage" es OBLIGATORIO en eBay para
     // categorías de medicina/OTC/suplementos — si falta, el listado
@@ -5892,6 +6693,10 @@ function renderResult(r){
       <span style="color:var(--mu);font-size:11px"> · ID ${esc(r.category||'26395')}</span>
     </div></div>`;
 
+  // ── 3.2 CONDITION (PHASE 3 v13+) ─────────────────────────
+  // Dynamic row that shows state: resolving → loading → ready/error
+  h+=`<div class="card" id="condition-row"><div class="lbl">Condition</div><div class="val" style="color:var(--mu)">—</div></div>`;
+
   // ── 3.5 DESCRIPCIÓN eBay (generada automáticamente con Claude) ──────────────
   h+=`<div class="card" style="border-left:3px solid #7c4dff">
     <div class="lbl" style="color:#b388ff">📄 eBay Description</div>
@@ -6047,6 +6852,9 @@ function renderResult(r){
   h+=`<button class="ag-btn" id="agBtn">🔄 SCAN ANOTHER</button>`;
 
   $('resBody').innerHTML=h;
+
+  // Refresh condition display to show current state (resolving/loading/ready/error)
+  psRefreshConditionDisplay();
 
   const addB=$('addBtn');
   if(addB){
@@ -6587,7 +7395,7 @@ async function validateCategoriesWithEbay(items) {
     });
     if (!payload.length) return map;
 
-    var r = await fetch('https://savvy-ebay-prices-production.up.railway.app/leaf-category', {
+    var r = await fetch(SAVVY_API + '/leaf-category', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ items: payload })
@@ -6685,9 +7493,11 @@ async function exportCSV(){
     'Suitable For':'C:Suitable For', 'For Pet Type':'C:Suitable For', 'Hair Type':'C:Suitable For', 'Skin Type':'C:Suitable For',
     'Fragrance':'C:Fragrance',
     'Country/Region of Manufacture':'C:Country/Region of Manufacture', 'Country of Origin':'C:Country/Region of Manufacture',
-    'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose', 'Type of Product':'C:Main Purpose',
+    'Main Purpose':'C:Main Purpose', 'Body Area':'C:Main Purpose',
+    'Type':'C:Type', 'Type of Product':'C:Type',
     'Age Group':'C:Age Group',
     'Department':'C:Department',
+    'Model':'C:Model', 'Model Number':'C:Model', 'Item Model Number':'C:Model',
     'MPN':'C:MPN',
     'Period After Opening (PAO)':'C:Period After Opening (PAO)', 'PAO':'C:Period After Opening (PAO)',
     'Styling Effect':'C:Styling Effect',
@@ -7109,7 +7919,7 @@ async function exportCSV(){
   var _skusToCheck = bulk.map(function(it){ return it.sku || ''; }).filter(Boolean);
   var _existingSkus = {};
   try {
-    var _skuRes = await fetch('https://savvy-ebay-prices-production.up.railway.app/check-skus', {
+    var _skuRes = await fetch(SAVVY_API + '/check-skus', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ skus: _skusToCheck })
@@ -7152,6 +7962,10 @@ async function exportCSV(){
   toast('🏷️ Build ' + (window.PS_BUILD || '?') + ' — generando CSV');
   toast('🔎 Validando categorías con eBay...');
   var leafMap = await validateCategoriesWithEbay(bulk);
+
+  // [SAFETY] Merge validated leaf categories into shared global cache
+  // This allows psResolveFinalCategory() to use validated mappings for future operations
+  Object.assign(window._psLeafCategoryMap, leafMap);
 
   // ── MISMA CATEGORÍA PARA TODOS LOS PAQUETES DEL MISMO PRODUCTO ──────────
   // 17 ago 2026: SAN-197638007751-1pk salió en categoría 82597 y su hermano
@@ -7226,19 +8040,78 @@ async function exportCSV(){
     return;
   }
 
+  // PHASE 3: Second-layer condition validation - check each item's condition state before export
+  var _badConditions = bulk.filter(function(it) {
+    var itemState = it.conditionState || 'idle';
+    // Block items in loading/error/idle states (conditions not ready)
+    if (itemState === 'loading' || itemState === 'error' || itemState === 'idle') return true;
+    // Block items where condition is REQUIRED but not selected
+    if (itemState === 'ready' && it.conditionRequired && !it.conditionId) return true;
+    return false;
+  });
+
+  if (_badConditions.length) {
+    var _condIssueList = _badConditions.map(function(it) {
+      var state = it.conditionState || 'idle';
+      if (state === 'loading') return '• ' + (it.sku || it.title || '?') + ' — conditions loading';
+      if (state === 'error') return '• ' + (it.sku || it.title || '?') + ' — conditions failed to load';
+      if (state === 'idle') return '• ' + (it.sku || it.title || '?') + ' — no condition loaded';
+      if (state === 'ready' && it.conditionRequired && !it.conditionId) return '• ' + (it.sku || it.title || '?') + ' — condition required but not selected';
+      return '• ' + (it.sku || it.title || '?');
+    }).join('\n');
+
+    window._exportLock = false;
+    if (expBtnEl) {
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }
+    alert(
+      '🚫 EXPORT DETENIDO\n\n' + _badConditions.length + ' producto(s) con problemas de CONDITION:\n\n' +
+      _condIssueList +
+      '\n\nEdita cada uno en la lista de arriba, confirma que la condición está cargada y seleccionada. Luego intenta exportar otra vez.'
+    );
+    toast('🚫 Export detenido — ' + _badConditions.length + ' producto(s) sin condición válida');
+    return;
+  }
+
+  // [SAFETY] PHASE 3 v13: Check for category mismatches BEFORE export
+  // If conditions were loaded for a different category than final CSV category, BLOCK entire export
+  var _catMismatches = bulk.filter(function(it) {
+    if (!it.conditionCategoryId) return false; // Not validated yet, will be shown as 'idle' error above
+
+    var _finalCat = psResolveFinalCategory(it);
+    return String(it.conditionCategoryId) !== String(_finalCat);
+  });
+
+  if (_catMismatches.length) {
+    var _catMismatchList = _catMismatches.map(function(it) {
+      var _finalCat = psResolveFinalCategory(it);
+      return '• ' + (it.sku || it.title || '?') +
+             ' (condición para ' + it.conditionCategoryId +
+             ', pero CSV exportará ' + _finalCat + ')';
+    }).join('\n');
+
+    window._exportLock = false;
+    if (expBtnEl) {
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }
+    alert(
+      '🚫 EXPORT DETENIDO\n\n' + _catMismatches.length + ' producto(s) con MISMATCH de categoría de condición:\n\n' +
+      _catMismatchList +
+      '\n\nLa condición fue cargada para una categoría diferente de la que se va a exportar.\n\n' +
+      'Abre cada producto, deja que resuelva la categoría de eBay, y selecciona una condición para la categoría correcta. Después exporta otra vez.'
+    );
+    toast('🚫 Export detenido — ' + _catMismatches.length + ' producto(s) con mismatch de categoría');
+    return;
+  }
+
   bulk.forEach(function(it) {
     // ── CATEGORÍA FINAL, CALCULADA AL PRINCIPIO DEL CICLO ──────────────────
-    // Antes esto se calculaba hasta abajo (justo antes de armar la fila), pero
-    // toda la lógica de item specifics de arriba usaba it.category — que es la
-    // categoría ADIVINADA localmente, no la que eBay asigna y que realmente
-    // viaja en el CSV. Por eso el Dosage no se llenaba: TUM-307667388107 salió
-    // en 75039 y NAT-074312014024 en 11776, pero la lógica estaba comparando
-    // contra otra categoría. Se calcula UNA vez aquí y se reutiliza en todo
-    // el ciclo. (Corregido 14 ago 2026 — misma clase de bug que la fecha de
-    // expiración.)
-    var _catKey     = String(it.category || '').trim() + '|' + String(it.title || '').trim();
-    var _catKeyTrim = _catKey.substring(0, 120); // el backend recorta la clave a 120 chars
-    var _finalCat   = leafMap[_catKey] || leafMap[_catKeyTrim] || psSafeCategory(it.category, '31786');
+    // Usa el mismo resolver que la carga de condiciones para garantizar coherencia
+    var _finalCat = psResolveFinalCategory(it);
 
     // Saltar productos no identificados o restringidos por EPA
     if (EPA_BLOCKED.some(function(u){ return (it.sku||'').includes(u); })) {
@@ -7255,9 +8128,7 @@ async function exportCSV(){
       return;
     }
     var pics = it.bundleImg || it.photo || it.imgUrl || '';
-    var typeVal   = detectType(String(it.category), it.title);
     var epaVal    = getEpaNumber(String(it.category), it.title);
-    var modelVal  = '';
     var colorVal  = '';
     var langVal   = '';
     var bookTitle = '';
@@ -7275,6 +8146,24 @@ async function exportCSV(){
     // caminos, incluidos productos guardados antes de este arreglo.
     _itSpecs = psScrubSpecs(_itSpecs, _finalCat, it.title);
     _itSpecs = psScrubHealthSpecs(_itSpecs, _finalCat, it.title, it.upc || it.sku || '');
+
+    // ── Build _specByCol and _specForCol IMMEDIATELY after _itSpecs is ready ──
+    // This must happen BEFORE any Model/Type extraction logic uses _specForCol()
+    var _specByCol = {};
+    for (var _sk in _itSpecs) {
+      if (!_itSpecs.hasOwnProperty(_sk)) continue;
+      var _col = SPEC_COL_MAP[_sk];
+      if (_col && _itSpecs[_sk] && !_specByCol[_col]) {
+        _specByCol[_col] = String(_itSpecs[_sk]).trim();
+      }
+    }
+    function _specForCol(col){ return _specByCol[col] || ''; }
+
+    // ── Type & Model: precedencia estructurada → fallback ──
+    var _structuredType = _specForCol('C:Type');
+    var _structuredModel = _specForCol('C:Model');
+    var typeVal   = _structuredType ? _structuredType : detectType(String(it.category), it.title);
+    var modelVal  = '';
 
     // Detectar Connectivity del título automáticamente
     var _tl = (it.title || '').toLowerCase();
@@ -7335,24 +8224,27 @@ async function exportCSV(){
     var cleanTitle = psFixTitleCase((it.title||'').replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}✳️⭐🔥💊📦✅❌⚠️🌟💰📊🏷️]/gu, '').replace(/\s+/g,' ').trim(), it.brand).substring(0,80);
 
     // Model — required for Electronics & Appliances
-    // ── Solo usamos el texto extraído del título como Model si el título
+    // ── Precedencia: structured specifics → title regex → "Does Not Apply"
+    // Solo usamos el texto extraído del título como Model si el título
     // REALMENTE tenía un delimitador (coma/guión) separando un segmento
     // corto tipo modelo. Nuestros títulos SEO son texto corrido sin comas,
     // así que sin esta protección se copiaba el título casi completo como
     // "Model" (ej. "Bluetooth Portable Speaker Wireless Audio Player Pack
     // of 2 New"). Si no hay modelo real identificable, usamos el estándar
     // de eBay "Does Not Apply" — honesto y aceptado para productos sin MPN. ──
-    if (APPLIANCE_C.includes(String(it.category))) {
+    if (!_structuredModel && APPLIANCE_C.includes(String(it.category))) {
       var titleHadDelim = /,/.test(it.title || '');
       var titleWords = (it.title||'').split(/,/)[0].trim();
       var candidateApplModel = brandFix ? titleWords.replace(new RegExp('^'+brandFix+'\\s*','i'),'').trim() : titleWords.trim();
       modelVal = (titleHadDelim && candidateApplModel && candidateApplModel.length <= 40)
         ? candidateApplModel.substring(0,65)
         : 'Does Not Apply';
+    } else if (_structuredModel) {
+      modelVal = _structuredModel;
     }
 
     // Model — también requerido para electrónicos (cualquier producto con Connectivity)
-    if (!modelVal && connectivityVal) {
+    if (!modelVal && connectivityVal && !_structuredModel) {
       var titleHadDelim2 = /[,\-|]/.test(it.title || '');
       var titleParts = (it.title || '').split(/[,\-|]/)[0].trim();
       var candidateModel = brandFix
@@ -7361,6 +8253,8 @@ async function exportCSV(){
       modelVal = (titleHadDelim2 && candidateModel && candidateModel.length <= 40)
         ? candidateModel.substring(0, 65)
         : 'Does Not Apply';
+    } else if (!modelVal && _structuredModel) {
+      modelVal = _structuredModel;
     }
 
     // Color — required for mugs, kitchenware
@@ -7405,17 +8299,6 @@ async function exportCSV(){
     // eBay solo acepta UPCs de 12-14 dígitos. Si no hay UPC válido, va vacío
     // (eBay permite "Does not apply" pero preferimos dejarlo vacío que inventar).
     var upcVal = '';
-    // ── Helper: obtiene el valor de un specific de IA para una columna dada.
-    // Recorre cur._specifics del producto y mapea cada nombre a su columna.
-    var _specByCol = {};
-    for (var _sk in _itSpecs) {
-      if (!_itSpecs.hasOwnProperty(_sk)) continue;
-      var _col = SPEC_COL_MAP[_sk];
-      if (_col && _itSpecs[_sk] && !_specByCol[_col]) {
-        _specByCol[_col] = String(_itSpecs[_sk]).trim();
-      }
-    }
-    function _specForCol(col){ return _specByCol[col] || ''; }
 
     var _rawUpc = String((it.upc || '')).replace(/[^0-9]/g, '');
     if (!_rawUpc && it.sku) {
@@ -7463,14 +8346,15 @@ async function exportCSV(){
     }
     var departmentVal = _specForCol('C:Department') || psExtractGenderDepartment(it.title);
 
-    lines.push([
+    // ── Test: CSV column alignment and precedence validation ──
+    var csvRow = [
       'Add',
       it.sku||'',
       _finalCat,
       cleanTitle,
-      '1000',
+      it.conditionId ? String(it.conditionId) : '',
       psAppendLote(descToEbayHTML(it.description) || ('<p>' + cleanTitle + '</p>'), it),
-      pics,
+      psNormalizeImageUrls(pics),
       'FixedPrice','GTC',
       it.price||'9.99',
       String(it.quantity||1),'1',
@@ -7518,7 +8402,29 @@ async function exportCSV(){
       _specForCol('C:When to Take'),
       (it.weightMajor != null ? String(it.weightMajor) : ''),
       (it.weightMinor != null ? String(it.weightMinor) : '')
-    ].map(q).join(','));
+    ];
+
+    // ── CSV Column Alignment Test: ensure row has same number of columns as header ──
+    if (csvRow.length !== HDR.length) {
+      console.warn('CSV alignment mismatch for SKU ' + (it.sku||'') + ': HDR=' + HDR.length + ' row=' + csvRow.length);
+    }
+
+    // ── CSV Precedence Test: verify Model and Type use correct sources ──
+    // Dynamic column indices (not hardcoded)
+    var csvModelCol = HDR.indexOf('C:Model');
+    var csvTypeCol = HDR.indexOf('C:Type');
+    if (csvModelCol >= 0 && csvTypeCol >= 0) {
+      var testModelVal = csvRow[csvModelCol];
+      var testTypeVal = csvRow[csvTypeCol];
+      if (_structuredModel && testModelVal !== _structuredModel) {
+        console.warn('Model precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredModel + ', got ' + testModelVal);
+      }
+      if (_structuredType && testTypeVal !== _structuredType) {
+        console.warn('Type precedence issue for SKU ' + (it.sku||'') + ': expected ' + _structuredType + ', got ' + testTypeVal);
+      }
+    }
+
+    lines.push(csvRow.map(q).join(','));
   });
 
   var csv  = lines.join('\r\n');
