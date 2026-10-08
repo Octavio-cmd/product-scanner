@@ -88,8 +88,8 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-var _psSbInvacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v15';
+var _psSbInvVacio = {};
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v16';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2694,18 +2694,12 @@ function psRefreshFinalCategoryDisplay() {
   var valDiv = catCard.querySelector('.val');
   if (!valDiv) return;
 
-  // Get the final category name if available from cur.categoryName
-  // Otherwise just show the ID
-  var catName = cur.categoryName || '';
+  // [SAFETY v16] Only display the final leaf category ID
+  // Do NOT pair cur.categoryName (provisional name) with final leaf ID
+  // If we later have a verified final category name from backend metadata, we can add it
+  valDiv.innerHTML = '<span style="color:var(--mu)">ID ' + esc(finalCatId) + '</span>';
 
-  // Update the display to show final category (not provisional)
-  if (catName && catName !== 'undefined') {
-    valDiv.innerHTML = catName + '<span style="color:var(--mu);font-size:11px"> · ID ' + esc(finalCatId) + '</span>';
-  } else {
-    valDiv.innerHTML = '<span style="color:var(--mu)">ID ' + esc(finalCatId) + '</span>';
-  }
-
-  console.log('[CAT DISPLAY] Updated visible category to final: ' + finalCatId);
+  console.log('[CAT DISPLAY] Updated visible category to final leaf: ' + finalCatId);
 }
 window.psRefreshFinalCategoryDisplay = psRefreshFinalCategoryDisplay;
 
