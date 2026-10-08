@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-07-converged-staging-preview-v6';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v7';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -3081,11 +3081,21 @@ async function analyzeEbayUrl(urlStr){
   let step = 'resolve_url';
 
   try {
-    // Short links (ebay.io) or any URL without /itm/ — resolve via Railway
-    if (urlStr.includes('ebay.io') || !urlStr.match(/\/itm\//)) {
+    // Check for valid session token
+    const token = savvyToken();
+    if (!token) {
+      savvySesionCaducada();
+      return;
+    }
+
+    // Short links (ebay.io, ebay.to, etc.) or any URL without /itm/ — resolve via API
+    if (urlStr.includes('ebay.io') || urlStr.includes('ebay.to') || !urlStr.match(/\/itm\//)) {
       try {
         stat('Resolving short link...');
-        const resolveRes = await fetch(SAVVY_API + '/resolve-url?url=' + encodeURIComponent(urlStr));
+        const resolveRes = await savvyLocationFetch(
+          SAVVY_API + '/api/resolve-url?url=' + encodeURIComponent(urlStr),
+          { method: 'GET' }
+        );
         if (resolveRes.ok) {
           const resolveData = await resolveRes.json();
           if (resolveData.status === 'success' && resolveData.item_id) {
@@ -3121,7 +3131,10 @@ async function analyzeEbayUrl(urlStr){
     step = 'ebay_item';
     stat('Loading eBay item ' + itemId + '...');
     $('lp').textContent = 'Item: ' + itemId;
-    const itemRes = await fetch(SAVVY_API + '/ebay-item?item_id=' + encodeURIComponent(itemId));
+    const itemRes = await savvyLocationFetch(
+      SAVVY_API + '/api/ebay-item?item_id=' + encodeURIComponent(itemId),
+      { method: 'GET' }
+    );
     if (!itemRes.ok) { toast('⚠️ eBay error ' + itemRes.status); screen('res'); return; }
     const json = await itemRes.json();
     if (json.status !== 'success' || !json.data) { toast('⚠️ Item not found'); screen('res'); return; }
