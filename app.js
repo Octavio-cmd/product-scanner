@@ -88,8 +88,8 @@
 // seguir corriendo un build viejo aunque GitHub Pages ya tenga el nuevo.
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
-var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v14';
+var _psSbInvacio = {};
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v15';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2524,7 +2524,7 @@ function psOpenConditionWheelForCurrent() {
   conditions.forEach((cond, idx) => {
     const option = document.createElement('div');
     option.style.cssText = 'flex:0 0 var(--ch, 44px);display:flex;align-items:center;justify-content:center;'
-      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent;opacity:0.6;transition:opacity .2s,border-color .2s';
+      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent;opacity:0.6;transition:opacity .2s,border-color .2s;font-weight:400';
     option.textContent = cond.conditionDisplayName;
     option.setAttribute('data-cond-id', cond.conditionId);
     option.setAttribute('data-idx', idx);
@@ -2535,11 +2535,42 @@ function psOpenConditionWheelForCurrent() {
       option.style.fontWeight = '800';
       option.style.borderColor = 'var(--ac)';
       tempSelectedIndex = idx;
+      tempSelectedId = cond.conditionId;
     }
+
+    // [FIX v15] Add click/tap handler to make options selectable
+    option.addEventListener('click', function() {
+      tempSelectedIndex = idx;
+      tempSelectedId = cond.conditionId;
+
+      // Update visual highlighting for all options
+      options.forEach(function(o, i) {
+        var selected = i === idx;
+        o.style.opacity = selected ? '1' : '0.6';
+        o.style.fontWeight = selected ? '800' : '400';
+        o.style.borderColor = selected ? 'var(--ac)' : 'transparent';
+      });
+
+      // Scroll selected option to center
+      option.scrollIntoView({
+        behavior: 'smooth',
+        block: 'center'
+      });
+    });
 
     options.push(option);
     wheelContainer.appendChild(option);
   });
+
+  // Initialize tempSelectedIndex to first option if nothing selected yet
+  if (tempSelectedIndex < 0 && options.length > 0) {
+    tempSelectedIndex = 0;
+    tempSelectedId = conditions[0].conditionId;
+    setTimeout(() => {
+      options[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
+      updateCenteredOption();
+    }, 100);
+  }
 
   // Add spacer bottom
   const spacerBottom = document.createElement('div');
@@ -2640,6 +2671,43 @@ function psRefreshConditionDisplay() {
   }
 }
 window.psRefreshConditionDisplay = psRefreshConditionDisplay;
+
+// ── Refresh visible category display to show actual final leaf category ────
+// This ensures the visible category matches the category used for condition lookup
+function psRefreshFinalCategoryDisplay() {
+  // Find the category card in the rendered result
+  // It's the one that contains "Category" label
+  var cards = document.querySelectorAll('.card');
+  var catCard = null;
+
+  for (var i = 0; i < cards.length; i++) {
+    var lbl = cards[i].querySelector('.lbl');
+    if (lbl && lbl.textContent && lbl.textContent.includes('Category')) {
+      catCard = cards[i];
+      break;
+    }
+  }
+
+  if (!catCard || !cur || !cur._finalCategoryId) return;
+
+  var finalCatId = String(cur._finalCategoryId).trim();
+  var valDiv = catCard.querySelector('.val');
+  if (!valDiv) return;
+
+  // Get the final category name if available from cur.categoryName
+  // Otherwise just show the ID
+  var catName = cur.categoryName || '';
+
+  // Update the display to show final category (not provisional)
+  if (catName && catName !== 'undefined') {
+    valDiv.innerHTML = catName + '<span style="color:var(--mu);font-size:11px"> · ID ' + esc(finalCatId) + '</span>';
+  } else {
+    valDiv.innerHTML = '<span style="color:var(--mu)">ID ' + esc(finalCatId) + '</span>';
+  }
+
+  console.log('[CAT DISPLAY] Updated visible category to final: ' + finalCatId);
+}
+window.psRefreshFinalCategoryDisplay = psRefreshFinalCategoryDisplay;
 
 function psRetryConditionLoad() {
   if (cur && cur._conditionRequestedCategoryId) {
@@ -3689,6 +3757,9 @@ async function finishAnalyze(upc, prod, ebayFull, stepIn){
 
           // Store resolved category for CSV consistency checks
           startCur._finalCategoryId = String(finalCatId);
+
+          // [FIX v15] Update visible category display to show the actual final leaf category
+          psRefreshFinalCategoryDisplay();
 
           // Now load conditions for the validated category
           await psLoadCategoryConditions(finalCatId);
