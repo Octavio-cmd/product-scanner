@@ -89,7 +89,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-staging-preview-v8';
+window.PS_BUILD = '2026-10-08-converged-staging-preview-v9';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2292,16 +2292,22 @@ function updateDateDisplay() {
 async function psLoadCategoryConditions(finalCategoryId) {
   if (!cur || !finalCategoryId) return;
 
-  // Mark as loading
-  cur._conditionLoaded = false;
+  // Store requested category for retry
+  cur._conditionRequestedCategoryId = String(finalCategoryId).trim();
+
+  // Mark as loading (state machine)
+  cur._conditionState = 'loading';
   cur._conditionError = '';
   cur._availableConditions = [];
+  psRefreshConditionDisplay(); // Show loading state immediately
 
   try {
     const token = savvyToken();
     if (!token) {
-      cur._conditionError = 'No session';
-      console.error('[COND] No session token available');
+      cur._conditionState = 'error';
+      cur._conditionError = 'No session token available';
+      console.error('[COND] ' + cur._conditionError);
+      psRefreshConditionDisplay();
       return;
     }
 
@@ -2317,26 +2323,29 @@ async function psLoadCategoryConditions(finalCategoryId) {
 
     if (!response.ok) {
       const errorData = await response.json().catch(() => ({}));
-      cur._conditionError = errorData.error || 'Unable to fetch conditions';
-      console.error('[COND] Error: ' + cur._conditionError);
-      cur._conditionLoaded = true;
+      cur._conditionState = 'error';
+      cur._conditionError = errorData.error || ('HTTP ' + response.status);
+      console.error('[COND] HTTP Error: ' + cur._conditionError);
+      psRefreshConditionDisplay();
       return;
     }
 
     const data = await response.json();
 
     if (data.status === 'error') {
-      cur._conditionError = data.error || 'Unable to fetch conditions';
-      console.error('[COND] Error: ' + cur._conditionError);
-      cur._conditionLoaded = true;
+      cur._conditionState = 'error';
+      cur._conditionError = data.error || 'API error';
+      console.error('[COND] API Error: ' + cur._conditionError);
+      psRefreshConditionDisplay();
       return;
     }
 
     // Verify categoryId matches requested category (cache safety)
     if (String(data.categoryId).trim() !== String(finalCategoryId).trim()) {
-      cur._conditionError = 'Category mismatch in response';
-      console.error('[COND] Category mismatch: requested ' + finalCategoryId + ', got ' + data.categoryId);
-      cur._conditionLoaded = true;
+      cur._conditionState = 'error';
+      cur._conditionError = 'Category mismatch: requested ' + finalCategoryId + ', got ' + data.categoryId;
+      console.error('[COND] ' + cur._conditionError);
+      psRefreshConditionDisplay();
       return;
     }
 
@@ -2357,18 +2366,21 @@ async function psLoadCategoryConditions(finalCategoryId) {
       if (cur._conditionId) {
         const stillValid = cur._availableConditions.find(c => c.conditionId === cur._conditionId);
         if (!stillValid) {
+          console.log('[COND] Previous selection no longer valid in new category, clearing');
           cur._conditionId = null;
           cur._conditionDisplayName = '';
         }
       }
     }
 
-    cur._conditionLoaded = true;
+    // Set final state based on whether condition is required
+    cur._conditionState = cur._conditionRequired ? 'ready' : 'not_required';
+    cur._conditionError = '';
     psRefreshConditionDisplay(); // Update UI after load
   } catch (err) {
-    console.error('[COND] Error:', err);
-    cur._conditionError = err.message || 'Fetch failed';
-    cur._conditionLoaded = true;
+    console.error('[COND] Fetch error:', err);
+    cur._conditionState = 'error';
+    cur._conditionError = err.message || 'Network error';
     psRefreshConditionDisplay(); // Update UI with error state
   }
 }
@@ -2516,15 +2528,18 @@ function psRefreshConditionDisplay() {
   const condRow = document.getElementById('condition-row');
   if (!condRow) return;
 
-  if (!cur._conditionLoaded) {
+  // [COND] State machine: idle | loading | ready | error | not_required
+  const state = cur._conditionState || 'idle';
+
+  if (state === 'loading') {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--mu)">Loading conditions...</div>';
-  } else if (cur._conditionError) {
+  } else if (state === 'error') {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw)">⚠ Unable to load conditions</div>'
       + '<div style="font-size:12px;color:var(--mu);margin-top:4px;cursor:pointer" onclick="psRetryConditionLoad()">↻ Retry</div>';
-  } else if (cur._conditionRequired && !cur._conditionId) {
+  } else if (state === 'ready' && cur._conditionRequired && !cur._conditionId) {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="color:var(--dw);cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
       + '⚠ Select condition (REQUIRED) ›</div>';
-  } else if (cur._conditionId) {
+  } else if (state === 'ready' && cur._conditionId) {
     condRow.innerHTML = '<div class="lbl">Condition</div><div class="val" style="cursor:pointer" onclick="psOpenConditionWheelForCurrent()">'
       + (cur._conditionDisplayName || 'Selected') + ' ›</div>';
   } else {
@@ -2535,8 +2550,8 @@ function psRefreshConditionDisplay() {
 window.psRefreshConditionDisplay = psRefreshConditionDisplay;
 
 function psRetryConditionLoad() {
-  if (cur && cur._conditionCategoryId) {
-    psLoadCategoryConditions(cur._conditionCategoryId);
+  if (cur && cur._conditionRequestedCategoryId) {
+    psLoadCategoryConditions(cur._conditionRequestedCategoryId);
   }
 }
 window.psRetryConditionLoad = psRetryConditionLoad;
@@ -3691,8 +3706,35 @@ async function addBulk() {
     }
   }
 
-  // PHASE 3: Validar condición si es requerida
-  if (cur._conditionRequired && !cur._conditionId) {
+  // PHASE 3: Validar condición - state machine checks
+  const condState = cur._conditionState || 'idle';
+
+  // [COND] Block if conditions are still loading
+  if (condState === 'loading') {
+    toast('❌ CONDICIÓN - Las opciones aún se están cargando...');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if conditions failed to load AND user must retry
+  if (condState === 'error') {
+    toast('❌ CONDICIÓN - No se cargaron las opciones. Toca ↻ Retry antes de continuar.');
+    var addBtn = document.getElementById('addBtn');
+    if (addBtn) {
+      addBtn.disabled = false;
+      addBtn.textContent = '➕ ADD TO CSV';
+      addBtn.style.background = '';
+    }
+    return;
+  }
+
+  // [COND] Block if condition REQUIRED but not selected (state must be 'ready')
+  if (condState === 'ready' && cur._conditionRequired && !cur._conditionId) {
     toast('❌ FALTA CONDITION - Campo obligatorio para esta categoría');
     var addBtn = document.getElementById('addBtn');
     if (addBtn) {
@@ -3702,18 +3744,6 @@ async function addBulk() {
     }
     // Auto-open condition wheel for current product
     setTimeout(() => psOpenConditionWheelForCurrent(), 300);
-    return;
-  }
-
-  // Also block if condition metadata could not be loaded
-  if (!cur._conditionLoaded && cur._conditionError) {
-    toast('❌ Unable to load condition options. Retry and try again.');
-    var addBtn = document.getElementById('addBtn');
-    if (addBtn) {
-      addBtn.disabled = false;
-      addBtn.textContent = '➕ ADD TO CSV';
-      addBtn.style.background = '';
-    }
     return;
   }
 
@@ -4085,7 +4115,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     conditionRequired:   (cur && cur._conditionRequired) || false,
     availableConditions: (cur && cur._availableConditions) || [],
     conditionCategoryId: (cur && cur._conditionCategoryId) || '',
-    conditionLoaded:     (cur && cur._conditionLoaded) || false,
+    conditionState:      (cur && cur._conditionState) || 'idle',
     conditionError:      (cur && cur._conditionError) || ''
   });
   saveBulkToStorage();
@@ -4589,7 +4619,7 @@ async function addSplitPacksToCSV(){
       conditionRequired:   (cur && cur._conditionRequired) || false,
       availableConditions: (cur && cur._availableConditions) || [],
       conditionCategoryId: (cur && cur._conditionCategoryId) || '',
-      conditionLoaded:     (cur && cur._conditionLoaded) || false,
+      conditionState:      (cur && cur._conditionState) || 'idle',
       conditionError:      (cur && cur._conditionError) || ''
     });
     added++;
@@ -7734,6 +7764,41 @@ async function exportCSV(){
       'Abre cada uno, toca 📅 y agrega la fecha del envase. Después exporta otra vez.'
     );
     toast('🚫 Export detenido — faltan ' + _noExp.length + ' fecha(s) de expiración');
+    return;
+  }
+
+  // PHASE 3: Second-layer condition validation - check each item's condition state before export
+  var _badConditions = bulk.filter(function(it) {
+    var itemState = it.conditionState || 'idle';
+    // Block items in loading/error/idle states (conditions not ready)
+    if (itemState === 'loading' || itemState === 'error' || itemState === 'idle') return true;
+    // Block items where condition is REQUIRED but not selected
+    if (itemState === 'ready' && it.conditionRequired && !it.conditionId) return true;
+    return false;
+  });
+
+  if (_badConditions.length) {
+    var _condIssueList = _badConditions.map(function(it) {
+      var state = it.conditionState || 'idle';
+      if (state === 'loading') return '• ' + (it.sku || it.title || '?') + ' — conditions loading';
+      if (state === 'error') return '• ' + (it.sku || it.title || '?') + ' — conditions failed to load';
+      if (state === 'idle') return '• ' + (it.sku || it.title || '?') + ' — no condition loaded';
+      if (state === 'ready' && it.conditionRequired && !it.conditionId) return '• ' + (it.sku || it.title || '?') + ' — condition required but not selected';
+      return '• ' + (it.sku || it.title || '?');
+    }).join('\n');
+
+    window._exportLock = false;
+    if (expBtnEl) {
+      expBtnEl.innerHTML = expBtnOldHTML;
+      expBtnEl.style.opacity = '';
+      expBtnEl.style.pointerEvents = '';
+    }
+    alert(
+      '🚫 EXPORT DETENIDO\n\n' + _badConditions.length + ' producto(s) con problemas de CONDITION:\n\n' +
+      _condIssueList +
+      '\n\nEdita cada uno en la lista de arriba, confirma que la condición está cargada y seleccionada. Luego intenta exportar otra vez.'
+    );
+    toast('🚫 Export detenido — ' + _badConditions.length + ' producto(s) sin condición válida');
     return;
   }
 
