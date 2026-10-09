@@ -90,7 +90,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-09-condition-system-production-v35';
+window.PS_BUILD = '2026-10-09-condition-system-production-v35-1';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2454,9 +2454,7 @@ async function psLoadCategoryConditions(finalCategoryId) {
     cur._availableConditions = data.conditions || [];
     cur._conditionCategoryId = data.categoryId;
 
-    // [DIAGNOSTIC] Log detailed conditions array after load
     console.log('[COND] Loaded ' + cur._availableConditions.length + ' conditions');
-    console.log('[COND] Conditions array:', cur._availableConditions.map((c, i) => ({ idx: i, id: c.conditionId, name: c.conditionDisplayName })));
 
     // Auto-select if only one option
     if (cur._availableConditions.length === 1) {
@@ -2822,17 +2820,6 @@ function psOpenConditionWheelForCurrent() {
     return;
   }
 
-  // [DIAGNOSTIC] Log full state before opening wheel
-  console.log('[COND-WHEEL] state', {
-    conditionState: cur && cur._conditionState,
-    conditionId: cur && cur._conditionId,
-    conditionDisplayName: cur && cur._conditionDisplayName,
-    conditionCategoryId: cur && cur._conditionCategoryId,
-    conditionRequestedCategoryId: cur && cur._conditionRequestedCategoryId,
-    availableConditions: cur && cur._availableConditions,
-    availableConditionsLength: cur && cur._availableConditions && cur._availableConditions.length
-  });
-
   const conditions = cur._availableConditions;
   let tempSelectedId = cur._conditionId;
   let tempSelectedIndex = -1;
@@ -2880,9 +2867,6 @@ function psOpenConditionWheelForCurrent() {
     option.setAttribute('data-cond-id', cond.conditionId);
     option.setAttribute('data-idx', idx);
 
-    // [DIAGNOSTIC] Log each option being rendered
-    console.log('[COND-WHEEL] rendering option', idx, 'id:', cond.conditionId, 'name:', cond.conditionDisplayName);
-
     // Highlight if already selected
     if (cur._conditionId === cond.conditionId) {
       option.style.background = 'rgba(255,107,53,.15)';
@@ -2916,9 +2900,6 @@ function psOpenConditionWheelForCurrent() {
     options.push(option);
     optionsContainer.appendChild(option);
   });
-
-  // [DIAGNOSTIC] Log rendered option count
-  console.log('[COND-WHEEL] rendered option count:', options.length, 'requested count:', conditions.length);
 
   // Initialize tempSelectedIndex to first option if nothing selected yet
   if (tempSelectedIndex < 0 && options.length > 0) {
