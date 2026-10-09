@@ -90,7 +90,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-09-condition-sku-v36';
+window.PS_BUILD = '2026-10-09-condition-sku-v36-1';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -4582,7 +4582,7 @@ async function _addBulkInternal() {
   var expDate   = cur._expDate  || '';
   var location  = cur.location  || '';
 
-  if (bulk.find(function(b){ return b.upc === cur.upc; })) {
+  if (bulk.find(function(b){ return b.sku === usedSKU; })) {
     toast('⚠️ Already in CSV'); return;
   }
 
@@ -9375,8 +9375,9 @@ function locCapture(code) {
         // Actualizar también los packs YA agregados al CSV de este mismo producto,
         // para que la ubicación llegue al Sheet aunque se capture después de ADD TO CSV
         if (typeof bulk !== 'undefined' && Array.isArray(bulk)) {
+          var curSKU = makeSKU(cur.brand, cur.upc, cur.packSize || 1, cur.title, cur._conditionId);
           for (var bi = 0; bi < bulk.length; bi++) {
-            if (bulk[bi].upc === cur.upc) bulk[bi].location = code;
+            if (bulk[bi].sku === curSKU) bulk[bi].location = code;
           }
         }
         try { if (typeof saveBulkToStorage === 'function') saveBulkToStorage(); } catch(e) {}
