@@ -90,7 +90,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-09-condition-system-production-v35-1';
+window.PS_BUILD = '2026-10-09-condition-system-production-v36';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -413,9 +413,9 @@ function psSafeCategory(cat, fallback){
   return c;
 }
 
-// SKU: 3 letras marca (o primera palabra del título) + UPC + Npk
-function makeSKU(brand,upc,packs,title){
-  packs=packs||1; title=title||'';
+// SKU: 3 letras marca + UPC + [condition token] + Npk (Strategy B: NEW keeps legacy, others insert token before pack)
+function makeSKU(brand,upc,packs,title,conditionId){
+  packs=packs||1; title=title||''; conditionId=conditionId||1000;
   let src=(brand||'').trim();
   if(!src||src.toLowerCase()==='generic') src='';
   if(!src&&title){
@@ -424,7 +424,12 @@ function makeSKU(brand,upc,packs,title){
     src=words.find(w=>w.length>1&&!skip.has(w.toLowerCase()))||'';
   }
   const pfx=src.replace(/[^a-zA-Z]/g,'').substring(0,3).toUpperCase()||'GEN';
-  return pfx+'-'+upc+'-'+packs+'pk';
+  const condToken = psConditionSkuToken(conditionId);
+  if (condToken) {
+    return pfx+'-'+upc+'-'+condToken+'-'+packs+'pk';
+  } else {
+    return pfx+'-'+upc+'-'+packs+'pk';
+  }
 }
 
 // Categorys — mapa completo de categorías leaf de eBay
@@ -2627,6 +2632,19 @@ function psAddConditionLabelToTitle(title, conditionId) {
 }
 window.psAddConditionLabelToTitle = psAddConditionLabelToTitle;
 
+// [SYNC v36] Return condition token for SKU construction. NEW (1000) returns empty string (legacy format preserved)
+function psConditionSkuToken(conditionId) {
+  const tokens = {
+    1000: '',     // NEW — no token, preserve legacy SKU format
+    1500: 'OB',   // Open Box
+    2500: 'R',    // Refurbished
+    3000: 'U',    // Used
+    7000: 'P'     // For Parts
+  };
+  return tokens[conditionId] !== undefined ? tokens[conditionId] : '';
+}
+window.psConditionSkuToken = psConditionSkuToken;
+
 // [SYNC v30] Remove contradictory condition language symmetrically for all conditions
 function psNormalizeDescriptionForCondition(text, conditionId) {
   if (!text || typeof text !== 'string') return text;
@@ -4558,7 +4576,7 @@ async function _addBulkInternal() {
   var skuEl   = document.getElementById('pack-sku-display');
   var titleEl = document.getElementById('pack-title-display');
   var usedTitle = cur._selectedTitle || (titleEl && titleEl.dataset.val) || rebuildTitle(cur.title||'', packs);
-  var usedSKU   = cur._selectedSKU   || (skuEl   && skuEl.dataset.val)   || makeSKU(cur.brand, cur.upc, packs, cur.title);
+  var usedSKU   = cur._selectedSKU   || (skuEl   && skuEl.dataset.val)   || makeSKU(cur.brand, cur.upc, packs, cur.title, cur._conditionId);
   var usedPrice = cur._selectedPrice || parseFloat(cur.price) || 9.99;
   var shade     = (cur._shade   || '').trim();
   var expDate   = cur._expDate  || '';
@@ -5114,7 +5132,7 @@ async function addSplitPacksToCSV(){
 
   for (var i = 0; i < packsToAdd.length; i++) {
     var p = packsToAdd[i];
-    var sku = makeSKU(cur.brand, cur.upc, p, cur.title);
+    var sku = makeSKU(cur.brand, cur.upc, p, cur.title, cur._conditionId);
     // Peso total del paquete (unidad × pack + caja) para eBay/ShipStation.
     // getUnitWeightLb() lee las casillas lb/oz. Si no hay peso, queda 0.
     var _unitLb = (typeof getUnitWeightLb === 'function') ? getUnitWeightLb() : 0;
@@ -7407,7 +7425,7 @@ async function psSendToShopify() {
     }
 
     // SKU del 1pk
-    var sku = makeSKU(cur.brand, cur.upc, 1, cur.title);
+    var sku = makeSKU(cur.brand, cur.upc, 1, cur.title, cur._conditionId);
 
     // Título limpio
     var title = rebuildTitle(cur.title || '', 1, cur._shade || '', cur._expDate || '');
