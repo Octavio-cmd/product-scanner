@@ -79,6 +79,7 @@
       tapTimer = setTimeout(function(){ tapCount = 0; }, 1500);
       if(tapCount >= 5){ tapCount = 0; window.toggleDebugConsole(); }
     });
+
   });
 })();
 
@@ -89,7 +90,7 @@
 // Abre la consola de debug (5 toques al logo) y confirma esta línea antes de
 // dar por buena cualquier prueba. Si no coincide, el iPhone está cacheado.
 var _psSbInvVacio = {};
-window.PS_BUILD = '2026-10-08-converged-production-candidate-v18';
+window.PS_BUILD = '2026-10-09-condition-system-production-v35';
 try {
   console.log('[Savvy Scanner] build ' + window.PS_BUILD);
   window.addEventListener('load', function(){
@@ -2297,10 +2298,23 @@ window._psLeafCategoryMap = window._psLeafCategoryMap || {};
 function psResolveFinalCategory(item) {
   if (!item) return '31786';
 
+  // [v32] Priority 1: If category was already resolved and validated, that is AUTHORITATIVE
+  // Title changes (condition, manual edits) must NEVER invalidate the resolved final category
+  if (item._finalCategoryId) {
+    return String(item._finalCategoryId);
+  }
+
+  // [v32] Priority 2: Use the validated condition category from the last successful load
+  if (item._conditionCategoryId) {
+    return String(item._conditionCategoryId);
+  }
+
+  // [v32] Priority 3: Check cache for previously resolved mappings
   var map = window._psLeafCategoryMap || {};
   var key = String(item.category || '').trim() + '|' + String(item.title || '').trim();
   var keyTrim = key.substring(0, 120);
 
+  // [v32] Priority 4: Fallback to provisional category only if nothing else available
   return (
     map[key] ||
     map[keyTrim] ||
@@ -2440,13 +2454,17 @@ async function psLoadCategoryConditions(finalCategoryId) {
     cur._availableConditions = data.conditions || [];
     cur._conditionCategoryId = data.categoryId;
 
+    // [DIAGNOSTIC] Log detailed conditions array after load
     console.log('[COND] Loaded ' + cur._availableConditions.length + ' conditions');
+    console.log('[COND] Conditions array:', cur._availableConditions.map((c, i) => ({ idx: i, id: c.conditionId, name: c.conditionDisplayName })));
 
     // Auto-select if only one option
     if (cur._availableConditions.length === 1) {
       cur._conditionId = cur._availableConditions[0].conditionId;
       cur._conditionDisplayName = cur._availableConditions[0].conditionDisplayName;
       console.log('[COND] Auto-selected only option: ' + cur._conditionDisplayName);
+      // [SYNC v27] Apply full condition content sync
+      psApplyConditionContent(cur._conditionId);
     } else {
       // Multiple conditions available
       // First, check if a previous selection is still valid
@@ -2458,6 +2476,8 @@ async function psLoadCategoryConditions(finalCategoryId) {
       if (previousStillValid) {
         // Keep the previously selected condition
         console.log('[COND] Keeping previous selection: ' + cur._conditionDisplayName);
+        // [SYNC v27] Apply full condition content sync for kept selection
+        psApplyConditionContent(cur._conditionId);
       } else {
         // Previous selection not valid or none exists
         // Check if NEW (conditionId 1000) is available
@@ -2466,6 +2486,8 @@ async function psLoadCategoryConditions(finalCategoryId) {
           cur._conditionId = newCondition.conditionId;
           cur._conditionDisplayName = newCondition.conditionDisplayName;
           console.log('[COND] Auto-selected NEW: ' + cur._conditionDisplayName);
+          // [SYNC v27] Apply full condition content sync for auto-selected New
+          psApplyConditionContent(cur._conditionId);
         } else {
           // No NEW available, clear selection and let employee choose
           cur._conditionId = null;
@@ -2488,27 +2510,344 @@ async function psLoadCategoryConditions(finalCategoryId) {
 }
 window.psLoadCategoryConditions = psLoadCategoryConditions;
 
+// [SYNC v22] Sanitize title based on selected condition to remove contradictions
+function psSanitizeTitleForCondition(title, conditionId) {
+  if (!title || typeof title !== 'string') return title;
+
+  const condTerms = {
+    new: ['Used', 'Pre-Owned', 'Open Box', 'Open box', 'For Parts', 'Parts Only', 'Seller Refurbished', 'Refurbished'],
+    openBox: ['New', 'Brand New', 'Used', 'Pre-Owned', 'For Parts', 'Parts Only', 'Refurbished', 'Seller Refurbished'],
+    refurbished: ['New', 'Brand New', 'Open Box', 'Open box', 'Used', 'Pre-Owned', 'For Parts', 'Parts Only'],
+    used: ['New', 'Brand New', 'Open Box', 'Open box', 'Seller Refurbished', 'Refurbished', 'For Parts', 'Parts Only'],
+    forParts: ['New', 'Brand New', 'Open Box', 'Open box', 'Used', 'Pre-Owned', 'Seller Refurbished', 'Refurbished']
+  };
+
+  let termsToRemove = [];
+  switch(conditionId) {
+    case 1000: // New
+      termsToRemove = condTerms.new;
+      break;
+    case 1500: // Open box
+      termsToRemove = condTerms.openBox;
+      break;
+    case 2500: // Seller refurbished
+      termsToRemove = condTerms.refurbished;
+      break;
+    case 3000: // Used
+      termsToRemove = condTerms.used;
+      break;
+    case 7000: // For parts or not working
+      termsToRemove = condTerms.forParts;
+      break;
+    default:
+      return title;
+  }
+
+  // Remove contradictory terms from title
+  let sanitized = title;
+  termsToRemove.forEach(term => {
+    const regex = new RegExp('\\b' + term + '\\b', 'gi');
+    sanitized = sanitized.replace(regex, '');
+  });
+
+  // Clean up extra spaces
+  sanitized = sanitized.replace(/\s+/g, ' ').trim();
+
+  // Preserve 80 char limit
+  if (sanitized.length > 80) {
+    sanitized = sanitized.substring(0, 80).trim();
+  }
+
+  return sanitized;
+}
+window.psSanitizeTitleForCondition = psSanitizeTitleForCondition;
+
+// [SYNC v27] Add condition label to title, preventing duplicates
+function psAddConditionLabelToTitle(title, conditionId) {
+  if (!title || typeof title !== 'string') return title;
+
+  const conditionLabels = {
+    1000: 'New',
+    1500: 'Open Box',
+    2500: 'Refurbished',
+    3000: 'Used',
+    7000: 'For Parts'
+  };
+
+  const label = conditionLabels[conditionId];
+  if (!label) return title;
+
+  // Step 1: Remove ALL condition phrases from title (longest first to avoid partial matches)
+  let canonical = title;
+  const conditionPhrases = [
+    'Brand New',
+    'Seller Refurbished',
+    'Open-box',
+    'Open Box',
+    'Pre-Owned',
+    'Preowned',
+    'Parts Only',
+    'For Parts',
+    'Not Working',
+    'Refurbished',
+    'New',
+    'Used'
+  ];
+
+  conditionPhrases.forEach(phrase => {
+    const regex = new RegExp('\\b' + phrase.replace(/[\s\-]/g, '[\\s\\-]*') + '\\b', 'gi');
+    canonical = canonical.replace(regex, '');
+  });
+
+  // Clean up extra spaces
+  canonical = canonical.replace(/\s+/g, ' ').trim();
+
+  // Step 2: Append selected condition label
+  const targetLength = 80;
+  const labelWithSpace = ' ' + label;
+
+  // Try to append if space allows
+  if (canonical.length + labelWithSpace.length <= targetLength) {
+    return canonical + labelWithSpace;
+  }
+
+  // If no space, trim trailing words from canonical until we have room
+  const wordList = canonical.split(' ');
+  while (canonical.length + labelWithSpace.length > targetLength && wordList.length > 2) {
+    wordList.pop();
+    canonical = wordList.join(' ');
+  }
+
+  // Final append with length check
+  const result = canonical + labelWithSpace;
+  if (result.length <= targetLength) {
+    return result;
+  }
+
+  // Emergency fallback: return truncated
+  return result.substring(0, targetLength);
+}
+window.psAddConditionLabelToTitle = psAddConditionLabelToTitle;
+
+// [SYNC v30] Remove contradictory condition language symmetrically for all conditions
+function psNormalizeDescriptionForCondition(text, conditionId) {
+  if (!text || typeof text !== 'string') return text;
+
+  let patterns = [];
+
+  if (conditionId === 1000) {
+    // NEW: Remove Open Box, Used, Pre-Owned, Refurbished, For Parts, Not Working references
+    patterns = [
+      /[^.!?]*\b(?:open[\s-]?box|open-box)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:pre[\s-]?owned|preowned)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bseller\s+refurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\brefurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:for\s+parts|parts\s+only|not\s+working)\b[^.!?]*[.!?]/gi
+    ];
+  } else if (conditionId === 1500) {
+    // OPEN BOX: Remove Brand New, Used, Refurbished, For Parts, Not Working
+    patterns = [
+      /[^.!?]*\bbrand[\s-]*new\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bfactory[\s-]*sealed\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+in\s+(?:box|packaging)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+item\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:never\s+)?unopened\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bunused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:pre[\s-]?owned|preowned)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bseller\s+refurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\brefurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:for\s+parts|parts\s+only|not\s+working)\b[^.!?]*[.!?]/gi
+    ];
+  } else if (conditionId === 2500) {
+    // SELLER REFURBISHED: Remove Brand New, Open Box, Used, For Parts, Not Working
+    patterns = [
+      /[^.!?]*\bbrand[\s-]*new\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bfactory[\s-]*sealed\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+in\s+(?:box|packaging)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+item\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:never\s+)?unopened\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bunused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:open[\s-]?box|open-box)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:pre[\s-]?owned|preowned)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:for\s+parts|parts\s+only|not\s+working)\b[^.!?]*[.!?]/gi
+    ];
+  } else if (conditionId === 3000) {
+    // USED: Remove Brand New, Open Box, Refurbished, For Parts, Not Working
+    patterns = [
+      /[^.!?]*\bbrand[\s-]*new\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bfactory[\s-]*sealed\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+in\s+(?:box|packaging)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+item\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:never\s+)?unopened\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bunused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:open[\s-]?box|open-box)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bseller\s+refurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\brefurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:for\s+parts|parts\s+only|not\s+working)\b[^.!?]*[.!?]/gi
+    ];
+  } else if (conditionId === 7000) {
+    // FOR PARTS OR NOT WORKING: Remove Brand New, Open Box, Used, Refurbished
+    patterns = [
+      /[^.!?]*\bbrand[\s-]*new\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bfactory[\s-]*sealed\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+in\s+(?:box|packaging)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bnew\s+item\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:never\s+)?unopened\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bunused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:open[\s-]?box|open-box)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bused\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\b(?:pre[\s-]?owned|preowned)\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\bseller\s+refurbished\b[^.!?]*[.!?]/gi,
+      /[^.!?]*\brefurbished\b[^.!?]*[.!?]/gi
+    ];
+  }
+
+  let normalized = text;
+  patterns.forEach(pattern => {
+    normalized = normalized.replace(pattern, ' ');
+  });
+
+  // Clean up: remove multiple spaces, trim
+  normalized = normalized.replace(/\s+/g, ' ').trim();
+
+  return normalized;
+}
+
+// [SYNC v25] Rebuild description from clean base + current condition
+function psRebuildDescriptionForCondition(baseDescription, conditionId) {
+  if (!baseDescription || typeof baseDescription !== 'object') return baseDescription;
+
+  // Clone to avoid mutation
+  const rebuilt = {
+    intro: baseDescription.intro ? psNormalizeDescriptionForCondition(baseDescription.intro, conditionId) : '',
+    benefits: Array.isArray(baseDescription.benefits)
+      ? baseDescription.benefits.map(b => psNormalizeDescriptionForCondition(String(b), conditionId))
+      : [],
+    package_contents: baseDescription.package_contents
+      ? psNormalizeDescriptionForCondition(baseDescription.package_contents, conditionId)
+      : '',
+    disclaimer: baseDescription.disclaimer
+      ? psNormalizeDescriptionForCondition(baseDescription.disclaimer, conditionId)
+      : ''
+  };
+
+  // Prepend CONDITION section based on condition
+  const conditionSections = {
+    1000: 'New',
+    1500: 'Open Box\nPlease review the photos for the exact packaging condition and included accessories.',
+    2500: 'Seller Refurbished\nPlease review the photos and listing details for the exact cosmetic condition and included accessories.',
+    3000: 'Used\nPlease review the photos for the exact cosmetic condition and included accessories.',
+    7000: 'For Parts or Not Working\nItem may require repair or may not function as intended. Please review the photos and listing details carefully.'
+  };
+
+  const conditionText = conditionSections[conditionId];
+  if (conditionText) {
+    rebuilt.intro = 'CONDITION:\n' + conditionText + '\n\n' + rebuilt.intro;
+  }
+
+  return rebuilt;
+}
+window.psRebuildDescriptionForCondition = psRebuildDescriptionForCondition;
+
+// [SYNC v27] Single reusable function to apply condition content to current product
+function psApplyConditionContent(conditionId) {
+  if (!cur) return;
+
+  // Update condition state
+  const matchingCondition = cur._availableConditions && cur._availableConditions.find(c => c.conditionId === conditionId);
+  if (matchingCondition) {
+    cur._conditionId = conditionId;
+    cur._conditionDisplayName = matchingCondition.conditionDisplayName;
+  }
+
+  // Get the current effective title
+  const titleDisplay = document.getElementById('pack-title-display');
+  const currentEffectiveTitle = cur._selectedTitle || (titleDisplay && titleDisplay.dataset.val) || cur.title || '';
+
+  if (currentEffectiveTitle) {
+    // TITLE: Sanitize + Add condition label (with duplicate prevention)
+    let finalTitle = psSanitizeTitleForCondition(currentEffectiveTitle, conditionId);
+    finalTitle = psAddConditionLabelToTitle(finalTitle, conditionId);
+    console.log('[COND-CONTENT v27] Title: "' + currentEffectiveTitle + '" → "' + finalTitle + '"');
+
+    // Synchronize ALL title sources
+    cur.title = finalTitle;
+    cur._selectedTitle = finalTitle;
+
+    // Update visible DOM for title
+    if (titleDisplay) {
+      titleDisplay.textContent = finalTitle;
+      titleDisplay.dataset.val = finalTitle;
+    }
+
+    // Update title edit textarea
+    const titleInput = document.getElementById('pack-title-input');
+    if (titleInput) titleInput.value = finalTitle;
+
+    // Update title character count
+    const charCount = document.getElementById('title-char-count');
+    if (charCount) charCount.textContent = (finalTitle || '').length + '/80 chars';
+
+    // Prevent packState from overwriting with stale baseTitle
+    if (window._packState && window._packState.baseTitle) {
+      window._packState.baseTitle = finalTitle;
+    }
+  }
+
+  // DESCRIPTION: Rebuild from clean base with current condition
+  if (cur._description) {
+    // Use clean base for rebuild to avoid carryover
+    const baseDesc = cur._conditionBaseDescription || cur._description;
+    const rebuiltDesc = psRebuildDescriptionForCondition(baseDesc, conditionId);
+    cur._description = rebuiltDesc;
+
+    // Update visible description DOM immediately
+    const descResult = document.getElementById('ps-desc-result');
+    if (descResult) {
+      const renderedHtml = renderDescriptionHTML(rebuiltDesc);
+      descResult.innerHTML = renderedHtml;
+    }
+  }
+}
+window.psApplyConditionContent = psApplyConditionContent;
+
 // Open condition wheel picker for CURRENT PRODUCT (before adding to bulk)
+// [FIX v21] iOS-safe picker: robust tappable rows, no transforms, no clipping
 function psOpenConditionWheelForCurrent() {
   if (!cur || !cur._availableConditions || cur._availableConditions.length === 0) {
     toast('❌ No conditions available for this category');
     return;
   }
 
+  // [DIAGNOSTIC] Log full state before opening wheel
+  console.log('[COND-WHEEL] state', {
+    conditionState: cur && cur._conditionState,
+    conditionId: cur && cur._conditionId,
+    conditionDisplayName: cur && cur._conditionDisplayName,
+    conditionCategoryId: cur && cur._conditionCategoryId,
+    conditionRequestedCategoryId: cur && cur._conditionRequestedCategoryId,
+    availableConditions: cur && cur._availableConditions,
+    availableConditionsLength: cur && cur._availableConditions && cur._availableConditions.length
+  });
+
   const conditions = cur._availableConditions;
-  let tempSelectedId = cur._conditionId; // Temporary selection during scroll
+  let tempSelectedId = cur._conditionId;
   let tempSelectedIndex = -1;
 
-  // Create wheel picker overlay
+  // Create overlay with modal backdrop
   const overlay = document.createElement('div');
   overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,.5);z-index:9998;display:flex;flex-direction:column;justify-content:flex-end';
+  overlay.onclick = (e) => { if (e.target === overlay) overlay.remove(); };
 
   const sheet = document.createElement('div');
   sheet.style.cssText = 'background:var(--bg);border-radius:16px 16px 0 0;overflow:hidden;max-height:80vh;display:flex;flex-direction:column';
 
   // Header
   const header = document.createElement('div');
-  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--bd);background:var(--sf)';
+  header.style.cssText = 'display:flex;justify-content:space-between;align-items:center;padding:16px;border-bottom:1px solid var(--bd);background:var(--sf);flex-shrink:0';
   const cancelBtn = document.createElement('button');
   cancelBtn.textContent = 'Cancel';
   cancelBtn.style.cssText = 'background:none;border:none;color:var(--sv);font-size:14px;cursor:pointer;padding:4px';
@@ -2526,132 +2865,96 @@ function psOpenConditionWheelForCurrent() {
   header.appendChild(titleDiv);
   header.appendChild(doneBtn);
 
-  // Wheel container
-  const wheelContainer = document.createElement('div');
-  wheelContainer.style.cssText = 'flex:1;overflow-y:scroll;scroll-snap-type:y mandatory;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;position:relative';
+  // Options container — simple scrollable list, no transforms, full width
+  const optionsContainer = document.createElement('div');
+  optionsContainer.style.cssText = 'flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;display:flex;flex-direction:column;width:100%;min-height:0';
 
-  // Add spacer top
-  const spacerTop = document.createElement('div');
-  spacerTop.style.height = 'calc(var(--ch, 44px) * 2)';
-  wheelContainer.appendChild(spacerTop);
-
-  // Add condition options
+  // Add condition options as simple tappable rows
   const options = [];
   conditions.forEach((cond, idx) => {
     const option = document.createElement('div');
-    option.style.cssText = 'flex:0 0 var(--ch, 44px);display:flex;align-items:center;justify-content:center;'
-      +'scroll-snap-align:center;cursor:pointer;font-size:16px;color:var(--sv);border:1px solid transparent;opacity:0.6;transition:opacity .2s,border-color .2s;font-weight:400';
+    option.style.cssText = 'flex:0 0 auto;min-height:48px;padding:12px 16px;display:flex;align-items:center;'
+      +'cursor:pointer;font-size:16px;color:var(--sv);border-bottom:1px solid var(--bd);'
+      +'transition:background-color .2s,color .2s;background:transparent';
     option.textContent = cond.conditionDisplayName;
     option.setAttribute('data-cond-id', cond.conditionId);
     option.setAttribute('data-idx', idx);
 
+    // [DIAGNOSTIC] Log each option being rendered
+    console.log('[COND-WHEEL] rendering option', idx, 'id:', cond.conditionId, 'name:', cond.conditionDisplayName);
+
     // Highlight if already selected
     if (cur._conditionId === cond.conditionId) {
-      option.style.opacity = '1';
+      option.style.background = 'rgba(255,107,53,.15)';
       option.style.fontWeight = '800';
-      option.style.borderColor = 'var(--ac)';
+      option.style.color = 'var(--ac)';
       tempSelectedIndex = idx;
       tempSelectedId = cond.conditionId;
     }
 
-    // [FIX v15] Add click/tap handler to make options selectable
-    option.addEventListener('click', function() {
+    // Tap handler
+    option.addEventListener('click', function(e) {
+      e.stopPropagation();
       tempSelectedIndex = idx;
       tempSelectedId = cond.conditionId;
 
       // Update visual highlighting for all options
       options.forEach(function(o, i) {
-        var selected = i === idx;
-        o.style.opacity = selected ? '1' : '0.6';
-        o.style.fontWeight = selected ? '800' : '400';
-        o.style.borderColor = selected ? 'var(--ac)' : 'transparent';
+        var isSelected = i === idx;
+        o.style.background = isSelected ? 'rgba(255,107,53,.15)' : 'transparent';
+        o.style.fontWeight = isSelected ? '800' : '400';
+        o.style.color = isSelected ? 'var(--ac)' : 'var(--sv)';
       });
 
-      // Scroll selected option to center
+      // Scroll selected into view
       option.scrollIntoView({
-        behavior: 'smooth',
-        block: 'center'
+        behavior: 'auto',
+        block: 'nearest'
       });
     });
 
     options.push(option);
-    wheelContainer.appendChild(option);
+    optionsContainer.appendChild(option);
   });
+
+  // [DIAGNOSTIC] Log rendered option count
+  console.log('[COND-WHEEL] rendered option count:', options.length, 'requested count:', conditions.length);
 
   // Initialize tempSelectedIndex to first option if nothing selected yet
   if (tempSelectedIndex < 0 && options.length > 0) {
     tempSelectedIndex = 0;
     tempSelectedId = conditions[0].conditionId;
-    setTimeout(() => {
-      options[0].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      updateCenteredOption();
-    }, 100);
+    options[0].style.background = 'rgba(255,107,53,.15)';
+    options[0].style.fontWeight = '800';
+    options[0].style.color = 'var(--ac)';
   }
 
-  // Add spacer bottom
-  const spacerBottom = document.createElement('div');
-  spacerBottom.style.height = 'calc(var(--ch, 44px) * 2)';
-  wheelContainer.appendChild(spacerBottom);
-
-  // Center highlight band
-  const centerBand = document.createElement('div');
-  centerBand.style.cssText = 'position:absolute;top:50%;left:0;right:0;height:var(--ch, 44px);'
-    +'border-top:1px solid var(--ac);border-bottom:1px solid var(--ac);pointer-events:none;'
-    +'opacity:0.3;z-index:1;transform:translateY(-50%)';
-  wheelContainer.appendChild(centerBand);
-
-  // Track scroll to determine centered option
-  const updateCenteredOption = () => {
-    const containerRect = wheelContainer.getBoundingClientRect();
-    const containerCenter = containerRect.height / 2;
-
-    options.forEach((opt, idx) => {
-      const optRect = opt.getBoundingClientRect();
-      const optCenter = optRect.top + optRect.height / 2 - containerRect.top;
-      const distance = Math.abs(optCenter - containerCenter);
-
-      if (distance < 30) {
-        // This option is centered
-        tempSelectedIndex = idx;
-        tempSelectedId = conditions[idx].conditionId;
-        opt.style.opacity = '1';
-        opt.style.fontWeight = '800';
-        opt.style.borderColor = 'var(--ac)';
-      } else {
-        opt.style.opacity = '0.6';
-        opt.style.fontWeight = '400';
-        opt.style.borderColor = 'transparent';
-      }
-    });
-  };
-
-  wheelContainer.addEventListener('scroll', updateCenteredOption, false);
-
-  // Done button handler
+  // Done button handler - uses single reusable psApplyConditionContent function
   doneBtn.onclick = () => {
     if (tempSelectedIndex >= 0 && tempSelectedIndex < conditions.length) {
       const selected = conditions[tempSelectedIndex];
-      cur._conditionId = selected.conditionId;
-      cur._conditionDisplayName = selected.conditionDisplayName;
-      console.log('[COND] Selected: ' + cur._conditionDisplayName + ' (' + cur._conditionId + ')');
+      console.log('[COND] Selected: ' + selected.conditionDisplayName + ' (' + selected.conditionId + ')');
+      psApplyConditionContent(selected.conditionId);
     }
     overlay.remove();
-    psRefreshConditionDisplay(); // Refresh the condition row
+    psRefreshConditionDisplay();
   };
 
   sheet.appendChild(header);
-  sheet.appendChild(wheelContainer);
+  sheet.appendChild(optionsContainer);
   overlay.appendChild(sheet);
   overlay.setAttribute('data-picker', '');
 
   document.body.appendChild(overlay);
 
-  // Auto-scroll to current selection if exists
+  // Auto-scroll to current selection
   if (tempSelectedIndex >= 0) {
     setTimeout(() => {
-      options[tempSelectedIndex].scrollIntoView({ behavior: 'smooth', block: 'center' });
-      updateCenteredOption();
-    }, 100);
+      options[tempSelectedIndex].scrollIntoView({
+        behavior: 'auto',
+        block: 'nearest'
+      });
+    }, 50);
   }
 }
 window.psOpenConditionWheelForCurrent = psOpenConditionWheelForCurrent;
@@ -3872,6 +4175,12 @@ async function addBulk() {
     // con bullets (nunca la oración plana de 1 línea).
     if (cur && !cur._description) {
       cur._description = buildLocalFallbackDescription(cur, cur.packSize || 1);
+      // [SYNC v28.1] Capture clean base for fallback description before reapplying condition
+      cur._conditionBaseDescription = JSON.parse(JSON.stringify(cur._description));
+      // [SYNC v28] If condition was already auto-selected, reapply to fallback description
+      if (cur._conditionId) {
+        psApplyConditionContent(cur._conditionId);
+      }
       if (window._psDebug) window._psDebug('⚠️ Descripción IA no llegó a tiempo — usando fallback local con bullets');
     }
   }
@@ -4368,7 +4677,7 @@ async function _doAddBulk(usedTitle, usedSKU, usedPrice, shade, expDate, locatio
     upc:         (cur && cur.upc)         || '',
     brand:       (cur && cur.brand)       || 'Generic',
     category:    psSafeCategory(cur && cur.category),
-    description: descToEbayHTML(descForPack((cur && (cur._description || cur.description)) || '', packs)) || '',
+    description: descToEbayHTML(descForPack((cur && (cur._description || cur.description)) || '', packs, (cur && cur._conditionId) || null)) || '',
     location:    location,
     packs:       packs,
     photo:       photoUrl,
@@ -4711,6 +5020,12 @@ async function addSplitPacksToCSV(){
     }
     if (cur && !cur._description) {
       cur._description = buildLocalFallbackDescription(cur, cur.packSize || 1);
+      // [SYNC v28.1] Capture clean base for fallback description before reapplying condition
+      cur._conditionBaseDescription = JSON.parse(JSON.stringify(cur._description));
+      // [SYNC v28] If condition was already auto-selected, reapply to fallback description
+      if (cur._conditionId) {
+        psApplyConditionContent(cur._conditionId);
+      }
       if (window._psDebug) window._psDebug('⚠️ Descripción IA no llegó a tiempo — usando fallback local con bullets');
     }
   }
@@ -4832,6 +5147,11 @@ async function addSplitPacksToCSV(){
     if (dup) { skippedDup++; continue; }
 
     var title = rebuildTitle(baseTitle, p, shade, expDate);
+    // V34: Apply condition normalization to all pack titles (1pk, 3pk, 6pk, 12pk)
+    if (cur && cur._conditionId) {
+      title = psSanitizeTitleForCondition(title, cur._conditionId);  // Remove contradictory condition terms
+      title = psAddConditionLabelToTitle(title, cur._conditionId);  // Append selected condition
+    }
     var price = calcBundlePrice(cur.ebay || {}, p);
 
     // Armar las fotos del listado:
@@ -4865,7 +5185,7 @@ async function addSplitPacksToCSV(){
       upc:         cur.upc || '',
       brand:       cur.brand || 'Generic',
       category:    psSafeCategory(cur.category),
-      description: descToEbayHTML(descForPack(cur._description || cur.description, p)) || '',
+      description: descToEbayHTML(descForPack(cur._description || cur.description, p, (cur && cur._conditionId) || null)) || '',
       location:    location,
       packs:       p,
       quantity:    getSplitListings(split, p),
@@ -5392,15 +5712,38 @@ const PS_DESC_DISCLAIMER = 'This multi-pack bundle was packaged by our store for
 // Detectado en GOV-850061998606-1pk (Govee H706A).
 const PS_DESC_DISCLAIMER_SINGLE = 'Brand new, factory-sealed, and 100% authentic, made by the original manufacturer. Retail packaging may vary.';
 
-function psDisclaimerForPack(disclaimer, packs) {
-  if (!disclaimer) return '';
-  if (Number(packs) > 1) return disclaimer;
-  // Solo se sustituye el texto de bundle. Si alguien puso otro disclaimer
-  // a mano, se respeta tal cual.
-  if (/multi-pack bundle was packaged by our store/i.test(disclaimer)) {
-    return PS_DESC_DISCLAIMER_SINGLE;
+// [v33] Condition-aware disclaimer for CSV export
+function psDisclaimerForPack(packs, conditionId) {
+  const conditionLabels = {
+    1000: 'New',
+    1500: 'Open Box',
+    2500: 'Refurbished',
+    3000: 'Used',
+    7000: 'For Parts'
+  };
+
+  // For New condition, preserve original New-specific disclaimer
+  if (conditionId === 1000) {
+    if (Number(packs) > 1) {
+      return PS_DESC_DISCLAIMER;
+    } else {
+      return PS_DESC_DISCLAIMER_SINGLE;
+    }
   }
-  return disclaimer;
+
+  // For all other conditions, use neutral disclaimers
+  switch (conditionId) {
+    case 1500: // Open Box
+      return 'Please review the photos and listing details carefully for the exact condition and included items. Retail packaging may vary.';
+    case 2500: // Seller Refurbished
+      return 'Please review the photos and listing details carefully for the exact cosmetic condition and included items. Retail packaging may vary.';
+    case 3000: // Used
+      return 'Please review the photos and listing details carefully for the exact cosmetic condition and included items. Retail packaging may vary.';
+    case 7000: // For Parts or Not Working
+      return 'Item may require repair or may not function as intended. Please review the photos and listing details carefully for the exact condition and included items.';
+    default:
+      return ''; // No disclaimer for unknown conditions
+  }
 }
 
 async function psAutoGenerateDescription(){
@@ -5484,6 +5827,15 @@ Rules:
       package_contents: _fixPluralEcho(parsed.package_contents || ''),
       disclaimer: PS_DESC_DISCLAIMER
     };
+
+    // [SYNC v25] Capture condition-free base for later rebuilds
+    cur._conditionBaseDescription = JSON.parse(JSON.stringify(cur._description));
+
+    // [SYNC v28] If condition was already auto-selected, reapply to the now-available description
+    if (cur._conditionId) {
+      psApplyConditionContent(cur._conditionId);
+    }
+
     if(out) out.innerHTML = renderDescriptionHTML(cur._description);
   }catch(err){
     console.error('psAutoGenerateDescription error:', err);
@@ -7042,6 +7394,12 @@ async function psSendToShopify() {
     }
     if (cur && !cur._description) {
       cur._description = buildLocalFallbackDescription(cur, cur.packSize || 1);
+      // [SYNC v28.1] Capture clean base for fallback description before reapplying condition
+      cur._conditionBaseDescription = JSON.parse(JSON.stringify(cur._description));
+      // [SYNC v28] If condition was already auto-selected, reapply to fallback description
+      if (cur._conditionId) {
+        psApplyConditionContent(cur._conditionId);
+      }
       if (window._psDebug) window._psDebug('⚠️ Descripción IA no llegó a tiempo — usando fallback local con bullets');
     }
     if (btn) btn.textContent = '⏳ Enviando a Shopify...';
@@ -7225,18 +7583,23 @@ function buildLocalFallbackDescription(curObj, packs) {
   if (specs['Formulation']) benefits.push('Formulation: ' + specs['Formulation']);
   if (specs['Suitable For'] || specs['Hair Type']) benefits.push('Suitable for: ' + (specs['Suitable For'] || specs['Hair Type']));
   if (!benefits.length) benefits = ['Brand new, factory-sealed', 'Fast shipping from our North Carolina warehouse', '100% authentic, original manufacturer packaging'];
-  return {
+  var desc = {
     intro: (brand ? brand + ' — ' : '') + (title || 'Quality product') + '. Brand new and factory sealed.',
     benefits: benefits,
     package_contents: 'This listing includes ' + packs + ' unit' + (packs>1?'s':'') + ', brand new and factory-sealed.',
     disclaimer: PS_DESC_DISCLAIMER
   };
+  // [SYNC v25] Also store as clean base for condition rebuilds
+  if (curObj) curObj._conditionBaseDescription = JSON.parse(JSON.stringify(desc));
+  return desc;
 }
 
-function descForPack(desc, packs) {
+// [v33] Condition-aware description formatting for CSV export
+function descForPack(desc, packs, conditionId) {
   if (!desc) return desc;
   var unitWord = packs > 1 ? 'units' : 'unit';
-  var qtyLine = 'This listing includes ' + packs + ' ' + unitWord + ', brand new and factory-sealed.';
+  // [v33] Neutral quantity line - no condition-specific claims
+  var qtyLine = 'This listing includes ' + packs + ' ' + unitWord + '.';
   // Palabras contables que suelen llevar un número de cantidad delante.
   var COUNT_WORDS = 'units?|bottles?|boxes|box|packs?|pieces?|pcs?|items?|containers?|jars?|tubes?|cans?|bags?|pouches?|packets?|sets?|count|ct';
   // ── Normaliza singular/plural de una palabra contable según packs.
@@ -7292,7 +7655,7 @@ function descForPack(desc, packs) {
     intro: fixQty(desc.intro || ''),
     benefits: (desc.benefits || []).map(fixQty),
     package_contents: pc,
-    disclaimer: psDisclaimerForPack(desc.disclaimer || '', packs)
+    disclaimer: psDisclaimerForPack(packs, conditionId)
   };
 }
 
@@ -8222,6 +8585,11 @@ async function exportCSV(){
     else if (/\bcentrum\b/.test(titleLower)) { brandFix = 'Centrum'; }
 
     var cleanTitle = psFixTitleCase((it.title||'').replace(/[\u{1F300}-\u{1FFFF}\u{2600}-\u{27FF}\u{2B00}-\u{2BFF}\u{FE00}-\u{FEFF}✳️⭐🔥💊📦✅❌⚠️🌟💰📊🏷️]/gu, '').replace(/\s+/g,' ').trim(), it.brand).substring(0,80);
+
+    // [SYNC v22] Final title sanitization before CSV export — ensure condition consistency
+    if (it.conditionId) {
+      cleanTitle = psSanitizeTitleForCondition(cleanTitle, it.conditionId);
+    }
 
     // Model — required for Electronics & Appliances
     // ── Precedencia: structured specifics → title regex → "Does Not Apply"
