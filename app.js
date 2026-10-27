@@ -1635,18 +1635,40 @@ async function psCapturePhoto(slotId){
   // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto / Archivo
   // (las tres opciones que necesitamos)
 
+  // Safari: el input debe estar en el DOM antes de click(). Fuera de pantalla
+  // (más fiable que display:none). Se retira en change o en cancel.
+  input.style.position = 'fixed';
+  input.style.left = '-10000px';
+  input.style.top = '-10000px';
+  input.style.width = '1px';
+  input.style.height = '1px';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+
   input.onchange = async function(e){
     var file = e.target.files[0];
+    if (input.parentNode) input.parentNode.removeChild(input);
     if(!file) return;
+
+    // Cada selección recibe un número de secuencia por ranura. Solo la selección
+    // más reciente puede escribir la ranura: si una foto anterior termina después,
+    // su resultado se descarta y no sobrescribe la foto nueva.
+    var seqKey = '_psSeq_' + slotId;
+    window[seqKey] = (window[seqKey] || 0) + 1;
+    var mySeq = window[seqKey];
+    var isStale = function(){ return mySeq !== window[seqKey]; };
 
     var slot = document.getElementById('ps-slot-' + slotId);
     var setStatus = function(msg){
+      // Un progreso de una selección obsoleta no debe tapar la foto más reciente.
+      if(isStale()) return;
       if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:24px;height:24px;margin:0 auto 6px"></div><div style="font-size:10px;color:var(--mu)">'+msg+'</div></div>';
     };
     setStatus('Comprimiendo...');
 
     try{
       const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, setStatus);
+      if (isStale()) { console.log('[PS] resultado obsoleto descartado: ' + slotId); return; }
 
       if (cur) {
         if (slotId === 'front') { cur._frontImg = finalUrl; cur._frontImgLocal = localUrl; }
@@ -1660,6 +1682,7 @@ async function psCapturePhoto(slotId){
       toast('✅ Fondo removido — ' + (slotId==='front'?'Front':'Back') + ' lista');
     }catch(err){
       console.error('psCapturePhoto error:', err);
+      if (isStale()) { console.log('[PS] error obsoleto descartado: ' + slotId); return; }
       // ── FALLBACK ROBUSTO: si rembg o ImgBB fallan, usar la foto original
       // comprimida sin fondo removido. El proceso NO se detiene.
       toast('⚠️ rembg falló — usando foto original (sin fondo removido)');
@@ -1687,6 +1710,11 @@ async function psCapturePhoto(slotId){
         if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div style="font-size:24px">📷</div><div style="font-size:10px;color:#ff5252">Error — toca para reintentar</div></div>';
       }
     }
+  };
+
+  // Cancelar el selector sin elegir foto: retirar el input.
+  input.oncancel = function(){
+    if (input.parentNode) input.parentNode.removeChild(input);
   };
 
   // PRIMERO el click — luego nada más. Safari requiere que el click sea inmediato.
