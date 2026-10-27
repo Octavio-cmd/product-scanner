@@ -1635,8 +1635,19 @@ async function psCapturePhoto(slotId){
   // Sin input.capture → iOS muestra su menú nativo: Fototeca / Tomar foto / Archivo
   // (las tres opciones que necesitamos)
 
+  // Safari: el input debe estar en el DOM antes de click(). Fuera de pantalla
+  // (más fiable que display:none). Se retira en change o en cancel.
+  input.style.position = 'fixed';
+  input.style.left = '-10000px';
+  input.style.top = '-10000px';
+  input.style.width = '1px';
+  input.style.height = '1px';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+
   input.onchange = async function(e){
     var file = e.target.files[0];
+    if (input.parentNode) input.parentNode.removeChild(input);
     if(!file) return;
 
     // Cada selección recibe un número de secuencia por ranura. Solo la selección
@@ -1699,6 +1710,11 @@ async function psCapturePhoto(slotId){
         if(slot) slot.innerHTML = '<div style="text-align:center;padding:8px"><div style="font-size:24px">📷</div><div style="font-size:10px;color:#ff5252">Error — toca para reintentar</div></div>';
       }
     }
+  };
+
+  // Cancelar el selector sin elegir foto: retirar el input.
+  input.oncancel = function(){
+    if (input.parentNode) input.parentNode.removeChild(input);
   };
 
   // PRIMERO el click — luego nada más. Safari requiere que el click sea inmediato.
