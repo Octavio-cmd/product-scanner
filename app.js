@@ -1726,6 +1726,9 @@ async function psCapturePhoto(slotId){
 // secundaria (centrada, sin duplicar, sin distintivo) en el generador de packs.
 const MAX_EXTRA_PHOTOS = 6;
 
+// Tiempo máximo de espera para quitar el fondo de una foto EXTRA (cold start de rembg incluido).
+const EXTRA_PHOTO_TIMEOUT_MS = 120000;
+
 function psAddExtraPhoto(){
   if(!cur){ toast('⚠️ Escanea un producto primero'); return; }
   if(!cur._extraImgs) cur._extraImgs = [];
@@ -1756,19 +1759,36 @@ function psAddExtraPhoto(){
     cur._extraImgs.push(entry);
     renderExtraPhotosUI();
     var pos = function(){ return cur._extraImgs.indexOf(entry); };
+    // Sin respuesta en EXTRA_PHOTO_TIMEOUT_MS: la casilla pasa a error con ✕ para quitarla.
+    // Una respuesta tardía se descarta (la entrada ya no está en la lista o ya está en error).
+    var timer = null;
+    var timeout = new Promise(function(_, reject){
+      timer = setTimeout(function(){ reject(new Error('extra-timeout')); }, EXTRA_PHOTO_TIMEOUT_MS);
+    });
 
     try{
-      const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, function(msg){
-        var el = document.getElementById('ps-extra-slot-' + pos());
-        if(el) el.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div><div style="font-size:9px;color:var(--mu)">'+msg+'</div></div>';
-      });
+      const { finalUrl, localUrl } = await Promise.race([
+        psRemoveBackgroundPipeline(file, function(msg){
+          var el = document.getElementById('ps-extra-status-' + pos());
+          if(el) el.innerHTML = '<div style="text-align:center;padding:4px"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div><div style="font-size:9px;color:var(--mu)">'+msg+'</div></div>';
+        }),
+        timeout
+      ]);
+      clearTimeout(timer);
       if (pos() === -1) return; // la foto se quitó mientras se procesaba
       Object.assign(entry, { img: finalUrl, local: localUrl, loading: false });
       renderExtraPhotosUI();
       toast('✅ Foto extra ' + (pos()+1) + ' lista');
     }catch(err){
-      console.error('psAddExtraPhoto error:', err);
+      clearTimeout(timer);
       if (pos() === -1) return;
+      if (err && err.message === 'extra-timeout') {
+        Object.assign(entry, { loading: false, error: true });
+        renderExtraPhotosUI();
+        toast('⚠️ Sin respuesta del fondo — quita la foto y vuelve a intentarlo');
+        return;
+      }
+      console.error('psAddExtraPhoto error:', err);
       // FALLBACK: usar foto original sin fondo removido
       toast('⚠️ rembg falló — usando foto original');
       try {
@@ -1807,8 +1827,11 @@ function renderExtraPhotosUI(){
   const extras = (cur && cur._extraImgs) || [];
   let h = '<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:8px">';
   extras.forEach(function(e, i){
-    if(e.loading){
-      h += '<div id="ps-extra-slot-'+i+'" style="width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center"></div>';
+    if(e.loading || e.error){
+      h += '<div id="ps-extra-slot-'+i+'" style="position:relative;width:72px;height:72px;background:var(--sf2);border:2px dashed var(--bd);border-radius:10px;display:flex;align-items:center;justify-content:center;font-size:9px;color:var(--mu);text-align:center">'
+        + (e.loading ? '<div id="ps-extra-status-'+i+'"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div></div>' : 'Sin respuesta')
+        + '<button onclick="psRemoveExtraPhoto('+i+')" style="position:absolute;top:2px;right:2px;width:20px;height:20px;background:rgba(0,0,0,.7);color:#fff;border:none;border-radius:50%;font-size:12px;cursor:pointer;line-height:1">✕</button>'
+        + '</div>';
     } else {
       h += '<div id="ps-extra-slot-'+i+'" style="position:relative;width:72px;height:72px;background:var(--sf2);border:2px solid var(--bd);border-radius:10px;overflow:hidden">'
         + '<img src="'+esc(e.img)+'" style="width:100%;height:100%;object-fit:contain;background:#ffffff">'
