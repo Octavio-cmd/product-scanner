@@ -1737,24 +1737,38 @@ function psAddExtraPhoto(){
   var input = document.createElement('input');
   input.type = 'file';
   input.accept = 'image/*';
+  // Safari: el input debe estar en el DOM antes de click(). Fuera de pantalla; se retira en change o cancel.
+  input.style.position = 'fixed';
+  input.style.left = '-10000px';
+  input.style.top = '-10000px';
+  input.style.width = '1px';
+  input.style.height = '1px';
+  input.style.opacity = '0';
+  document.body.appendChild(input);
+
   input.onchange = async function(e){
+    if (input.parentNode) input.parentNode.removeChild(input);
     var file = e.target.files[0];
     if(!file) return;
 
-    const idx = cur._extraImgs.length; // posición donde va a quedar esta foto
-    cur._extraImgs.push({ img: null, local: null, loading: true });
+    // Identidad por objeto, no por posición: al quitar otra foto con ✕ los índices cambian.
+    var entry = { img: null, local: null, loading: true };
+    cur._extraImgs.push(entry);
     renderExtraPhotosUI();
+    var pos = function(){ return cur._extraImgs.indexOf(entry); };
 
     try{
       const { finalUrl, localUrl } = await psRemoveBackgroundPipeline(file, function(msg){
-        var el = document.getElementById('ps-extra-slot-' + idx);
+        var el = document.getElementById('ps-extra-slot-' + pos());
         if(el) el.innerHTML = '<div style="text-align:center;padding:8px"><div class="sp" style="width:20px;height:20px;margin:0 auto 4px"></div><div style="font-size:9px;color:var(--mu)">'+msg+'</div></div>';
       });
-      cur._extraImgs[idx] = { img: finalUrl, local: localUrl, loading: false };
+      if (pos() === -1) return; // la foto se quitó mientras se procesaba
+      Object.assign(entry, { img: finalUrl, local: localUrl, loading: false });
       renderExtraPhotosUI();
-      toast('✅ Foto extra ' + (idx+1) + ' lista');
+      toast('✅ Foto extra ' + (pos()+1) + ' lista');
     }catch(err){
       console.error('psAddExtraPhoto error:', err);
+      if (pos() === -1) return;
       // FALLBACK: usar foto original sin fondo removido
       toast('⚠️ rembg falló — usando foto original');
       try {
@@ -1764,13 +1778,19 @@ function psAddExtraPhoto(){
         if (imgbbKey) {
           try { var up = await clUploadPhotoToImgBB(fallbackUrl, imgbbKey, 'extra-fallback'); if(up) uploadedFb = up; } catch(e2){}
         }
-        cur._extraImgs[idx] = { img: uploadedFb, local: fallbackUrl, loading: false };
+        if (pos() === -1) return;
+        Object.assign(entry, { img: uploadedFb, local: fallbackUrl, loading: false });
         renderExtraPhotosUI();
       } catch(err2) {
-        cur._extraImgs.splice(idx, 1); // solo quitar si todo falló
+        if (pos() !== -1) cur._extraImgs.splice(pos(), 1); // solo quitar si todo falló
         renderExtraPhotosUI();
       }
     }
+  };
+
+  // Cancelar el selector sin elegir foto: retirar el input.
+  input.oncancel = function(){
+    if (input.parentNode) input.parentNode.removeChild(input);
   };
   input.click();
 }
