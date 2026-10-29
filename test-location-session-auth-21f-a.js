@@ -45,8 +45,8 @@ function makeSandbox({ token = TOKEN, locStatus = 200, loc = 'oficina', saveStat
   sb.ensureLoginScreen = () => { sb.loginShown++; return { style: {} }; };
   vm.createContext(sb);
   const names = ['savvyToken', 'savvyBorrarSesion', 'savvyInventoryHeaders', 'savvySesionCaducada', 'savvyLocationFetch',
-    'psCheckShipStationLocation', 'psSaveShipStationLocation', 'psRemoveLocation', 'psPersistLocation'];
-  const code = names.map(n => extract(n)).filter(Boolean).join('\n');
+    'psParseLocs', 'psJoinLocs', 'psAddLocs', 'psCheckShipStationLocation', 'psSaveShipStationLocation', 'psRemoveLocation', 'psPersistLocation'];
+  const code = "var PS_LOC_SEP = '/';\n" + names.map(n => extract(n)).filter(Boolean).join('\n');
   vm.runInContext(code, sb);
   vm.runInContext('var _psSellbriteProducts = { 0: { sku: "' + SKU + '", name: "LEGO", upc: "673419373609", warehouse_uuid: "wh-1", currentLoc: "oficina" } };', sb);
   el('ps-ssloc-0'); // location container exists
@@ -78,9 +78,9 @@ const byPath = (sb, p) => sb.calls.filter(c => c.url.includes(p));
   c = byPath(s, '/ss/create-product')[0];
   ok(c && hdr(c)['Authorization'] === 'Bearer ' + TOKEN, '2 /ss/create-product sends Authorization: Bearer');
   ok(c && c.url === BASE + '/ss/create-product' && c.opts.method === 'POST' && hdr(c)['Content-Type'] === 'application/json', '8 POST / URL / Content-Type unchanged');
-  ok(c && c.opts.body === JSON.stringify({ sku: SKU, name: 'LEGO', warehouse_location: 'oficina, A-12', upc: '673419373609' }), '9 create-product payload unchanged');
+  ok(c && c.opts.body === JSON.stringify({ sku: SKU, name: 'LEGO', warehouse_location: 'oficina/A-12', upc: '673419373609' }), '9 create-product payload unchanged');
   // 16 append unchanged
-  ok(JSON.parse(byPath(s, '/sb/update-inventory')[0].opts.body).bin_location === 'oficina, A-12', '16 append → "oficina, A-12" (unchanged)');
+  ok(JSON.parse(byPath(s, '/sb/update-inventory')[0].opts.body).bin_location === 'oficina/A-12', '16 append → "oficina/A-12" (formato /, nada perdido)');
   // 17 replace
   s = makeSandbox(); s.els['ps-ssloc-input-0'] = { value: 'B-4' };
   await s.psSaveShipStationLocation(0, 'replace');
@@ -89,7 +89,7 @@ const byPath = (sb, p) => sb.calls.filter(c => c.url.includes(p));
   s = makeSandbox();
   vm.runInContext('_psSellbriteProducts[0].currentLoc = "oficina, A-12, B-4";', s);
   await s.psRemoveLocation(0, 1);
-  ok(JSON.parse(byPath(s, '/ss/create-product')[0].opts.body).warehouse_location === 'oficina, B-4', '18 delete one → "oficina, B-4" (unchanged)');
+  ok(JSON.parse(byPath(s, '/ss/create-product')[0].opts.body).warehouse_location === 'oficina/B-4', '18 delete one → "oficina/B-4" (se conserva la otra)');
   // 19 /sb/update-inventory unchanged
   const inv = byPath(s, '/sb/update-inventory')[0];
   ok(inv && hdr(inv)['Authorization'] === 'Bearer ' + TOKEN && hdr(inv)['Content-Type'] === 'application/json' && JSON.parse(inv.opts.body).sku === SKU && !inv.url.includes('?'), '19 /sb/update-inventory still authenticated, same shape');
@@ -134,9 +134,15 @@ const byPath = (sb, p) => sb.calls.filter(c => c.url.includes(p));
     const same = ['savvyToken', 'savvyGuardarSesion', 'savvyBorrarSesion', 'savvyClaude', 'savvySesionCaducada', 'ensureLoginScreen', 'savvyInventoryHeaders', 'psUpdateSellbriteInventory']
       .every(n => extract(n) === extract(n, MAIN));
     ok(same, '20 login/session functions and inventory update byte-identical to 6aeaa3c');
+    // psPersistLocation (Sellbrite + ShipStation) sigue idéntica salvo fetch → savvyLocationFetch
     const norm = t => t.replace(/savvyLocationFetch\(/g, 'fetch(');
-    ok(['psCheckShipStationLocation', 'psSaveShipStationLocation', 'psRemoveLocation', 'psPersistLocation'].every(n => norm(extract(n)) === extract(n, MAIN)),
-       '16–18 location functions identical to 6aeaa3c except fetch → savvyLocationFetch');
+    ok(norm(extract('psPersistLocation')) === extract('psPersistLocation', MAIN),
+       '16–18 psPersistLocation identical to 6aeaa3c except fetch → savvyLocationFetch');
+    // Las funciones de ubicaciones cambian a propósito: ya no dividen solo por coma
+    ['psCheckShipStationLocation', 'psSaveShipStationLocation', 'psRemoveLocation'].forEach(n =>
+      ok(!/split\(','\)/.test(extract(n)) && /psParseLocs\(/.test(extract(n)), `${n} usa psParseLocs (lee "/" y ",")`));
+    ok(/psAddLocs\(/.test(extract('psSaveShipStationLocation')) && /psJoinLocs\(/.test(extract('psRemoveLocation')),
+       'agregar usa psAddLocs; quitar usa psJoinLocs');
   }
 
   console.log(`\n${pass} passed, ${fail} failed`);
