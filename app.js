@@ -5462,6 +5462,39 @@ async function psCheckSellbrite(upc, brand){
   }
 }
 
+// ── Ubicaciones múltiples por SKU ──────────────────────────────────────────
+// Formato del almacén: separadas por "/" (p. ej. RN1:S3:4/RN2:S4:1). Al leer
+// se aceptan "/" y "," (formato antiguo). Nunca se pierde una ubicación:
+// agregar conserva todas, quitar elimina solo la elegida.
+var PS_LOC_SEP = '/';
+function psParseLocs(text){
+  var seen = {}, out = [];
+  String(text || '').split(/[\/,]/).forEach(function(s){
+    var t = s.trim();
+    if(!t) return;
+    var k = t.toLowerCase();
+    if(seen[k]) return;          // sin duplicados, sin distinguir mayúsculas
+    seen[k] = true;
+    out.push(t);
+  });
+  return out;
+}
+function psJoinLocs(parts){ return parts.join(PS_LOC_SEP); }
+// Agrega las ubicaciones nuevas al final de las actuales. No quita ninguna.
+function psAddLocs(currentText, newText){
+  var parts = psParseLocs(currentText);
+  var seen = {};
+  parts.forEach(function(p){ seen[p.toLowerCase()] = true; });
+  var agregadas = [];
+  psParseLocs(newText).forEach(function(n){
+    if(seen[n.toLowerCase()]) return;
+    seen[n.toLowerCase()] = true;
+    parts.push(n);
+    agregadas.push(n);
+  });
+  return { text: psJoinLocs(parts), agregadas: agregadas };
+}
+
 async function psCheckShipStationLocation(sku, idx){
   const el = $('ps-ssloc-' + idx);
   if(!el) return;
@@ -5472,10 +5505,10 @@ async function psCheckShipStationLocation(sku, idx){
     const loc = data.exists ? (data.warehouse_location || '') : '';
     if(_psSellbriteProducts[idx]) _psSellbriteProducts[idx].currentLoc = loc; // para modo "añadir"/borrar
 
-    // Cada ubicación (separada por coma) se muestra como fichita con ✕ para borrarla individualmente
+    // Cada ubicación (separada por "/" o ",") se muestra como fichita con ✕ para borrarla individualmente
     let statusLine;
     if (loc) {
-      const parts = loc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+      const parts = psParseLocs(loc);
       let chips = parts.map(function(part, pi){
         return '<span style="display:inline-flex;align-items:center;gap:5px;background:rgba(0,230,118,.12);border:1px solid rgba(0,230,118,.4);border-radius:14px;padding:3px 6px 3px 10px;margin:2px 3px 2px 0">'
           + '<strong style="color:#00e676;font-size:12px">' + esc(part) + '</strong>'
@@ -5545,16 +5578,16 @@ async function psSaveShipStationLocation(idx, mode){
   if(!p){ console.error('❌ No hay producto guardado en _psSellbriteProducts[' + idx + ']'); toast('⚠️ No se cargó el producto'); return; }
   const input = $('ps-ssloc-input-' + idx);
   const newLoc = (input && input.value || '').trim();
-  if(!newLoc){ toast('⚠️ Escribe o escanea una ubicación primero'); return; }
+  const nuevas = psParseLocs(newLoc);
+  if(!nuevas.length){ toast('⚠️ Escribe o escanea una ubicación primero'); return; }
 
-  // ── Modo AÑADIR: combinar con la ubicación existente sin borrarla ──
-  let location = newLoc;
+  // Reemplazar (acción explícita del usuario): el texto escrito, con separador "/"
+  let location = psJoinLocs(nuevas);
+  // ── Modo AÑADIR: conservar TODAS las actuales y agregar las nuevas sin duplicar ──
   if(mode === 'append' && p.currentLoc){
-    // Evitar duplicados exactos (ignorando mayúsculas/espacios)
-    const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); });
-    const already = parts.some(function(s){ return s.toLowerCase() === newLoc.toLowerCase(); });
-    if(already){ toast('⚠️ Esa ubicación ya está en la lista'); return; }
-    location = p.currentLoc + ', ' + newLoc;
+    const r = psAddLocs(p.currentLoc, newLoc);
+    if(!r.agregadas.length){ toast('⚠️ Esa ubicación ya está en la lista'); return; }
+    location = r.text;
   }
   // ShipStation limita warehouseLocation a ~100 caracteres
   if(location.length > 100){
@@ -5570,10 +5603,10 @@ async function psSaveShipStationLocation(idx, mode){
 async function psRemoveLocation(idx, partIndex){
   const p = (_psSellbriteProducts || {})[idx];
   if(!p || !p.currentLoc){ toast('⚠️ No hay ubicaciones cargadas'); return; }
-  const parts = p.currentLoc.split(',').map(function(s){ return s.trim(); }).filter(Boolean);
+  const parts = psParseLocs(p.currentLoc);   // mismo orden que las fichas
   if(partIndex < 0 || partIndex >= parts.length) return;
-  const removed = parts.splice(partIndex, 1)[0];
-  const newLocation = parts.join(', '); // puede quedar vacío = borrar todas
+  const removed = parts.splice(partIndex, 1)[0];   // solo la elegida
+  const newLocation = psJoinLocs(parts);           // las demás se conservan; vacío = borrar todas
   console.log('🗑️ Borrando ubicación "' + removed + '" → nueva lista: "' + newLocation + '"');
   toast('🗑️ Quitando ' + removed + '...');
   await psPersistLocation(idx, newLocation);
